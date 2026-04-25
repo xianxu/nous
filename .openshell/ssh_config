@@ -1,0 +1,11 @@
+# BEGIN openshell-ariadne-sandbox
+Host openshell-ariadne-sandbox
+    User sandbox
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null
+    GlobalKnownHostsFile /dev/null
+    LogLevel ERROR
+    ProxyCommand /Users/xianxu/.local/bin/openshell ssh-proxy --gateway-name openshell --name ariadne-sandbox
+    ServerAliveInterval 60
+    ServerAliveCountMax 3
+# END openshell-ariadne-sandbox
