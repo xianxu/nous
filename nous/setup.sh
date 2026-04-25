@@ -3,7 +3,7 @@
 # Bootstraps a target repo with nous infrastructure and plugins.
 #
 # Usage:
-#   cd /path/to/your-repo && ../nous/layer/setup.sh <mode> [--yes]
+#   cd /path/to/your-repo && ../nous/nous/setup.sh <mode> [--yes]
 #
 # Modes:
 #   --all              Symlink everything (all plugins, track nous HEAD)
@@ -169,39 +169,6 @@ process_manifest() {
     done < "$manifest"
 }
 
-# Register a plugin's SKILL.md with Claude Code by symlinking into .claude/skills/
-register_skill() {
-    local plugin="$1"
-    local skill_dir="$TARGET_DIR/.claude/skills/$plugin"
-    local cmd_dir="$TARGET_DIR/cmd/$plugin"
-
-    [[ -d "$cmd_dir" && -f "$cmd_dir/SKILL.md" ]] || return 0
-    mkdir -p "$TARGET_DIR/.claude/skills"
-
-    local rel
-    rel=$(rel_path "$cmd_dir" "$TARGET_DIR/.claude/skills")
-    if [[ -L "$skill_dir" ]]; then
-        local existing
-        existing=$(readlink "$skill_dir")
-        [[ "$existing" == "$rel" ]] && return 0
-        rm "$skill_dir"
-    elif [[ -e "$skill_dir" ]]; then
-        rm -rf "$skill_dir"
-    fi
-    ln -s "$rel" "$skill_dir"
-    printf "  ${GREEN}skill${RESET}   .claude/skills/%s → cmd/%s\n" "$plugin" "$plugin"
-}
-
-# Unregister a plugin's skill
-unregister_skill() {
-    local plugin="$1"
-    local skill_dir="$TARGET_DIR/.claude/skills/$plugin"
-    if [[ -L "$skill_dir" || -e "$skill_dir" ]]; then
-        rm -rf "$skill_dir"
-        printf "  ${GREEN}removed${RESET} .claude/skills/%s\n" "$plugin"
-    fi
-}
-
 # List available plugins
 list_plugins() {
     local plugins=()
@@ -313,7 +280,6 @@ case "$ACTION" in
             name=$(basename "$manifest" .manifest)
             printf "  ${CYAN}[plugin: %s]${RESET}\n" "$name"
             process_manifest "$manifest" "symlink"
-            register_skill "$name"
         done
 
         echo "all" > "$MODE_MARKER"
@@ -331,7 +297,6 @@ case "$ACTION" in
         # Vendor the requested plugin
         printf "  ${CYAN}[plugin: %s]${RESET}\n" "$PLUGIN"
         process_manifest "$PLUGINS_DIR/$PLUGIN.manifest" "vendor"
-        register_skill "$PLUGIN"
 
         # Update .nous-plugins
         touch "$PLUGINS_FILE"
@@ -347,7 +312,6 @@ case "$ACTION" in
         # Remove the plugin's files
         printf "  ${CYAN}[removing: %s]${RESET}\n" "$PLUGIN"
         process_manifest "$PLUGINS_DIR/$PLUGIN.manifest" "remove"
-        unregister_skill "$PLUGIN"
 
         # Remove from .nous-plugins
         if [[ -f "$PLUGINS_FILE" ]]; then
@@ -365,8 +329,7 @@ case "$ACTION" in
                 name=$(basename "$manifest" .manifest)
                 printf "  ${CYAN}[plugin: %s]${RESET}\n" "$name"
                 process_manifest "$manifest" "symlink"
-                register_skill "$name"
-            done
+                done
         elif [[ "$PREVIOUS_MODE" == "selective" ]]; then
             # Re-vendor selected plugins
             if [[ -f "$PLUGINS_FILE" ]]; then
@@ -375,7 +338,6 @@ case "$ACTION" in
                     if [[ -f "$PLUGINS_DIR/$plugin.manifest" ]]; then
                         printf "  ${CYAN}[plugin: %s]${RESET}\n" "$plugin"
                         process_manifest "$PLUGINS_DIR/$plugin.manifest" "vendor"
-                        register_skill "$plugin"
                     else
                         printf "  ${YELLOW}skipped${RESET} %s (manifest not found)\n" "$plugin"
                     fi
@@ -402,16 +364,7 @@ fi
 
 TARGET_MODULE=$(head -1 "$TARGET_DIR/go.mod" | awk '{print $2}')
 
-# Check if any installed plugin has .go files (need module wiring)
-HAS_GO=false
-for d in "$TARGET_DIR/cmd" "$TARGET_DIR/lib"; do
-    if [[ -d "$d" ]] && find "$d" -name '*.go' -print -quit 2>/dev/null | grep -q .; then
-        HAS_GO=true
-        break
-    fi
-done
-
-if "$HAS_GO" && [[ "$TARGET_MODULE" != "$NOUS_MODULE" ]]; then
+if [[ "$TARGET_MODULE" != "$NOUS_MODULE" ]]; then
     MODE_NOW=$(cat "$MODE_MARKER" 2>/dev/null || echo "")
     if [[ "$MODE_NOW" == "selective" ]]; then
         # Vendor mode: rewrite import paths
@@ -431,12 +384,21 @@ if "$HAS_GO" && [[ "$TARGET_MODULE" != "$NOUS_MODULE" ]]; then
     fi
 fi
 
+# ── Ensure Makefile.local includes Makefile.nous ─────────────────────────────
+MAKEFILE_LOCAL="$TARGET_DIR/Makefile.local"
+if [[ -f "$MAKEFILE_LOCAL" ]]; then
+    if ! grep -q 'Makefile\.nous' "$MAKEFILE_LOCAL"; then
+        printf '\n-include Makefile.nous\n' >> "$MAKEFILE_LOCAL"
+        printf "  ${GREEN}updated${RESET} Makefile.local (added Makefile.nous include)\n"
+    fi
+fi
+
 # ── Ensure .gitignore entries ────────────────────────────────────────────────
 GITIGNORE="$TARGET_DIR/.gitignore"
 NOUS_IGNORES=(
     ".nous-mode"
     ".nous-plugins"
-    "/gmail"
+    "cmd/*/bin/"
 )
 
 touch "$GITIGNORE"

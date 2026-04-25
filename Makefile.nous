@@ -1,11 +1,28 @@
 # Nous layer targets.
 # Included by consuming repos via: -include Makefile.nous
 
+.PHONY: build test clean trim
+
+build:
+	@for dir in cmd/*/; do \
+		[ -f "$$dir/main.go" ] || continue; \
+		name=$$(basename "$$dir"); \
+		mkdir -p "$$dir/bin"; \
+		echo "building cmd/$$name/bin/$$name"; \
+		go build -o "$$dir/bin/$$name" "./$$dir"; \
+	done
+
+test:
+	go test ./...
+
+clean:
+	@for dir in cmd/*/; do \
+		rm -rf "$$dir/bin"; \
+	done
+
 # Trim git history — keep only the last DAYS days of commits.
 # Usage: make trim DAYS=90
 DAYS ?= 90
-
-.PHONY: trim
 
 trim:
 	@ROOT=$$(git rev-list --max-parents=0 HEAD); \

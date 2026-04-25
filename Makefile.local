@@ -1,19 +1,3 @@
-# Nous repo targets.
-
-.PHONY: build test clean
-
-build:
-	@for dir in cmd/*/; do \
-		name=$$(basename "$$dir"); \
-		mkdir -p "$$dir/bin"; \
-		echo "building cmd/$$name/bin/$$name"; \
-		go build -o "$$dir/bin/$$name" "./$$dir"; \
-	done
-
-test:
-	go test ./...
-
-clean:
-	@for dir in cmd/*/; do \
-		rm -rf "$$dir/bin"; \
-	done
+# Nous repo-specific targets.
+# Include nous layer targets (build, test, clean, trim)
+-include Makefile.nous

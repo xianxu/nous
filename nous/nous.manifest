@@ -8,6 +8,9 @@
 #   copy      — copy once (for files that need local modification)
 #   scaffold  — create empty directory
 
+# ── Skills ────────────────────────────────────────────────────────────────────
+symlink   nous/skills/nous-tools    .claude/skills/nous-tools
+
 # ── Makefile ─────────────────────────────────────────────────────────────────
 symlink   Makefile.nous
 
