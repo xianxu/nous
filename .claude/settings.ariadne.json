@@ -1,0 +1,32 @@
+{
+  "$comment": "Ariadne base-layer settings. Merged UNDER settings.local.json by setup.sh.",
+  "$merge_keys": ["permissions.allow", "hooks.SessionStart", "sandbox.filesystem.allowWrite"],
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(cp:*)",
+      "Bash(rm:*)",
+      "WebSearch"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true,
+    "filesystem": {
+      "allowWrite": []
+    }
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./construct/scripts/sync-local-skills.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

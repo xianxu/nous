@@ -1,0 +1,39 @@
+# Nous layer targets.
+# Included by consuming repos via: -include Makefile.nous
+
+# Trim git history — keep only the last DAYS days of commits.
+# Usage: make trim DAYS=90
+DAYS ?= 90
+
+.PHONY: trim
+
+trim:
+	@ROOT=$$(git rev-list --max-parents=0 HEAD); \
+	CUTOFF=$$(git rev-list --after="$(DAYS) days ago" --reverse HEAD | head -1); \
+	if [ -z "$$CUTOFF" ]; then \
+		echo "All commits are within the last $(DAYS) days. Nothing to trim."; \
+		exit 0; \
+	fi; \
+	if [ "$$CUTOFF" = "$$ROOT" ]; then \
+		echo "Oldest commit is already the boundary. Nothing to trim."; \
+		exit 0; \
+	fi; \
+	BEFORE=$$(git rev-list --count $$CUTOFF..HEAD); \
+	TOTAL=$$(git rev-list --count HEAD); \
+	DROPPING=$$((TOTAL - BEFORE)); \
+	echo "Keeping $$BEFORE commits (last $(DAYS) days)"; \
+	echo "Squashing $$DROPPING older commits into a single root"; \
+	echo "Boundary: $$(git log -1 --format='%h %ci %s' $$CUTOFF)"; \
+	echo ""; \
+	read -p "Continue? [y/N] " confirm; \
+	if [ "$$confirm" != "y" ] && [ "$$confirm" != "Y" ]; then \
+		echo "Aborted."; \
+		exit 0; \
+	fi; \
+	git replace --graft $$CUTOFF && \
+	FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -- --all && \
+	rm -rf .git/refs/replace/ && \
+	git reflog expire --expire=now --all && \
+	git gc --prune=now && \
+	echo "" && \
+	echo "Done. Run 'git push --force' to update remote."

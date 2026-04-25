@@ -2,3 +2,4 @@
 .goto
 .openshell/.bootstrap/
 .openshell/.base-image-digest
+cmd/*/bin/

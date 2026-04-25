@@ -1,0 +1,18 @@
+# Nous Core Manifest
+# Infrastructure installed regardless of plugin selection.
+#
+# Format: <action> <source-path> [<target-path>]
+#
+# Actions:
+#   symlink   — create symlink (or copy in vendor mode)
+#   copy      — copy once (for files that need local modification)
+#   scaffold  — create empty directory
+
+# ── Makefile ─────────────────────────────────────────────────────────────────
+symlink   Makefile.nous
+
+# ── Documentation ────────────────────────────────────────────────────────────
+copy      README.md           README-NOUS.md
+
+# ── Directory conventions ────────────────────────────────────────────────────
+scaffold  life

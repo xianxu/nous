@@ -1,0 +1,5 @@
+# Gmail plugin — search and read Gmail threads via Charon proxy.
+# Requires: charon auth google <email>
+
+symlink   lib/gmail
+symlink   cmd/gmail
