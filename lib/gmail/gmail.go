@@ -216,6 +216,10 @@ func apiGet(account, path string, dest any) error {
 		return err
 	}
 	req.Header.Set("X-Charon-Account", account)
+	// Read-only Gmail operations need gmail.readonly. Charon enforces by
+	// returning HTTP 407 with a structured fix command if it's not granted
+	// yet (see charon/docs/agent-protocol.md).
+	req.Header.Set("X-Charon-Scope", "gmail.readonly")
 
 	resp, err := getClient().Do(req)
 	if err != nil {
@@ -227,6 +231,21 @@ func apiGet(account, path string, dest any) error {
 		resp.Body.Close()
 	}()
 
+	if resp.StatusCode == http.StatusProxyAuthRequired { // 407 from charon
+		b, _ := io.ReadAll(resp.Body)
+		var charonErr struct {
+			Error    string   `json:"error"`
+			Missing  []string `json:"missing"`
+			Account  string   `json:"account"`
+			Provider string   `json:"provider"`
+			Fix      string   `json:"fix"`
+		}
+		if json.Unmarshal(b, &charonErr) == nil && charonErr.Error == "scope_missing" {
+			return fmt.Errorf("missing scope %v for %s. To fix: run `charon auth` (TUI) or `%s`",
+				charonErr.Missing, charonErr.Account, charonErr.Fix)
+		}
+		return fmt.Errorf("charon 407: %s", string(b))
+	}
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("API returned %d: %s", resp.StatusCode, string(b))

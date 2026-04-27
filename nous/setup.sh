@@ -39,11 +39,6 @@ TARGET_DIR="$(pwd)"
 CORE_MANIFEST="$SCRIPT_REAL/nous.manifest"
 PLUGINS_DIR="$SCRIPT_REAL/plugins"
 
-if [[ "$NOUS_DIR" == "$TARGET_DIR" ]]; then
-    echo "Running inside nous itself — nothing to do."
-    exit 0
-fi
-
 # ── Colors ────────────────────────────────────────────────────────────────────
 GREEN='\033[1;32m'
 YELLOW='\033[1;33m'
@@ -178,6 +173,21 @@ list_plugins() {
     done
     echo "${plugins[@]}"
 }
+
+# ── Self mode: running inside nous itself ────────────────────────────────────
+# When invoked from the nous repo root, the only useful work is linking
+# nous/skills/* into .claude/skills/ so the host Claude Code session picks
+# them up. Skip manifests, go.mod wiring, Makefile includes, etc.
+if [[ "$NOUS_DIR" == "$TARGET_DIR" ]]; then
+    printf "${CYAN}Nous setup (self): linking skills${RESET}\n\n"
+    for skill_dir in "$SCRIPT_REAL/skills"/*/; do
+        [[ -d "$skill_dir" ]] || continue
+        name=$(basename "$skill_dir")
+        create_symlink "${skill_dir%/}" "$TARGET_DIR/.claude/skills/$name"
+    done
+    printf "\n${GREEN}Done.${RESET}\n"
+    exit 0
+fi
 
 # ── State files ──────────────────────────────────────────────────────────────
 MODE_MARKER="$TARGET_DIR/.nous-mode"

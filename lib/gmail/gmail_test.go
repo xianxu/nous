@@ -144,6 +144,9 @@ func TestSearchThreads(t *testing.T) {
 		if r.Header.Get("X-Charon-Account") != "test@example.com" {
 			t.Errorf("missing X-Charon-Account header")
 		}
+		if r.Header.Get("X-Charon-Scope") != "gmail.readonly" {
+			t.Errorf("X-Charon-Scope = %q, want gmail.readonly", r.Header.Get("X-Charon-Scope"))
+		}
 		json.NewEncoder(w).Encode(map[string]any{
 			"threads": []map[string]string{
 				{"id": "thread1"},

@@ -10,6 +10,7 @@
 
 # ── Skills ────────────────────────────────────────────────────────────────────
 symlink   nous/skills/nous-tools    .claude/skills/nous-tools
+symlink   nous/skills/charon        .claude/skills/charon
 
 # ── Makefile ─────────────────────────────────────────────────────────────────
 symlink   Makefile.nous

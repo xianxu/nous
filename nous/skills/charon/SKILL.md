@@ -10,7 +10,7 @@ outbound requests. Your tool never sees the token; you declare *which
 account* and *which scopes* via headers, charon handles the rest.
 
 The **canonical spec** for the agent-side protocol lives in the charon
-repo: [`charon/docs/agent-protocol.md`](../../../../charon/docs/agent-protocol.md).
+repo: [`charon/docs/agent-protocol.md`](https://github.com/xianxu/charon/blob/main/docs/agent-protocol.md).
 Read that for the full contract, especially when adding a new tool or
 adding to an existing one.
 
@@ -37,16 +37,28 @@ body tells you exactly what's missing and how to fix it:
 }
 ```
 
-Surface the `fix` command to the user (or tell them to run `charon auth`
-for the interactive TUI), then retry your call.
+In this case, ask user to grant permission in `charon auth` (interactive TUI), and the failed 407 permission should be marked in the UI, for user to confirm granting permission.
 
 ## Discovering required scopes (Google)
 
-For programmatic lookup, charon ships its scope catalog as JSON:
+For programmatic lookup, charon ships its catalog and current grants
+as JSON:
 
 ```bash
-charon scopes google             # all known scopes for the provider
-charon scopes google | jq '.[] | select(.short | startswith("gmail"))'
+charon scopes                              # what's POSSIBLE per provider
+charon permissions                         # what's GRANTED per account
+charon permissions google user@gmail.com   # one account's scopes (array)
+```
+
+Use `scopes` at code-write time to map operations to scope short
+names. Use `permissions` at runtime if your tool needs to know what
+the user has actually granted (e.g., to decide whether to attempt an
+optional capability).
+
+```bash
+charon scopes | jq 'keys'                                    # ["google"]
+charon scopes | jq '.google[] | select(.short | startswith("gmail"))'
+charon permissions google user@gmail.com | jq '.'
 ```
 
 Each entry has `short`, `full`, `description`, `required`. Use `short`
