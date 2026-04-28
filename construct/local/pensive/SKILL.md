@@ -17,6 +17,10 @@ Capture a train of thought into `docs/vision/` as a timestamped pensive document
 
 1. **Create the file** at `docs/vision/YYYY-MM-DD-NN-pensive-<topic-slug>.md` using today's date and a two-digit sequence number (NN). Check existing files for today's date to determine the next number (01, 02, 03, etc.).
 2. **Write the pensive** with this format:
+   - Front matter:
+      - type: ideas | eureka | thoughts
+      - description: a brief summary the conversation
+      - reference: [file1, file2]
    - Title: `# Pensive: <Topic>`
    - Metadata: `**Date:** YYYY-MM-DD` and `**Status:** Thinking out loud`
    - Horizontal rule
@@ -29,4 +33,5 @@ Capture a train of thought into `docs/vision/` as a timestamped pensive document
 - Keep the user's voice and framing. These are their thoughts, not summaries.
 - Include open questions and unresolved tensions. Pensives are not conclusions.
 - Link to related documents if they exist in the repo.
-- Short is fine. A pensive can be 3 paragraphs.
+- Short is fine. A pensive can be 3 paragraphs. 
+- Be concise and precise. 

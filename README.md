@@ -86,6 +86,12 @@ docs/vision/        # Pensives, brainstorms, product thinking
 CLAUDE.md           # Agent instructions (loaded automatically by Claude Code)
 ```
 
+### The vendoring system
+
+Ariadne right now is private. The way `nous` uses it is through vendoring. Basically `../ariadne/construct/setup.sh --vendor` is ran to set up the base layer in `nous`. 
+
+`nous` provides the same way its derivative and private `brain` repo should do, basically run `../nous/nous/setup.sh` in your `brain` folder. Note in this example, since everyone have access to `nous` and since `brain` is intended to be private, we used symlink version, e.g. without the `--vendor` flag. This requires `nous` and `brain` to be sibling in some folder.
+
 ### Go applications
 
 `cmd/` and `lib/` hold Go applications — deterministic scripts that work alongside AI to extend your workflows.

@@ -43,6 +43,11 @@ symlink   construct/local
 symlink   construct/adapted
 copy      construct/config.json
 
+# ── Data prototypes (typed markdown documents, used by xx-data skill) ─────────
+# Shared prototypes propagate via symlink. Project-local overrides at
+# <repo>/data/<name>.md are opt-in and not scaffolded.
+symlink   construct/data
+
 # ── Directory conventions (scaffold empty dirs) ───────────────────────────────
 scaffold  workshop/issues
 scaffold  workshop/history
