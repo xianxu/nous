@@ -4,7 +4,9 @@
       "Bash(mkdir:*)",
       "Bash(cp:*)",
       "Bash(rm:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(rm /Users/xianxu/workspace/nous/.claude/skills/xx-memory /Users/xianxu/workspace/nous/.claude/skills/xx-pensive)",
+      "Bash(rm -rf /Users/xianxu/workspace/nous/construct/local/pensive)"
     ]
   },
   "sandbox": {
