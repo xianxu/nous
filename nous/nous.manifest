@@ -20,3 +20,7 @@ copy      README.md           README-NOUS.md
 
 # ── Directory conventions ────────────────────────────────────────────────────
 scaffold  life
+scaffold  memory/ideas/pensive
+scaffold  memory/life/travel
+scaffold  memory/life/references
+scaffold  memory/work/meeting-notes
