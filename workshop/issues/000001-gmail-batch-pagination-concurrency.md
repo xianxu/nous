@@ -84,23 +84,24 @@ is a separate verb.
 
 ## Plan
 
-- [x] Add `pageToken` loop in `threads.list` (landed by sibling agent 2026-04-28)
+- [x] Add `pageToken` loop in `threads.list` (sibling agent 2026-04-28)
 - [x] Add semaphore-bounded concurrency over `threads.get` calls
-      (concurrency=8, landed by sibling agent 2026-04-28)
-- [ ] Sketch `apiBatch` in `lib/gmail/batch.go`: multipart writer for request,
+      (concurrency=8, sibling agent 2026-04-28)
+- [x] Sketch `apiBatch` in `lib/gmail/batch.go`: multipart writer for request,
       multipart reader for response, per-sub-request error surfacing
-- [ ] Unit-test `apiBatch` against a fake server that echoes a fixed multipart
-      response (no Charon dependency in tests)
-- [ ] Refactor `SearchThreads` metadata fan-out to use `apiBatch` in chunks of 100
-      (replaces the current N-goroutine loop, even though it's bounded now)
-- [ ] Add exponential-backoff retry on 429 / 5xx, both at the batch level and
-      per sub-request inside a batch response
-- [ ] Decide: keep auto-paginating `SearchThreads`, or split into
-      `BackfillThreads` + dedicated CLI verb (current code uses the former —
-      may be sufficient)
-- [ ] Manual verify: backfill 1k threads from a real account through Charon,
-      compare result count and sample thread metadata against pre-batch behavior
-- [ ] Update `cmd/gmail/SKILL.md` if CLI surface changes
+      (commit 3b29be3)
+- [x] Unit-test `apiBatch` against a fake server that echoes a fixed multipart
+      response (no Charon dependency in tests) — 7 tests in batch_test.go
+- [x] Refactor `SearchThreads` metadata fan-out to use `apiBatch` in chunks of 100
+      (replaces N-goroutine loop; semaphore now applies to batches not calls)
+- [x] Add exponential-backoff retry on 429 / 5xx, both at the batch level and
+      per sub-request inside a batch response — 4 retry tests
+- [x] Decide: keep auto-paginating `SearchThreads`. No separate `BackfillThreads`
+      yet — current API surface is sufficient for the 1k–10k use case.
+- [x] Manual verify: 250 threads (multi-batch) returned in 1.87s with valid
+      metadata; 1k hit a *different* rate-limit (per-minute quota on
+      threads.list — `apiGet` retry not in scope here, follow-up needed)
+- [ ] Update `cmd/gmail/SKILL.md` if CLI surface changes (no changes — defer)
 - [ ] Update `atlas/` if a gmail entry exists; create one if not
 
 ## Log
@@ -129,6 +130,32 @@ not per-second throughput. Concrete observations:
 Implication: the patch does two structurally different things —
 **bound concurrency** (concurrency cap) and **paginate the list call**
 (page-size cap). Both are independently necessary.
+
+### 2026-04-28 — Manual verification (real Gmail through Charon)
+
+Tested against `xianxu@gmail.com`, `label:inbox`:
+
+- **50 threads**: returned 50 well-formed summaries, single batch path.
+- **250 threads (multi-batch)**: 1.87 s wall, returned all 250 with valid
+  id/sender/date/snippet for each. Exercised 1 list call + 3 batches
+  (100 + 100 + 50). One thread had `Subject=""` — pre-existing semantics
+  (`headerOr` returns blank when header is present-but-empty); not a
+  regression vs. pre-batch behavior.
+- **1000 threads**: hit a *different* rate-limit surface — 403 "Queries per
+  minute per user" thrown by `threads.list` in `apiGet`, not the batch
+  path. Cumulative recent test calls (50 + 250 + sibling agent's earlier
+  1k download = ~6500 quota units in a minute) tripped Gmail's per-minute
+  quota cap (~15k units/min for personal accounts). The batch path itself
+  never ran — failure was on the *first* list call.
+
+Implication for future: `apiGet` needs the same retry/backoff treatment as
+`apiBatch` for the per-minute (vs. concurrent) rate-limit. Out of scope for
+#000001 (perf rewrite of metadata fan-out); worth a follow-up — possibly a
+shared retry helper used by both apiGet and apiBatch.
+
+Verification status: **batch path verified at multi-batch scale**.
+1k+ runs need either per-minute backoff in apiGet or natural pacing
+between large queries.
 
 ### 2026-04-28 — Pagination + concurrency landed (sibling agent)
 
