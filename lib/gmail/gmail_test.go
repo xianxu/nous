@@ -1,9 +1,15 @@
 package gmail
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -135,11 +141,31 @@ func TestExtractBody(t *testing.T) {
 	}
 }
 
-// TestSearchThreads tests the full search flow with a mock HTTP server.
+// TestSearchThreads tests the full search flow with a mock HTTP server,
+// including the batch endpoint used for metadata fan-out.
 func TestSearchThreads(t *testing.T) {
+	// Per-thread metadata payloads the mock will return.
+	threadData := map[string]string{
+		"thread1": `{"id":"thread1","messages":[
+			{"id":"msg1","snippet":"First thread snippet","payload":{"headers":[
+				{"name":"Subject","value":"Hello"},
+				{"name":"From","value":"alice@example.com"},
+				{"name":"Date","value":"Mon, 1 Jan 2026 00:00:00 +0000"}
+			]}},
+			{"id":"msg2","snippet":"reply","payload":{"headers":[]}}
+		]}`,
+		"thread2": `{"id":"thread2","messages":[
+			{"id":"msg3","snippet":"Second thread","payload":{"headers":[
+				{"name":"Subject","value":"Goodbye"},
+				{"name":"From","value":"bob@example.com"},
+				{"name":"Date","value":"Tue, 2 Jan 2026 00:00:00 +0000"}
+			]}}
+		]}`,
+	}
+
 	mux := http.NewServeMux()
 
-	// Mock thread list
+	// threads.list — unchanged
 	mux.HandleFunc("/gmail/v1/users/me/threads", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Charon-Account") != "test@example.com" {
 			t.Errorf("missing X-Charon-Account header")
@@ -155,62 +181,89 @@ func TestSearchThreads(t *testing.T) {
 		})
 	})
 
-	// Mock thread metadata
-	mux.HandleFunc("/gmail/v1/users/me/threads/thread1", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{
-			"id": "thread1",
-			"messages": []map[string]any{
-				{
-					"id":      "msg1",
-					"snippet": "First thread snippet",
-					"payload": map[string]any{
-						"headers": []map[string]string{
-							{"name": "Subject", "value": "Hello"},
-							{"name": "From", "value": "alice@example.com"},
-							{"name": "Date", "value": "Mon, 1 Jan 2026 00:00:00 +0000"},
-						},
-					},
-				},
-				{"id": "msg2", "snippet": "reply", "payload": map[string]any{"headers": []any{}}},
-			},
-		})
-	})
+	// Batch endpoint — parse multipart, look up each sub-request's thread,
+	// emit a multipart response with one part per sub-request.
+	mux.HandleFunc("/batch/gmail/v1", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Charon-Scope") != "gmail.readonly" {
+			t.Errorf("batch X-Charon-Scope = %q", r.Header.Get("X-Charon-Scope"))
+		}
+		_, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if err != nil {
+			t.Fatalf("parse incoming content-type: %v", err)
+		}
+		mr := multipart.NewReader(r.Body, params["boundary"])
 
-	mux.HandleFunc("/gmail/v1/users/me/threads/thread2", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{
-			"id": "thread2",
-			"messages": []map[string]any{
-				{
-					"id":      "msg3",
-					"snippet": "Second thread",
-					"payload": map[string]any{
-						"headers": []map[string]string{
-							{"name": "Subject", "value": "Goodbye"},
-							{"name": "From", "value": "bob@example.com"},
-							{"name": "Date", "value": "Tue, 2 Jan 2026 00:00:00 +0000"},
-						},
-					},
-				},
-			},
-		})
+		type sub struct {
+			contentID string
+			threadID  string
+		}
+		var subs []sub
+		for {
+			p, err := mr.NextPart()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				t.Fatalf("read sub-part: %v", err)
+			}
+			cid := p.Header.Get("Content-ID")
+			body, _ := io.ReadAll(p)
+			p.Close()
+			// Parse "GET /gmail/v1/users/me/threads/<id>?..." from first line.
+			line := strings.SplitN(string(body), "\r\n", 2)[0]
+			parts := strings.Fields(line)
+			if len(parts) < 2 {
+				t.Fatalf("bad request line: %q", line)
+			}
+			path := parts[1]
+			path = strings.TrimPrefix(path, "/gmail/v1/users/me/threads/")
+			path = strings.SplitN(path, "?", 2)[0]
+			subs = append(subs, sub{contentID: cid, threadID: path})
+		}
+
+		// Build multipart response.
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		for _, s := range subs {
+			h := make(map[string][]string)
+			h["Content-Type"] = []string{"application/http"}
+			// Echo as <response-N>: take the digits inside <N> from the request CID.
+			cid := strings.TrimSuffix(strings.TrimPrefix(s.contentID, "<"), ">")
+			h["Content-ID"] = []string{fmt.Sprintf("<response-%s>", cid)}
+			pw, _ := mw.CreatePart(h)
+			body, ok := threadData[s.threadID]
+			if !ok {
+				fmt.Fprintf(pw, "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s",
+					len(`{"error":{"code":404}}`), `{"error":{"code":404}}`)
+				continue
+			}
+			fmt.Fprintf(pw, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s",
+				len(body), body)
+		}
+		mw.Close()
+		w.Header().Set("Content-Type", "multipart/mixed; boundary="+mw.Boundary())
+		w.WriteHeader(200)
+		w.Write(buf.Bytes())
 	})
 
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	// Override the API base URL and client for testing
+	// Override the API base URLs and client for testing
 	origAPI := gmailAPI
+	origBatch := gmailBatchURL
 	origOnce := clientOnce
 	origClient := httpClient
 
 	gmailAPI = srv.URL + "/gmail/v1/users/me"
-	clientOnce = sync.Once{}
+	gmailBatchURL = srv.URL + "/batch/gmail/v1"
+	clientOnce = &sync.Once{}
 	httpClient = nil
-	// Force a plain client (no TLS, no proxy)
 	clientOnce.Do(func() { httpClient = srv.Client() })
 
 	defer func() {
 		gmailAPI = origAPI
+		gmailBatchURL = origBatch
 		clientOnce = origOnce
 		httpClient = origClient
 	}()
@@ -293,7 +346,7 @@ func TestGetThread(t *testing.T) {
 	origClient := httpClient
 
 	gmailAPI = srv.URL + "/gmail/v1/users/me"
-	clientOnce = sync.Once{}
+	clientOnce = &sync.Once{}
 	httpClient = nil
 	clientOnce.Do(func() { httpClient = srv.Client() })
 

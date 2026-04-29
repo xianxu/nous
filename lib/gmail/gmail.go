@@ -49,76 +49,140 @@ type Thread struct {
 }
 
 // SearchThreads finds threads matching a Gmail query for the given account.
+// idEntry is the slim {id} record returned by threads.list / messages.list.
+type idEntry struct {
+	ID string `json:"id"`
+}
+
 func SearchThreads(account, query string, maxResults int) ([]ThreadSummary, error) {
-	// Step 1: list thread IDs
-	params := url.Values{
-		"q":          {query},
-		"maxResults": {strconv.Itoa(maxResults)},
+	// Step 1: list thread IDs (paginate until we have maxResults; Gmail caps at 500/page)
+	var ids []idEntry
+	pageToken := ""
+	for len(ids) < maxResults {
+		remaining := maxResults - len(ids)
+		page := remaining
+		if page > 500 {
+			page = 500
+		}
+		params := url.Values{
+			"q":          {query},
+			"maxResults": {strconv.Itoa(page)},
+		}
+		if pageToken != "" {
+			params.Set("pageToken", pageToken)
+		}
+		var listResp struct {
+			Threads       []idEntry `json:"threads"`
+			NextPageToken string    `json:"nextPageToken"`
+		}
+		if err := apiGet(account, "/threads?"+params.Encode(), &listResp); err != nil {
+			return nil, fmt.Errorf("list threads: %w", err)
+		}
+		ids = append(ids, listResp.Threads...)
+		if listResp.NextPageToken == "" || len(listResp.Threads) == 0 {
+			break
+		}
+		pageToken = listResp.NextPageToken
 	}
-	var listResp struct {
-		Threads []struct {
-			ID string `json:"id"`
-		} `json:"threads"`
-	}
-	if err := apiGet(account, "/threads?"+params.Encode(), &listResp); err != nil {
-		return nil, fmt.Errorf("list threads: %w", err)
+	if len(ids) > maxResults {
+		ids = ids[:maxResults]
 	}
 
-	// Step 2: fetch metadata for each thread (parallel)
-	type result struct {
-		idx     int
-		summary ThreadSummary
-		err     error
+	// Step 2: fetch metadata via batched threads.get. Chunk by Gmail's 100/batch
+	// cap; run multiple batches in parallel under a semaphore. Per-user concurrent
+	// cap (~10–20 outer connections) is the binding constraint, so 8 batches in
+	// flight = up to 800 logical sub-requests "open" without tripping the cap.
+	chunks := chunkSlice(ids, MaxBatchSize)
+	summaries := make([]ThreadSummary, len(ids))
+
+	sem := make(chan struct{}, 8)
+	errCh := make(chan error, len(chunks))
+	var wg sync.WaitGroup
+	for chunkIdx, chunk := range chunks {
+		wg.Add(1)
+		go func(chunkIdx int, chunk []idEntry) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			if err := fetchMetadataBatch(account, summaries, chunkIdx*MaxBatchSize, chunk); err != nil {
+				errCh <- err
+			}
+		}(chunkIdx, chunk)
 	}
-	ch := make(chan result, len(listResp.Threads))
-	for i, t := range listResp.Threads {
-		go func(i int, id string) {
-			var threadResp threadResponse
-			if err := apiGet(account, "/threads/"+id+"?format=metadata", &threadResp); err != nil {
-				ch <- result{idx: i, err: fmt.Errorf("get thread %s metadata: %w", id, err)}
-				return
-			}
-			if len(threadResp.Messages) == 0 {
-				ch <- result{idx: i}
-				return
-			}
-			msg := threadResp.Messages[0]
-			headers := parseHeaders(msg.Payload.Headers)
-			ch <- result{idx: i, summary: ThreadSummary{
-				ID:           id,
-				Subject:      headerOr(headers, "Subject", "(no subject)"),
-				Sender:       headerOr(headers, "From", "?"),
-				Date:         headerOr(headers, "Date", "?"),
-				Snippet:      msg.Snippet,
-				MessageCount: len(threadResp.Messages),
-			}}
-		}(i, t.ID)
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	results := make([]result, 0, len(listResp.Threads))
-	for range listResp.Threads {
-		results = append(results, <-ch)
-	}
-	// Check errors, preserve order
-	for _, r := range results {
-		if r.err != nil {
-			return nil, r.err
+	// Filter out empty slots (404s, empty threads). Order is preserved because
+	// each goroutine writes to a disjoint contiguous range of the slice.
+	out := make([]ThreadSummary, 0, len(summaries))
+	for _, s := range summaries {
+		if s.ID != "" {
+			out = append(out, s)
 		}
 	}
-	// Sort by original index to maintain Gmail's relevance ordering
-	summaries := make([]ThreadSummary, 0, len(results))
-	ordered := make(map[int]ThreadSummary, len(results))
-	for _, r := range results {
-		if r.summary.ID != "" {
-			ordered[r.idx] = r.summary
+	return out, nil
+}
+
+// fetchMetadataBatch issues one batched threads.get?format=metadata for the
+// given chunk and writes parsed ThreadSummary entries into out[baseIdx:].
+// Out-of-range threads (404) are left as zero-valued entries; the caller
+// filters those.
+func fetchMetadataBatch(account string, out []ThreadSummary, baseIdx int, chunk []idEntry) error {
+	reqs := make([]batchRequest, len(chunk))
+	for i, e := range chunk {
+		reqs[i] = batchRequest{Method: "GET", Path: "/threads/" + e.ID + "?format=metadata"}
+	}
+	results, err := apiBatchWithRetry(account, "gmail.readonly", reqs)
+	if err != nil {
+		return fmt.Errorf("batch threads.get: %w", err)
+	}
+	for i, r := range results {
+		switch {
+		case r.Status == http.StatusNotFound:
+			continue // thread vanished; leave zero-valued
+		case r.Status != http.StatusOK:
+			return fmt.Errorf("thread %s: status %d: %s", chunk[i].ID, r.Status, string(r.Body))
+		}
+		var threadResp threadResponse
+		if err := json.Unmarshal(r.Body, &threadResp); err != nil {
+			return fmt.Errorf("thread %s: parse JSON: %w", chunk[i].ID, err)
+		}
+		if len(threadResp.Messages) == 0 {
+			continue
+		}
+		msg := threadResp.Messages[0]
+		headers := parseHeaders(msg.Payload.Headers)
+		out[baseIdx+i] = ThreadSummary{
+			ID:           chunk[i].ID,
+			Subject:      headerOr(headers, "Subject", "(no subject)"),
+			Sender:       headerOr(headers, "From", "?"),
+			Date:         headerOr(headers, "Date", "?"),
+			Snippet:      msg.Snippet,
+			MessageCount: len(threadResp.Messages),
 		}
 	}
-	for i := range listResp.Threads {
-		if s, ok := ordered[i]; ok {
-			summaries = append(summaries, s)
-		}
+	return nil
+}
+
+// chunkSlice splits a slice into chunks of size <= n.
+func chunkSlice[T any](s []T, n int) [][]T {
+	if n <= 0 || len(s) == 0 {
+		return nil
 	}
-	return summaries, nil
+	chunks := make([][]T, 0, (len(s)+n-1)/n)
+	for i := 0; i < len(s); i += n {
+		end := i + n
+		if end > len(s) {
+			end = len(s)
+		}
+		chunks = append(chunks, s[i:end])
+	}
+	return chunks
 }
 
 // GetThread retrieves a full thread with all message bodies.
@@ -178,7 +242,7 @@ type body struct {
 // Go on macOS does not always respect SSL_CERT_FILE, so we load it explicitly.
 // The client is built once and reused.
 var (
-	clientOnce sync.Once
+	clientOnce = &sync.Once{}
 	httpClient *http.Client
 )
 
