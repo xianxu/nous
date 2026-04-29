@@ -1,0 +1,4 @@
+# Oneshot plugin — single system+user prompt against a local Ollama model.
+# Requires: ollama serve running locally (or OLLAMA_HOST set).
+
+symlink   cmd/oneshot
