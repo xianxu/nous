@@ -1,6 +1,6 @@
 ---
 id: 000001
-status: working
+status: done
 deps: []
 created: 2026-04-28
 updated: 2026-04-28
@@ -130,6 +130,38 @@ not per-second throughput. Concrete observations:
 Implication: the patch does two structurally different things —
 **bound concurrency** (concurrency cap) and **paginate the list call**
 (page-size cap). Both are independently necessary.
+
+### 2026-04-28 — Shared retry layer + calibrated defaults (commit b8f0383)
+
+Extracted retry classification + backoff to `lib/gmail/retry.go`; wired both
+`apiGet` and `apiBatch` through the same `classifyRetry` + `doWithRetry`
+helpers. apiGet now retries on 5xx, 429, and 403 with reason
+`rateLimitExceeded` / `userRateLimitExceeded` / `quotaExceeded`. Charon 407
+and 403/`dailyLimitExceeded` are explicitly non-retriable.
+
+Defaults calibrated from observed limits:
+- MaxAttempts: 5 → 8 (7 × 30s = 210s wait budget; ≥3 per-minute windows)
+- MaxDelay: 5s → 60s
+- quotaPerMinuteHint: 30s default for 403 rate-limit when no Retry-After
+- SearchThreads batch concurrency: 8 → 4 (each batch = 100× quota units of a
+  single call; lower concurrency stays within token-bucket burst tolerance)
+
+End-to-end verification through Charon against xianxu@gmail.com:
+
+| Threads | Time   | Status | Notes                                          |
+|--------:|-------:|--------|------------------------------------------------|
+| 250     | 1.87s  | ✓      | within burst budget, no retries                |
+| 500     | 2.16s  | ✓      | within burst budget                            |
+| 1000    | 5.50s  | ✓      | (was 64s exit=1 with old 5-attempt budget)     |
+| 2000    | 2:13   | ✓      | retries engaged, self-paced through quota      |
+
+The 1k case is the load-bearing one: previously failed with retries
+exhausted on the per-minute quota; now succeeds in <6s by avoiding the
+burst that triggered the quota in the first place. The 2k case proves the
+retry budget is right-sized — when quota does deplete, the loop rides
+through ~3 minute-windows and recovers.
+
+Status moved from `working` → `done`.
 
 ### 2026-04-28 — Manual verification (real Gmail through Charon)
 
