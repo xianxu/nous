@@ -89,13 +89,20 @@ func SearchThreads(account, query string, maxResults int) ([]ThreadSummary, erro
 	}
 
 	// Step 2: fetch metadata via batched threads.get. Chunk by Gmail's 100/batch
-	// cap; run multiple batches in parallel under a semaphore. Per-user concurrent
-	// cap (~10–20 outer connections) is the binding constraint, so 8 batches in
-	// flight = up to 800 logical sub-requests "open" without tripping the cap.
+	// cap; run multiple batches in parallel under a semaphore.
+	//
+	// Concurrency=4 is a calibration trade-off, not the per-user concurrent
+	// cap (which is ~10–20 outer connections). Each batch consumes 500 quota
+	// units (100 sub-requests × 5 units). With concurrency=4 and ~1.5s per
+	// batch, sustained burn is ~1300 u/s — over Gmail's 250 u/s cap, but the
+	// token-bucket burst tolerance absorbs short queries (≤500 threads run
+	// in seconds with no retries). For 1k+ backfills, the retry loop's
+	// 30s rateLimitExceeded waits self-pace the work; raising concurrency
+	// further trades retry-induced latency for nothing.
 	chunks := chunkSlice(ids, MaxBatchSize)
 	summaries := make([]ThreadSummary, len(ids))
 
-	sem := make(chan struct{}, 8)
+	sem := make(chan struct{}, 4)
 	errCh := make(chan error, len(chunks))
 	var wg sync.WaitGroup
 	for chunkIdx, chunk := range chunks {
@@ -274,7 +281,21 @@ func getClient() *http.Client {
 	return httpClient
 }
 
+// apiGet issues a single GET against Gmail and decodes JSON into dest. Wraps
+// the call in doWithRetry: 429 / 5xx / 403-rateLimitExceeded retry with
+// backoff; 407 / 4xx (other than 429 and rate-limit 403) and dailyLimitExceeded
+// surface immediately.
 func apiGet(account, path string, dest any) error {
+	return doWithRetry(defaultRetryOpts, func() error {
+		return apiGetOnce(account, path, dest)
+	})
+}
+
+// apiGetOnce performs one HTTP attempt without retry. Returns *httpStatusErr
+// (via classifyRetry-friendly path) on non-2xx so doWithRetry can dispatch.
+// 407 from Charon is converted into a structured user-facing error to
+// preserve the existing scope_missing message.
+func apiGetOnce(account, path string, dest any) error {
 	req, err := http.NewRequest("GET", gmailAPI+path, nil)
 	if err != nil {
 		return err
@@ -305,14 +326,18 @@ func apiGet(account, path string, dest any) error {
 			Fix      string   `json:"fix"`
 		}
 		if json.Unmarshal(b, &charonErr) == nil && charonErr.Error == "scope_missing" {
-			return fmt.Errorf("missing scope %v for %s. To fix: run `charon auth` (TUI) or `%s`",
-				charonErr.Missing, charonErr.Account, charonErr.Fix)
+			// Wrap inside httpStatusErr so classifyRetry sees 407 and refuses
+			// to retry; the inner Error() preserves the user-facing fix message.
+			return &httpStatusErr{
+				Status: http.StatusProxyAuthRequired,
+				Body: []byte(fmt.Sprintf("missing scope %v for %s. To fix: run `charon auth` (TUI) or `%s`",
+					charonErr.Missing, charonErr.Account, charonErr.Fix)),
+			}
 		}
-		return fmt.Errorf("charon 407: %s", string(b))
+		return &httpStatusErr{Status: http.StatusProxyAuthRequired, Body: b}
 	}
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("API returned %d: %s", resp.StatusCode, string(b))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return readHTTPError(resp)
 	}
 	return json.NewDecoder(resp.Body).Decode(dest)
 }

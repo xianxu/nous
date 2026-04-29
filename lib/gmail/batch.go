@@ -13,7 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -80,12 +79,8 @@ func apiBatch(account, scope string, reqs []batchRequest) ([]batchResponse, erro
 		resp.Body.Close()
 	}()
 
-	if resp.StatusCode == http.StatusProxyAuthRequired {
-		return nil, parseCharonScopeError(resp.Body)
-	}
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("batch endpoint returned %d: %s", resp.StatusCode, string(b))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, readHTTPError(resp)
 	}
 
 	return decodeBatchResponse(resp.Header.Get("Content-Type"), resp.Body, len(reqs))
@@ -202,39 +197,18 @@ func parseResponseContentID(s string) (int, error) {
 	return strconv.Atoi(s)
 }
 
-// parseCharonScopeError reads a Charon 407 body and returns a structured error
-// matching apiGet's format. Shared with apiGet via a small refactor.
-func parseCharonScopeError(body io.Reader) error {
-	b, _ := io.ReadAll(body)
-	return fmt.Errorf("charon 407 (batch): %s", string(b))
-}
-
-// retryOpts controls apiBatchWithRetry behavior. Default is 4 attempts,
-// 200ms base delay, 5s cap; jitter is ±25%.
-type retryOpts struct {
-	MaxAttempts int
-	BaseDelay   time.Duration
-	MaxDelay    time.Duration
-}
-
-var defaultRetryOpts = retryOpts{
-	MaxAttempts: 4,
-	BaseDelay:   200 * time.Millisecond,
-	MaxDelay:    5 * time.Second,
-}
-
-// sleepFunc is overridable for tests so retry loops don't actually sleep.
-var sleepFunc = time.Sleep
-
-// apiBatchWithRetry calls apiBatch with exponential backoff. Two retry
+// apiBatchWithRetry calls apiBatch with retry classification. Two retry
 // surfaces are handled:
 //
-//   - Whole-batch transport / outer-status errors retry the whole batch.
-//   - Per-sub-request 429 / 5xx statuses retry only the failing sub-requests
-//     in the next attempt, preserving the per-request slot in the result.
+//   - Whole-batch transport / outer-status errors retry the whole batch via
+//     classifyRetry (handles 429, 5xx, 403-rateLimitExceeded, etc.).
+//   - Per-sub-request status errors retry only the failing sub-requests in
+//     the next attempt, preserving the per-request slot in the result. Each
+//     sub-response status is classified via the same shared logic by wrapping
+//     it in an httpStatusErr.
 //
-// Auth errors (Charon 407 / scope_missing) and 4xx other than 429 are
-// surfaced immediately — retrying them won't help.
+// Auth errors (Charon 407 / scope_missing), dailyLimitExceeded, and 4xx other
+// than the rate-limit family are surfaced immediately — retrying won't help.
 func apiBatchWithRetry(account, scope string, reqs []batchRequest) ([]batchResponse, error) {
 	return apiBatchWithRetryOpts(account, scope, reqs, defaultRetryOpts)
 }
@@ -259,77 +233,70 @@ func apiBatchWithRetryOpts(account, scope string, reqs []batchRequest, opts retr
 
 		results, err := apiBatch(account, scope, current)
 		if err != nil {
-			if !isRetriableErr(err) {
+			retry, wait := classifyRetry(err)
+			if !retry {
 				return nil, err
 			}
 			lastErr = err
 			if attempt+1 == opts.MaxAttempts {
-				return nil, fmt.Errorf("batch failed after %d attempts: %w", opts.MaxAttempts, err)
+				break
 			}
-			sleepFunc(backoffDelay(opts, attempt))
+			if wait == 0 {
+				wait = backoffDelay(opts, attempt)
+			}
+			sleepFunc(wait)
 			continue
 		}
 
 		var nextPending []int
+		var subWait time.Duration
 		for i, r := range results {
 			origIdx := pending[i]
-			if isRetriableStatus(r.Status) && attempt+1 < opts.MaxAttempts {
-				nextPending = append(nextPending, origIdx)
-				lastErr = fmt.Errorf("sub-request %d returned %d", origIdx, r.Status)
+			subErr := subResponseAsError(r)
+			if subErr == nil {
+				out[origIdx] = r
 				continue
 			}
-			out[origIdx] = r
+			retry, wait := classifyRetry(subErr)
+			if !retry {
+				// Non-retriable sub-status (e.g. 404 vanished thread). Pass
+				// the response through to the caller; it's the final state.
+				out[origIdx] = r
+				continue
+			}
+			nextPending = append(nextPending, origIdx)
+			lastErr = fmt.Errorf("sub-request %s: %w", reqs[origIdx].Path, subErr)
+			if wait > subWait {
+				subWait = wait
+			}
 		}
 
 		if len(nextPending) == 0 {
 			return out, nil
 		}
+		if attempt+1 == opts.MaxAttempts {
+			break
+		}
 		pending = nextPending
-		sleepFunc(backoffDelay(opts, attempt))
+		if subWait == 0 {
+			subWait = backoffDelay(opts, attempt)
+		}
+		sleepFunc(subWait)
 	}
 
-	// Exhausted attempts with sub-requests still pending. Fill in their
-	// last-seen status if any, then return an error.
-	if lastErr != nil {
-		return out, fmt.Errorf("batch retries exhausted: %w", lastErr)
-	}
-	return out, nil
+	// Exhausted attempts with retriable sub-requests still pending.
+	return nil, fmt.Errorf("batch retries exhausted (%d attempts): %w", opts.MaxAttempts, lastErr)
 }
 
-// isRetriableStatus reports whether an HTTP status code from Gmail warrants
-// a retry. 429 (rate-limited) and any 5xx are retriable.
-func isRetriableStatus(s int) bool {
-	return s == http.StatusTooManyRequests || (s >= 500 && s < 600)
-}
-
-// isRetriableErr decides whether an outer-batch error (returned from apiBatch
-// itself) should retry. Transport errors and 5xx outer responses retry;
-// auth-related and other 4xx don't.
-func isRetriableErr(err error) bool {
-	if err == nil {
-		return false
+// subResponseAsError converts a sub-response into an httpStatusErr if its
+// status is non-2xx, so classifyRetry can dispatch on it. Returns nil for 2xx.
+func subResponseAsError(r batchResponse) error {
+	if r.Status >= 200 && r.Status < 300 {
+		return nil
 	}
-	msg := err.Error()
-	// Charon 407 (scope_missing) — retry won't help.
-	if strings.Contains(msg, "charon 407") || strings.Contains(msg, "scope_missing") {
-		return false
+	return &httpStatusErr{
+		Status: r.Status,
+		Reason: parseGmailErrorReason(r.Body),
+		Body:   r.Body,
 	}
-	// Outer 4xx other than 429 — caller misconfigured something.
-	if strings.Contains(msg, "batch endpoint returned 4") &&
-		!strings.Contains(msg, "batch endpoint returned 429") {
-		return false
-	}
-	return true
-}
-
-// backoffDelay computes exponential backoff with ±25% jitter for the given
-// attempt number (0-indexed).
-func backoffDelay(opts retryOpts, attempt int) time.Duration {
-	delay := opts.BaseDelay * time.Duration(1<<attempt)
-	if delay > opts.MaxDelay {
-		delay = opts.MaxDelay
-	}
-	// Jitter in [-delay/4, delay/4)
-	jitter := time.Duration(rand.Int63n(int64(delay)/2)) - delay/4
-	return delay + jitter
 }

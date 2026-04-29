@@ -282,41 +282,71 @@ func withFastSleep(t *testing.T) func() {
 	return func() { sleepFunc = orig }
 }
 
-func TestIsRetriableStatus(t *testing.T) {
+func TestClassifyRetry(t *testing.T) {
 	cases := []struct {
-		s    int
-		want bool
+		name      string
+		err       error
+		wantRetry bool
+		wantWait  time.Duration // 0 means "default exponential"; non-zero means "honor this hint"
 	}{
-		{200, false},
-		{404, false},
-		{429, true},
-		{500, true},
-		{503, true},
-		{599, true},
-		{600, false},
+		{"nil", nil, false, 0},
+		{"transport error", fmt.Errorf("connection refused"), true, 0},
+		{"500", &httpStatusErr{Status: 500}, true, 0},
+		{"503 with Retry-After", &httpStatusErr{Status: 503, RetryAfter: 4 * time.Second}, true, 4 * time.Second},
+		{"429", &httpStatusErr{Status: 429}, true, 0},
+		{"403 rateLimitExceeded", &httpStatusErr{Status: 403, Reason: "rateLimitExceeded"}, true, quotaPerMinuteHint},
+		{"403 userRateLimitExceeded", &httpStatusErr{Status: 403, Reason: "userRateLimitExceeded"}, true, quotaPerMinuteHint},
+		{"403 dailyLimitExceeded", &httpStatusErr{Status: 403, Reason: "dailyLimitExceeded"}, false, 0},
+		{"403 other", &httpStatusErr{Status: 403, Reason: "forbidden"}, false, 0},
+		{"407 charon", &httpStatusErr{Status: 407}, false, 0},
+		{"400", &httpStatusErr{Status: 400}, false, 0},
+		{"404", &httpStatusErr{Status: 404}, false, 0},
+		{"200", &httpStatusErr{Status: 200}, false, 0}, // arguably never seen but defensive
 	}
 	for _, c := range cases {
-		if got := isRetriableStatus(c.s); got != c.want {
-			t.Errorf("isRetriableStatus(%d) = %v, want %v", c.s, got, c.want)
+		t.Run(c.name, func(t *testing.T) {
+			retry, wait := classifyRetry(c.err)
+			if retry != c.wantRetry || wait != c.wantWait {
+				t.Errorf("classifyRetry(%v) = (%v, %v), want (%v, %v)",
+					c.err, retry, wait, c.wantRetry, c.wantWait)
+			}
+		})
+	}
+}
+
+func TestParseGmailErrorReason(t *testing.T) {
+	cases := []struct {
+		body string
+		want string
+	}{
+		{`{"error":{"code":429,"errors":[{"reason":"rateLimitExceeded"}]}}`, "rateLimitExceeded"},
+		{`{"error":{"errors":[{"reason":"userRateLimitExceeded","domain":"usageLimits"}]}}`, "userRateLimitExceeded"},
+		{`{"error":{"code":404}}`, ""},
+		{`{}`, ""},
+		{``, ""},
+		{`not json`, ""},
+	}
+	for _, c := range cases {
+		if got := parseGmailErrorReason([]byte(c.body)); got != c.want {
+			t.Errorf("parseGmailErrorReason(%q) = %q, want %q", c.body, got, c.want)
 		}
 	}
 }
 
-func TestIsRetriableErr(t *testing.T) {
+func TestParseRetryAfter(t *testing.T) {
 	cases := []struct {
-		msg  string
-		want bool
+		in   string
+		want time.Duration
 	}{
-		{"transport error", true},
-		{"batch endpoint returned 500", true},
-		{"batch endpoint returned 429: throttled", true},
-		{"batch endpoint returned 400: bad request", false},
-		{"batch endpoint returned 403: forbidden", false},
-		{"charon 407 (batch): scope_missing", false},
+		{"", 0},
+		{"30", 30 * time.Second},
+		{"0", 0},
+		{"-5", 0},
+		{"abc", 0},
 	}
 	for _, c := range cases {
-		if got := isRetriableErr(fmt.Errorf("%s", c.msg)); got != c.want {
-			t.Errorf("isRetriableErr(%q) = %v, want %v", c.msg, got, c.want)
+		if got := parseRetryAfter(c.in); got != c.want {
+			t.Errorf("parseRetryAfter(%q) = %v, want %v", c.in, got, c.want)
 		}
 	}
 }

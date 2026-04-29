@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -138,6 +139,100 @@ func TestExtractBody(t *testing.T) {
 				t.Errorf("extractBody() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestApiGet_RetriesOn503 verifies apiGet retries through doWithRetry on a
+// transient 5xx and eventually decodes the success response.
+func TestApiGet_RetriesOn503(t *testing.T) {
+	defer withFastSleep(t)()
+
+	var attempts int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&attempts, 1)
+		if n < 3 {
+			w.WriteHeader(503)
+			fmt.Fprint(w, `{"error":{"code":503,"errors":[{"reason":"backendError"}]}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		fmt.Fprint(w, `{"threads":[{"id":"x"}]}`)
+	}))
+	defer srv.Close()
+
+	origAPI := gmailAPI
+	gmailAPI = srv.URL + "/gmail/v1/users/me"
+	defer func() { gmailAPI = origAPI }()
+	resetClientForTest(srv.Client())
+
+	var dest struct {
+		Threads []struct {
+			ID string `json:"id"`
+		} `json:"threads"`
+	}
+	if err := apiGet("u", "/threads", &dest); err != nil {
+		t.Fatalf("apiGet: %v", err)
+	}
+	if attempts != 3 {
+		t.Errorf("attempts = %d, want 3 (two 503s + one success)", attempts)
+	}
+	if len(dest.Threads) != 1 || dest.Threads[0].ID != "x" {
+		t.Errorf("dest = %+v", dest)
+	}
+}
+
+// TestApiGet_RetriesOnRateLimit403 verifies apiGet retries Gmail's per-minute
+// quota error (403 rateLimitExceeded), and surfaces the error if exhausted.
+func TestApiGet_RetriesOnRateLimit403(t *testing.T) {
+	defer withFastSleep(t)()
+
+	var attempts int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		w.WriteHeader(403)
+		fmt.Fprint(w, `{"error":{"code":403,"errors":[{"reason":"rateLimitExceeded","domain":"usageLimits"}]}}`)
+	}))
+	defer srv.Close()
+
+	origAPI := gmailAPI
+	gmailAPI = srv.URL + "/gmail/v1/users/me"
+	defer func() { gmailAPI = origAPI }()
+	resetClientForTest(srv.Client())
+
+	var dest map[string]any
+	err := apiGet("u", "/threads", &dest)
+	if err == nil {
+		t.Fatal("expected error after exhaustion, got nil")
+	}
+	if attempts != int32(defaultRetryOpts.MaxAttempts) {
+		t.Errorf("attempts = %d, want %d (all attempts used)", attempts, defaultRetryOpts.MaxAttempts)
+	}
+}
+
+// TestApiGet_NoRetryOnDailyLimit verifies dailyLimitExceeded fails fast.
+func TestApiGet_NoRetryOnDailyLimit(t *testing.T) {
+	defer withFastSleep(t)()
+
+	var attempts int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		w.WriteHeader(403)
+		fmt.Fprint(w, `{"error":{"code":403,"errors":[{"reason":"dailyLimitExceeded"}]}}`)
+	}))
+	defer srv.Close()
+
+	origAPI := gmailAPI
+	gmailAPI = srv.URL + "/gmail/v1/users/me"
+	defer func() { gmailAPI = origAPI }()
+	resetClientForTest(srv.Client())
+
+	var dest map[string]any
+	if err := apiGet("u", "/threads", &dest); err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if attempts != 1 {
+		t.Errorf("attempts = %d, want 1 (daily-limit must not retry)", attempts)
 	}
 }
 
