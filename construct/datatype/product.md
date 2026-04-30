@@ -6,9 +6,14 @@ description: Use when capturing the durable charter of a product (the umbrella t
 
 # product
 
-A product is the living *charter*: vision, what it is in one sentence, the durable shape (components) of what's being built, and where each component currently stands. It spans 0..N peer repositories of the brain. Forward-looking plans (what we want to be true at month T) live in `roadmap`, not here.
+A product is the living *charter*: vision, what it is in one sentence, the durable shape (components) of what's being built, and where each component currently stands. It spans 0..N peer repositories of the brain.
 
-"Product" is the umbrella name. It covers externally-sold products, internal projects, and infra alike. The word "project" is overloaded (engineering effort, IDE workspace, etc.) and avoided here.
+Distinct from sibling datatypes:
+
+- `project` — an execution container ("what we've decided to do for a purpose, with an MVP scope"). Operator-POV, time-bounded, can cut across multiple products and repos. A product is referenced by many projects over its life.
+- `roadmap` — month-level aggregate of projects + KTLO bucket.
+
+In short: **product describes what is built; project describes what we're working on right now to advance it.**
 
 ## Frontmatter shape
 
