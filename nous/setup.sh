@@ -37,7 +37,11 @@ SCRIPT_REAL="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || r
 NOUS_DIR="$(dirname "$SCRIPT_REAL")"
 TARGET_DIR="$(pwd)"
 CORE_MANIFEST="$SCRIPT_REAL/nous.manifest"
+ARIADNE_BASE_MANIFEST="$SCRIPT_REAL/ariadne-base.manifest"
 PLUGINS_DIR="$SCRIPT_REAL/plugins"
+
+# Where to find ariadne when refreshing nous itself. Override via env if needed.
+ARIADNE_DIR="${ARIADNE_DIR:-$(dirname "$NOUS_DIR")/ariadne}"
 
 # ── Colors ────────────────────────────────────────────────────────────────────
 GREEN='\033[1;32m'
@@ -120,10 +124,40 @@ remove_entry() {
     fi
 }
 
-# Process a manifest file with a given action (symlink, vendor, or remove)
+merge_settings() {
+    local base_file="$1"   # e.g. .claude/settings.ariadne.json (in nous)
+    local target_file="$2" # e.g. .claude/settings.json (in target)
+
+    ensure_parent "$target_file"
+    [[ -L "$target_file" ]] && rm "$target_file"
+
+    local merge_script="$NOUS_DIR/construct/scripts/merge-settings.sh"
+    if [[ ! -f "$merge_script" ]]; then
+        printf "  ${YELLOW}skipped${RESET} %s (merge-settings.sh not found in nous)\n" "${target_file#$TARGET_DIR/}"
+        return 0
+    fi
+
+    local target_dir
+    target_dir=$(dirname "$target_file")
+    local had_local=false
+    [[ -f "$target_dir/settings.local.json" ]] && had_local=true
+
+    bash "$merge_script" "$base_file" "$target_dir" >/dev/null
+
+    if "$had_local"; then
+        printf "  ${YELLOW}merged${RESET}  %s (base + local)\n" "${target_file#$TARGET_DIR/}"
+    else
+        printf "  ${GREEN}created${RESET} %s (from base, no local overrides)\n" "${target_file#$TARGET_DIR/}"
+    fi
+}
+
+# Process a manifest file with a given action (symlink, vendor, or remove).
+# source_root defaults to $NOUS_DIR; pass $ARIADNE_DIR when self-refreshing
+# the ariadne base layer into nous.
 process_manifest() {
     local manifest="$1"
     local mode="$2"  # symlink, vendor, remove
+    local source_root="${3:-$NOUS_DIR}"
 
     [[ -f "$manifest" ]] || return 0
 
@@ -139,9 +173,9 @@ process_manifest() {
                 if [[ "$mode" == "remove" ]]; then
                     remove_entry "$TARGET_DIR/$target"
                 elif [[ "$mode" == "vendor" ]]; then
-                    create_vendored "$NOUS_DIR/$source" "$TARGET_DIR/$target"
+                    create_vendored "$source_root/$source" "$TARGET_DIR/$target"
                 else
-                    create_symlink "$NOUS_DIR/$source" "$TARGET_DIR/$target"
+                    create_symlink "$source_root/$source" "$TARGET_DIR/$target"
                 fi
                 ;;
             scaffold)
@@ -154,10 +188,24 @@ process_manifest() {
                     remove_entry "$TARGET_DIR/$target"
                 elif [[ ! -f "$TARGET_DIR/$target" ]]; then
                     ensure_parent "$TARGET_DIR/$target"
-                    cp "$NOUS_DIR/$source" "$TARGET_DIR/$target"
+                    cp "$source_root/$source" "$TARGET_DIR/$target"
                     printf "  ${GREEN}copied${RESET}  %s\n" "$target"
                 else
                     printf "  ${YELLOW}skipped${RESET} %s (already exists)\n" "$target"
+                fi
+                ;;
+            merge)
+                if [[ "$mode" != "remove" ]]; then
+                    merge_settings "$source_root/$source" "$TARGET_DIR/$target"
+                fi
+                ;;
+            touch)
+                if [[ "$mode" != "remove" ]]; then
+                    ensure_parent "$TARGET_DIR/$source"
+                    if [[ ! -f "$TARGET_DIR/$source" ]]; then
+                        touch "$TARGET_DIR/$source"
+                        printf "  ${GREEN}created${RESET} %s\n" "$source"
+                    fi
                 fi
                 ;;
         esac
@@ -175,11 +223,27 @@ list_plugins() {
 }
 
 # ── Self mode: running inside nous itself ────────────────────────────────────
-# When invoked from the nous repo root, the only useful work is linking
-# nous/skills/* into .claude/skills/ so the host Claude Code session picks
-# them up. Skip manifests, go.mod wiring, Makefile includes, etc.
+# When invoked from the nous repo root, refresh the ariadne base layer that
+# nous re-exports to its descendants. We deliberately do NOT call
+# ariadne/construct/setup.sh — that script is private to ariadne. Instead we
+# vendor the upstream base.manifest verbatim into nous/ariadne-base.manifest
+# and process it ourselves (vendor mode, source_root=ARIADNE_DIR).
 if [[ "$NOUS_DIR" == "$TARGET_DIR" ]]; then
-    printf "${CYAN}Nous setup (self): linking skills${RESET}\n\n"
+    printf "${CYAN}Nous setup (self): refreshing ariadne base layer${RESET}\n\n"
+
+    UPSTREAM_BASE_MANIFEST="$ARIADNE_DIR/construct/base.manifest"
+    if [[ -f "$UPSTREAM_BASE_MANIFEST" ]]; then
+        if ! cmp -s "$UPSTREAM_BASE_MANIFEST" "$ARIADNE_BASE_MANIFEST"; then
+            cp "$UPSTREAM_BASE_MANIFEST" "$ARIADNE_BASE_MANIFEST"
+            printf "  ${GREEN}synced${RESET}  nous/ariadne-base.manifest from %s\n" "$ARIADNE_DIR"
+        fi
+        printf "  ${CYAN}[ariadne base]${RESET}\n"
+        process_manifest "$ARIADNE_BASE_MANIFEST" "vendor" "$ARIADNE_DIR"
+    elif [[ -f "$ARIADNE_BASE_MANIFEST" ]]; then
+        printf "  ${YELLOW}ariadne not found at %s; skipping base re-vendor.${RESET}\n" "$ARIADNE_DIR"
+    fi
+
+    printf "\n  ${CYAN}[nous skills]${RESET}\n"
     for skill_dir in "$SCRIPT_REAL/skills"/*/; do
         [[ -d "$skill_dir" ]] || continue
         name=$(basename "$skill_dir")
@@ -252,29 +316,29 @@ fi
 # ── Execute ──────────────────────────────────────────────────────────────────
 printf "${CYAN}Nous setup: %s → %s${RESET}\n\n" "$NOUS_DIR" "$TARGET_DIR"
 
-# ── Step 1: Install ariadne base layer (from nous's vendored copy) ──────────
-ARIADNE_SETUP="$NOUS_DIR/construct/setup.sh"
-if [[ -f "$ARIADNE_SETUP" && "$ACTION" != "rm" ]]; then
-    printf "  ${CYAN}[ariadne base layer]${RESET}\n"
-    YES_FLAG=""
-    $ASSUME_YES && YES_FLAG="--yes"
-    if [[ "$ACTION" == "all" ]]; then
-        # --all: symlink ariadne files from nous's vendored copies
-        bash "$ARIADNE_SETUP" --symlink $YES_FLAG 2>&1 | while read -r line; do printf "  %s\n" "$line"; done
+# Install nous core manifest (which includes the ariadne base layer entries
+# re-exported from nous's vendored construct/, .openshell/, etc.)
+CORE_MODE=""
+if [[ "$ACTION" == "all" ]]; then
+    CORE_MODE="symlink"
+elif [[ "$ACTION" == "add" ]]; then
+    CORE_MODE="vendor"
+elif [[ "$ACTION" == "refresh" ]]; then
+    # Honor previous mode so refresh doesn't silently switch symlinks → copies.
+    if [[ "$PREVIOUS_MODE" == "all" ]]; then
+        CORE_MODE="symlink"
     else
-        # --add/refresh: vendor ariadne files into target
-        bash "$ARIADNE_SETUP" --vendor $YES_FLAG 2>&1 | while read -r line; do printf "  %s\n" "$line"; done
+        CORE_MODE="vendor"
     fi
-    printf "\n"
 fi
 
-# ── Step 2: Install nous core manifest ───────────────────────────────────────
-if [[ "$ACTION" == "all" ]]; then
+if [[ -n "$CORE_MODE" ]]; then
+    if [[ -f "$ARIADNE_BASE_MANIFEST" ]]; then
+        printf "  ${CYAN}[ariadne base]${RESET}\n"
+        process_manifest "$ARIADNE_BASE_MANIFEST" "$CORE_MODE"
+    fi
     printf "  ${CYAN}[nous core]${RESET}\n"
-    process_manifest "$CORE_MANIFEST" "symlink"
-elif [[ "$ACTION" == "add" || "$ACTION" == "refresh" ]]; then
-    printf "  ${CYAN}[nous core]${RESET}\n"
-    process_manifest "$CORE_MANIFEST" "vendor"
+    process_manifest "$CORE_MANIFEST" "$CORE_MODE"
 fi
 
 case "$ACTION" in
@@ -394,12 +458,26 @@ if [[ "$TARGET_MODULE" != "$NOUS_MODULE" ]]; then
     fi
 fi
 
-# ── Ensure Makefile.local includes Makefile.nous ─────────────────────────────
+# ── Ensure Makefile.local includes Makefile.nous + upstream override ────────
+# UPSTREAM_NAME/UPSTREAM_REFRESH are read by Makefile.workflow's `refresh`
+# target. Defining them in Makefile.local (included after Makefile.workflow)
+# overrides the ariadne-default `?=` assignments via lazy recipe expansion,
+# so `make refresh` calls back into nous instead of ariadne.
 MAKEFILE_LOCAL="$TARGET_DIR/Makefile.local"
 if [[ -f "$MAKEFILE_LOCAL" ]]; then
     if ! grep -q 'Makefile\.nous' "$MAKEFILE_LOCAL"; then
         printf '\n-include Makefile.nous\n' >> "$MAKEFILE_LOCAL"
         printf "  ${GREEN}updated${RESET} Makefile.local (added Makefile.nous include)\n"
+    fi
+    if ! grep -q 'UPSTREAM_NAME' "$MAKEFILE_LOCAL"; then
+        NOUS_REL_FROM_TARGET=$(rel_path "$NOUS_DIR" "$TARGET_DIR")
+        cat >> "$MAKEFILE_LOCAL" <<EOF
+
+# Refresh from nous (set by nous/setup.sh)
+UPSTREAM_NAME    := nous
+UPSTREAM_REFRESH := $NOUS_REL_FROM_TARGET/nous/setup.sh
+EOF
+        printf "  ${GREEN}updated${RESET} Makefile.local (added UPSTREAM_NAME=nous override)\n"
     fi
 fi
 

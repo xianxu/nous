@@ -1,5 +1,7 @@
-# Nous Core Manifest
-# Infrastructure installed regardless of plugin selection.
+# Nous Core Manifest (nous-specific additions)
+#
+# Entries inherited from ariadne live in nous/ariadne-base.manifest, which is
+# processed first by setup.sh. This file holds only nous's own additions.
 #
 # Format: <action> <source-path> [<target-path>]
 #
@@ -7,8 +9,10 @@
 #   symlink   — create symlink (or copy in vendor mode)
 #   copy      — copy once (for files that need local modification)
 #   scaffold  — create empty directory
+#   touch     — create empty file if missing
+#   merge     — JSON merge (settings.ariadne.json layered under settings.local.json)
 
-# ── Skills ────────────────────────────────────────────────────────────────────
+# ── Nous skills ──────────────────────────────────────────────────────────────
 symlink   nous/skills/nous-tools    .claude/skills/nous-tools
 symlink   nous/skills/charon        .claude/skills/charon
 
