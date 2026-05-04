@@ -47,6 +47,7 @@ ARIADNE_DIR="${ARIADNE_DIR:-$(dirname "$NOUS_DIR")/ariadne}"
 GREEN='\033[1;32m'
 YELLOW='\033[1;33m'
 RED='\033[1;31m'
+BOLD_RED='\033[1;31m'
 CYAN='\033[1;36m'
 RESET='\033[0m'
 
@@ -303,6 +304,31 @@ confirm() {
         *) echo "Aborted."; exit 1 ;;
     esac
 }
+
+# Confirm first-time setup in a new repo (no .nous-mode marker yet).
+# Guards against accidental runs in the wrong directory.
+if [[ -z "$PREVIOUS_MODE" && "$ACTION" != "rm" ]]; then
+    REPO_NAME=$(basename "$TARGET_DIR")
+    printf "${YELLOW}First-time nous setup in:${RESET} ${BOLD_RED}%s${RESET}\n" "$REPO_NAME"
+    printf "  Path:   %s\n" "$TARGET_DIR"
+    if [[ "$ACTION" == "all" ]]; then
+        printf "  Action: --all (symlink everything from nous)\n"
+    elif [[ "$ACTION" == "add" ]]; then
+        printf "  Action: --add %s (vendor selectively)\n" "$PLUGIN"
+    fi
+    if ! $ASSUME_YES; then
+        if [[ ! -t 0 ]]; then
+            echo "Error: first-time setup requires --yes in non-interactive runs." >&2
+            exit 1
+        fi
+        read -r -p "Set up nous in this repo? [y/N] " reply
+        case "$reply" in
+            y|Y|yes|YES) ;;
+            *) echo "Aborted."; exit 1 ;;
+        esac
+    fi
+    printf "\n"
+fi
 
 if [[ "$ACTION" == "all" && "$PREVIOUS_MODE" == "selective" ]]; then
     confirm "Switching from selective → all. Vendored plugin files with local modifications will be REPLACED by symlinks."
