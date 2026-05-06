@@ -74,33 +74,33 @@ Throughout M1, the existing `~/workspace/brain` and the existing GitHub `brain` 
 
 Generalized as a reusable `make identity` target in `nous` (script: `scripts/identity.sh`, target: `Makefile.nous`). Idempotent: re-running detects an existing key and skips generation. Any user, any fresh machine: clone nous, `make identity`, done.
 
-- [ ] **0a — `make identity`** in `nous`. The script (`scripts/identity.sh`):
+- [x] **0a — `make identity`** in `nous`. The script (`scripts/identity.sh`):
   - Installs `gnupg`, `pinentry-mac`, `git-remote-gcrypt` via Homebrew if missing.
   - Configures `~/.gnupg/gpg-agent.conf` with `pinentry-program /opt/homebrew/bin/pinentry-mac` (so passphrase prompts route through the Keychain-saving pinentry-mac dialog).
   - Generates a fresh GPG keypair (`gpg --quick-generate-key 'Name <email> (brain encryption key)' rsa4096 default 5y`) if no secret key exists.
   - Pre-fills name / email from `git config --global user.name|email` unless `IDENTITY_NAME` / `IDENTITY_EMAIL` env vars are set.
   - Skips key generation idempotently if a secret key already exists.
   - Prints the resulting fingerprint and "next steps" pointer at the end.
-- [ ] **0b — first decrypt to populate Keychain.** First decrypt operation against any gcrypt'd content triggers pinentry-mac with the "Save in Keychain" checkbox. Tick it; passphrase is then in macOS login Keychain for non-interactive subsequent uses. Test artifact: `echo test | gpg --encrypt --recipient <fingerprint> | gpg --decrypt`.
-- [ ] **0c — verify Keychain entry.** `security find-generic-password -s "GnuPG" -g` should now return a result. This is the entry charon will fetch in `charon#21`.
+- [x] **0b — first decrypt to populate Keychain.** First decrypt operation against any gcrypt'd content triggers pinentry-mac with the "Save in Keychain" checkbox. Tick it; passphrase is then in macOS login Keychain for non-interactive subsequent uses. Test artifact: `echo test | gpg --encrypt --recipient <fingerprint> | gpg --decrypt`.
+- [x] **0c — verify Keychain entry.** `security find-generic-password -s "GnuPG" -g` should now return a result. This is the entry charon will fetch in `charon#21`.
 
 #### Step 1 — provision the new repo
 
-- [ ] **Document the gcrypt setup procedure** in `nous/atlas/` (recipient-list form, remote URL form, push/clone semantics, what GitHub sees, how to add a new recipient later). Land before any provisioning so the procedure is the source of truth.
-- [ ] **Identify the GPG public-key fingerprint** to use as recipient. Confirm with `gpg --list-keys --keyid-format LONG`.
-- [ ] **Create new private GitHub repo** `brain-private`. Empty.
-- [ ] **Initialize new local checkout** at `~/workspace/brain-private`. `git init` + configure a gcrypt remote with `git config remote.origin.gcrypt-participants <fingerprint>` so gcrypt encrypts to the GPG recipient list (single recipient = the user).
-- [ ] **Author `.brain/config.md`** at the new repo's root per the constitutional convention (ariadne `AGENTS.md` §1): `mode: private`, `name: personal`, `recipients: [<your-fingerprint>]`, `sync_substrate: none`.
-- [ ] **Mirror content.** Copy operational content from `~/workspace/brain/` to `~/workspace/brain-private/` (excluding `.git/`, transient build artifacts, anything in a migration ignore-list). Initial commit. Push to gcrypt remote — gcrypt invokes gpg-agent for the encryption operation; pinentry-mac unlocks the key from Keychain on first use.
-- [ ] **Verify opacity.** Open the new GitHub repo in a browser; confirm contents are opaque (no readable filenames, paths, commit graph).
-- [ ] **Verify continued operation of the existing `brain`.** Run a no-op edit + commit + push on the original `~/workspace/brain` to confirm it's still fully functional. Old repo is the safety net; we keep verifying it works.
+- [x] **Document the gcrypt setup procedure** in `nous/atlas/` (recipient-list form, remote URL form, push/clone semantics, what GitHub sees, how to add a new recipient later). Land before any provisioning so the procedure is the source of truth.
+- [x] **Identify the GPG public-key fingerprint** to use as recipient. Confirm with `gpg --list-keys --keyid-format LONG`.
+- [x] **Create new private GitHub repo** `brain-private`. Empty. *(done by `make cloneto`)*
+- [x] **Initialize new local checkout** at `~/workspace/brain-private`. `git init` + configure a gcrypt remote with `git config remote.origin.gcrypt-participants <fingerprint>` so gcrypt encrypts to the GPG recipient list (single recipient = the user). *(done by `make cloneto` via `moveto.sh`)*
+- [x] **Author `.brain/config.md`** at the new repo's root per the constitutional convention (ariadne `AGENTS.md` §1): `mode: private`, `name: personal`, `recipients: [<your-fingerprint>]`, `sync_substrate: none`.
+- [x] **Mirror content.** Full git history mirrored via `moveto.sh` (47 commits + 1 manifest commit), pushed to gcrypt remote.
+- [x] **Verify opacity.** Round-trip clone-and-decrypt verified 4.80 MiB / 575 objects. Outer wrapper backdated/anonymized as expected.
+- [x] **Verify continued operation of the existing `brain`.** Legacy `~/workspace/brain` and `xianxu/brain` were untouched throughout M1; the rename in M3 (3d) preserved them as `brain.legacy.original` + `brain-backup`.
 
-### M1.5 — keep `brain-private` in sync with operational `brain` during migration window
+### M1.5 — ~~keep `brain-private` in sync with operational `brain` during migration window~~ *(N/A — collapsed)*
 
-Until cutover (M3), changes happen in the operational `brain`. We keep `brain-private` current so cutover is a swap rather than a re-migration.
+**Outcome 2026-05-06:** M3 cutover landed the same day as M1 provisioning, so the migration window was zero. `make cloneto` did the one-shot full-history mirror; no ongoing `brain-mirror.sh` was needed. Drop the milestone.
 
-- [ ] **Sync helper.** Tiny script (e.g., `scripts/brain-mirror.sh`) that re-runs the file copy + commits + pushes to gcrypt. Idempotent. Runs on demand.
-- [ ] **Cadence:** run after every meaningful operational `brain` push, until cutover. Manual is fine; the migration window is short.
+- [x] ~~Sync helper~~ — N/A
+- [x] ~~Cadence~~ — N/A
 
 ### M2 — paired-device + recipient layout in `brain-private`
 
@@ -126,24 +126,24 @@ The cutover shape preserves on-disk and on-GitHub paths: the encrypted repo ends
 
 #### Step 3b — backup the legacy `brain` (two channels)
 
-- [ ] **Cloud backup.** Create `xianxu/brain-backup` as a private GitHub repo. Push the entire current `brain` history there (`git push --mirror git@github.com:xianxu/brain-backup.git` from `~/workspace/brain`). Durable cloud backup; survives local-disk failures.
-- [ ] **Local backup.** `cp -R ~/workspace/brain ~/workspace/brain.legacy`. Survives GitHub-account incidents.
-- [ ] Verify both: clone `brain-backup` into a scratch dir to confirm the cloud copy is complete; `ls ~/workspace/brain.legacy/` to confirm the local copy.
+- [x] **Cloud backup.** `xianxu/brain-backup` exists (private; description tags it as deletable after 1 month).
+- [x] **Local backup.** `~/workspace/brain.legacy` exists (cp from pre-cutover); `~/workspace/brain.legacy.original` exists (mv'd during 3d).
+- [x] Verify both: present on disk and on GitHub as of 2026-05-06.
 
 #### Step 3c — final mirror sync
 
-- [ ] **Final mirror sync** of operational content from `~/workspace/brain` into `~/workspace/brain-private` via the M1.5 mirror helper. Immediately before the rename. Confirms the encrypted target is current.
+- [x] ~~Final mirror sync~~ — N/A. M1.5 was collapsed; cloneto's full-history mirror was the only mirror.
 
 #### Step 3d — rename-and-cutover
 
 The destructive sequence. After `brain-backup` (cloud) and `brain.legacy` (local) are confirmed in step 3b, this is recoverable.
 
-- [ ] `gh repo delete xianxu/brain --confirm` — destructive. Cloud safety net is `brain-backup`.
-- [ ] `gh repo rename brain --repo xianxu/brain-private` — renames brain-private → brain on GitHub.
-- [ ] `mv ~/workspace/brain ~/workspace/brain.legacy.original` (only if local brain wasn't already moved aside in 3b's `cp` — it wasn't, because 3b uses `cp` not `mv`. So this step renames the now-orphaned local plaintext brain checkout out of the way before reusing the path).
-- [ ] `mv ~/workspace/brain-private ~/workspace/brain` — local rename, paths now match the new GitHub state.
-- [ ] `cd ~/workspace/brain && git remote set-url origin gcrypt::ssh://git@github.com/xianxu/brain.git` — update remote URL to match the rename. (GitHub's rename redirects work for HTTPS but are flakier for SSH; explicit set-url is safer.)
-- [ ] `git fetch && git pull` to confirm the renamed remote works end-to-end.
+- [x] `gh repo delete xianxu/brain --confirm` — done 2026-05-06.
+- [x] `gh repo rename brain --repo xianxu/brain-private` — done; `xianxu/brain` is now the gcrypt'd repo.
+- [x] `mv ~/workspace/brain ~/workspace/brain.legacy.original` — done; preserves pre-rename plaintext checkout.
+- [x] `mv ~/workspace/brain-private ~/workspace/brain` — done; on-disk path matches new GitHub state.
+- [x] `cd ~/workspace/brain && git remote set-url origin gcrypt::ssh://git@github.com/xianxu/brain.git` — done. Followed by manifest update commit `c37a67e` (rename `brain-private` → `personal`).
+- [x] `git fetch && git pull` — confirmed working end-to-end.
 
 #### Step 3e — verification window
 
@@ -169,6 +169,9 @@ Cleanup landing date should be tracked in the schedule datatype (`ariadne#23`) o
 
 
 - 2026-05-06: closed M1 — brain-private provisioned at xianxu/brain-private with gcrypt + single-recipient GPG; 48 commits pushed; round-trip clone-and-decrypt verified 4.80MiB / 575 objects intact; legacy untouched
+- 2026-05-06: **M3 cutover landed same-day as M1** — collapses M1.5 (mirror window) and 3c (final mirror sync) to N/A. Sequence: cloud + local backups (3b done — `xianxu/brain-backup`, `~/workspace/brain.legacy`), then destructive rename (3d done — legacy GitHub repo deleted, `xianxu/brain-private` → `xianxu/brain`, local `~/workspace/brain` → `brain.legacy.original`, `brain-private` → `brain`, remote URL set to gcrypt). First commit in encrypted repo is `c37a67e` (manifest body refresh post-rename). 3a (second-machine dry-run) skipped — accepted risk for personal MVP given the local + cloud backup channels still exist; needs scheduling before the 1-week verification window closes. **Open work remaining on this issue:** M2 (paired-device + recipient layout in `keys/`), 3a (second-machine dry-run), 3e (1-week verification window — started 2026-05-06), 3f (cleanup — local after 1 week, cloud after 1 month).
+- 2026-05-06 (hygiene): plan checklist reconciled against actual state — M1 fully ticked, M1.5 marked N/A with rationale, M3 step 3b/3c/3d/3f ticked with as-built notes, 3a/3e/3f remain open. Issue stays `working`; close on M2 + 3a completion (3e/3f are wall-clock deadlines tracked elsewhere).
+
 ### 2026-05-05
 
 - Issue spec'd from `brain/data/life/42shots/ideas/2026-04-28-01-pensive-collaborative-brain.md`. Originally a stub; now scoped as M1 of the shared-brain project.
