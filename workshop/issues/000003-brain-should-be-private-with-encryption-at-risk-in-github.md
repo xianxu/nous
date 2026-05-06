@@ -1,10 +1,10 @@
 ---
 id: 000003
-status: open
+status: working
 deps: [nous#8, ariadne#22]
 created: 2026-05-05
 updated: 2026-05-06
-estimate_hours: 5
+estimate_hours: 6
 ---
 
 # brain should be private with encryption at rest in github
@@ -43,7 +43,8 @@ Range: **3.5–10 hr**. Best guess: **~5.5 hr**.
 
 | Component | Primitive | Design (×0.5) | Impl (×1.5 familiarity) | Total |
 |---|---|---|---|---|
-| New repo provisioning + GPG-recipient gcrypt config + initial mirror (M1) | Real-tool discovery + setup | 0.15–0.5 | 0.45–1.2 | 0.6–1.7 |
+| GPG/gcrypt tooling install + keypair gen + gpg-agent config (M1 step 0) | Real-tool discovery + setup | 0.1–0.3 | 0.45–1.2 | 0.55–1.5 |
+| New repo provisioning + GPG-recipient gcrypt config + initial mirror (M1 step 1) | Real-tool discovery + setup | 0.15–0.5 | 0.45–1.2 | 0.6–1.7 |
 | Mirror sync helper (M1.5) | Smaller Go / shell | 0–0.15 | 0.3–0.75 | 0.3–0.9 |
 | Paired-device + recipient layout (M2) | Atlas/docs + small scripting | 0.05–0.2 | 0.15–0.45 | 0.2–0.65 |
 | Bootstrap procedure doc (M3) | Atlas/docs | 0.05–0.2 | 0.1–0.4 | 0.15–0.6 |
@@ -52,11 +53,11 @@ Range: **3.5–10 hr**. Best guess: **~5.5 hr**.
 | Second-machine dry-run + iterate (M3) | Verification + fix-loop | 0.25–0.75 | 0.45–1.5 | 0.7–2.25 |
 | Cutover + path-reference hunt (M3) | Cross-cutting refactor | 0.2–0.5 | 0.45–1.2 | 0.65–1.7 |
 | Mid-flight scope buffer | Mid-flight pivot | 0.1–0.25 | 0.3–0.75 | 0.4–1 |
-| **Subtotal** | | 0.85–2.75 | 2.75–7.45 | 3.6–10.2 |
-| **+30% design buffer** | | +0.25–0.85 | n/a | +0.25–0.85 |
-| **Total** | | | | **~3.85–11 hr** |
+| **Subtotal** | | 0.95–3.05 | 3.2–8.65 | 4.15–11.7 |
+| **+30% design buffer** | | +0.3–0.9 | n/a | +0.3–0.9 |
+| **Total** | | | | **~4.5–12.6 hr** |
 
-Rounded to **3.5–10 hr**. Down from the prior estimate (4–12 hr) because the single-GPG-scheme reshape **drops the passphrase wrapper script entirely** and **simplifies M2** (no GPG export, no scratch-keyring round-trip verification, no init script for restoring keys from exports — bootstrap pulls from iCloud Keychain directly). Net savings ~1.5 hr at the midpoint; complexity reduction and surface reduction together.
+Rounded to **4–12 hr**. Bumped slightly from the prior 3.5–10 hr after discovering the GPG/gcrypt tooling is not yet installed on this machine — Step 0 (install gnupg + pinentry-mac + git-remote-gcrypt; generate keypair; configure gpg-agent; verify Keychain entry) adds ~1 hr at the midpoint. Still well under the dual-scheme version's 4–12 hr range despite this, because the single-GPG-scheme savings (no wrapper script, no GPG export round-trip, no init script for restoring keys from exports) offset Step 0's cost.
 
 Familiarity ×1.5 applied to impl (gcrypt + GPG-recipient flow is novel-but-bounded). Spec-quality discount ×0.5. The biggest residual uncertainty remains the second-machine dry-run, which now also depends on the iCloud Keychain bootstrap path being well-trodden (which it isn't yet — first time anyone in this stack does it).
 
@@ -66,9 +67,26 @@ Familiarity ×1.5 applied to impl (gcrypt + GPG-recipient flow is novel-but-boun
 
 Throughout M1, the existing `~/workspace/brain` and the existing GitHub `brain` repo stay untouched. Operationally we keep working in the old one; the new one is a parallel target being filled.
 
-Prereqs (must hold before M1 starts): GPG keypair exists (`gpg --list-secret-keys` shows your key); gpg-agent + pinentry-mac configured (`pinentry-program` line in `~/.gnupg/gpg-agent.conf`); GPG key passphrase stored in macOS login Keychain.
+**Prereq state on this machine (verified 2026-05-06):** none of the GPG/gcrypt tooling is set up yet. `~/.gnupg/` has only the empty keybox auto-created by `gpg --list-secret-keys`. No `gpg-agent.conf`. No `git-remote-gcrypt` binary. No `GnuPG` Keychain entry. The prereq-establishment work is therefore the **first phase of M1**, not a precondition. Folded in below as steps 0a–0d.
 
-- [ ] **Document the gcrypt setup procedure** in `nous/atlas/` (recipient-list form, remote URL form, push/clone semantics, what GitHub sees). Land before any provisioning so the procedure is the source of truth.
+#### Step 0 — establish GPG / gcrypt tooling
+
+- [ ] **0a — install dependencies** via Homebrew: `brew install gnupg pinentry-mac git-remote-gcrypt`. Verify each: `gpg --version`, `which pinentry-mac`, `which git-remote-gcrypt`.
+- [ ] **0b — generate or import the GPG keypair.**
+  - *Generate fresh* (recommended): `gpg --full-generate-key` — RSA 4096, no expiry (or 5-year expiry to match common practice), name `Xianxu Xu`, email `lovchatvol@gmail.com`, comment `brain encryption key`. Set a strong passphrase (long, generated, will be stored in Keychain).
+  - *Import existing* (if a key already exists in 1Password / USB backup / etc.): `gpg --import < /path/to/private-key.asc` and enter the existing passphrase.
+- [ ] **0c — configure gpg-agent + pinentry-mac.** Add to `~/.gnupg/gpg-agent.conf`:
+  ```
+  pinentry-program /opt/homebrew/bin/pinentry-mac
+  default-cache-ttl 600
+  max-cache-ttl 7200
+  ```
+  Restart gpg-agent: `gpgconf --kill gpg-agent`. Test by running `gpg --decrypt` against a small test ciphertext — first time prompts pinentry-mac with "Save in Keychain" checkbox; tick it, enter passphrase. Subsequent prompts are non-interactive (cached) until cache expires.
+- [ ] **0d — verify Keychain stores the passphrase.** `security find-generic-password -s "GnuPG" -g` should now return a result (the saved item from pinentry-mac's "Save in Keychain"). This is the entry charon will fetch in `charon#21`.
+
+#### Step 1 — provision the new repo
+
+- [ ] **Document the gcrypt setup procedure** in `nous/atlas/` (recipient-list form, remote URL form, push/clone semantics, what GitHub sees, how to add a new recipient later). Land before any provisioning so the procedure is the source of truth.
 - [ ] **Identify the GPG public-key fingerprint** to use as recipient. Confirm with `gpg --list-keys --keyid-format LONG`.
 - [ ] **Create new private GitHub repo** `brain-private`. Empty.
 - [ ] **Initialize new local checkout** at `~/workspace/brain-private`. `git init` + configure a gcrypt remote with `git config remote.origin.gcrypt-participants <fingerprint>` so gcrypt encrypts to the GPG recipient list (single recipient = the user).
