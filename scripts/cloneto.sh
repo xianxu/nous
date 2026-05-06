@@ -85,20 +85,35 @@ else
 fi
 
 # ── 4. Select GPG identity ───────────────────────────────────────────────────
-# Build parallel arrays of fingerprints and uids from gpg --list-secret-keys.
+# Parse `gpg --list-secret-keys --with-colons` into per-identity (FP, UID) pairs.
+# A new identity starts with a `sec:` line; within each block we take the first
+# `fpr:` (primary fingerprint, not encrypt subkey) and the first `uid:`.
 declare -a FPS UIDS
-i=0
+idx=-1
+fpr_taken=0
 while IFS= read -r line; do
     case "$line" in
-        fpr:*) FPS[$i]=$(echo "$line" | awk -F: '{print $10}') ;;
+        sec:*)
+            idx=$((idx+1))
+            fpr_taken=0
+            FPS[$idx]=""
+            UIDS[$idx]=""
+            ;;
+        fpr:*)
+            if [ $idx -ge 0 ] && [ $fpr_taken -eq 0 ]; then
+                FPS[$idx]=$(echo "$line" | awk -F: '{print $10}')
+                fpr_taken=1
+            fi
+            ;;
         uid:*)
-            UIDS[$i]=$(echo "$line" | awk -F: '{print $10}')
-            i=$((i+1))
+            if [ $idx -ge 0 ] && [ -z "${UIDS[$idx]}" ]; then
+                UIDS[$idx]=$(echo "$line" | awk -F: '{print $10}')
+            fi
             ;;
     esac
 done < <(gpg --list-secret-keys --with-colons 2>/dev/null)
 
-N_KEYS=${#FPS[@]}
+N_KEYS=$((idx+1))
 if [ "$N_KEYS" -eq 0 ]; then
     die "No GPG secret keys found. Run 'make identity' first."
 elif [ "$N_KEYS" -eq 1 ]; then
