@@ -7,10 +7,15 @@
 #
 # Used by `make identity` (Makefile.nous).
 #
-# Inputs (override env > git config fallback):
-#   IDENTITY_NAME    Real name to embed in the key (default: `git config user.name`)
-#   IDENTITY_EMAIL   Email to embed in the key (default: `git config user.email`)
-#   IDENTITY_EXPIRY  Key expiry passed to `gpg --quick-generate-key` (default: 5y)
+# Inputs:
+#   When env vars are set they're used directly. When unset, the script prompts
+#   interactively, suggesting `git config user.name|email` as defaults the user
+#   can accept or override. Non-interactive (no TTY) runs require all three env
+#   vars set or the script bails with a clear message.
+#
+#   IDENTITY_NAME    Real name to embed in the key (prompts; suggests git config user.name)
+#   IDENTITY_EMAIL   Email to embed in the key (prompts; suggests git config user.email)
+#   IDENTITY_EXPIRY  Key expiry passed to `gpg --quick-generate-key` (prompts; default 5y)
 #
 # Spec: see nous#3 M1 Step 0; threat model `brain/atlas/threat-model-shared-brain.md`
 # `## Privilege concentration` and `## GPG key bootstrap and passphrase storage`.
@@ -25,9 +30,29 @@ warn() { printf "%s  [!]%s %s\n" "$YELLOW" "$RESET" "$*" >&2; }
 die()  { printf "%serror:%s %s\n" "$RED" "$RESET" "$*" >&2; exit 1; }
 
 # ── Inputs ───────────────────────────────────────────────────────────────────
-NAME="${IDENTITY_NAME:-$(git config --global user.name 2>/dev/null || true)}"
-EMAIL="${IDENTITY_EMAIL:-$(git config --global user.email 2>/dev/null || true)}"
-EXPIRY="${IDENTITY_EXPIRY:-5y}"
+# Env vars take priority. If unset, prompt interactively, with git config as
+# the suggested default (but always confirmed by the user).
+NAME="${IDENTITY_NAME:-}"
+EMAIL="${IDENTITY_EMAIL:-}"
+EXPIRY="${IDENTITY_EXPIRY:-}"
+
+prompt_with_default() {
+    local var_name="$1" prompt_label="$2" default="$3" answer
+    if [ -n "${!var_name}" ]; then
+        return 0  # already set via env
+    fi
+    if [ ! -t 0 ]; then
+        die "IDENTITY_$var_name is not set and stdin is not a TTY (cannot prompt). Re-run with IDENTITY_$var_name=... or in an interactive shell."
+    fi
+    if [ -n "$default" ]; then
+        read -rp "$prompt_label [$default]: " answer
+        printf -v "$var_name" '%s' "${answer:-$default}"
+    else
+        read -rp "$prompt_label: " answer
+        [ -n "$answer" ] || die "$var_name cannot be empty."
+        printf -v "$var_name" '%s' "$answer"
+    fi
+}
 
 # ── 1. Dependencies ──────────────────────────────────────────────────────────
 info "Checking dependencies..."
@@ -66,11 +91,26 @@ if [ -n "$existing" ]; then
     gpg --list-secret-keys --keyid-format LONG >&2
 else
     # ── 4. Generate a new key ───────────────────────────────────────────────
-    [ -n "$NAME" ]  || die "IDENTITY_NAME not set and 'git config --global user.name' is empty."
-    [ -n "$EMAIL" ] || die "IDENTITY_EMAIL not set and 'git config --global user.email' is empty."
+    info "No GPG secret key found. Setting up a new key."
+    info ""
 
-    info "Generating GPG key for: $NAME <$EMAIL>"
-    info "Expiry: $EXPIRY    Type: rsa4096"
+    git_name=$(git config --global user.name  2>/dev/null || true)
+    git_email=$(git config --global user.email 2>/dev/null || true)
+
+    prompt_with_default NAME   "Real name to embed in the GPG key"  "$git_name"
+    prompt_with_default EMAIL  "Email to embed in the GPG key"      "$git_email"
+    prompt_with_default EXPIRY "Key expiry (e.g. 5y, 0 for none)"    "5y"
+
+    echo
+    info "Will generate: $NAME <$EMAIL> (brain encryption key)"
+    info "Type: rsa4096    Expiry: $EXPIRY"
+    if [ -t 0 ]; then
+        read -rp "Proceed? [Y/n] " confirm
+        if [[ "$confirm" =~ ^[Nn] ]]; then
+            die "Aborted by user."
+        fi
+    fi
+
     info ""
     info "You will be prompted by pinentry-mac for a passphrase."
     info "Tick the 'Save in Keychain' checkbox so subsequent uses are non-interactive."
