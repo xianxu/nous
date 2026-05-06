@@ -18,7 +18,7 @@ estimate_hours: 5
 
 ## Spec
 
-Sources: `brain/data/life/42shots/ideas/2026-04-28-01-pensive-collaborative-brain.md` §Privacy and bootstrap, §Build order step 1; threat model in `nous#8` (gating — M1 of this issue does not start until #8 M1 ships).
+Sources: `brain/data/life/42shots/ideas/2026-04-28-01-pensive-collaborative-brain.md` §Privacy and bootstrap, §Build order step 1; threat model at `brain/atlas/threat-model-shared-brain.md` (authored under `nous#8` M1, this is the canonical reference for the encryption posture this issue implements). The default passphrase-storage mode is **macOS Keychain**, selected and justified in the threat model's *Passphrase storage* section.
 
 Brain holds the rawest private capture in the system. Today it lives in a private GitHub repo, but the host still sees plaintext — filenames, commit messages, the commit graph, every typed artifact. That's the wrong default for data this sensitive, and it's the prerequisite for sharing: any `brain-shared-*` repo will be encrypted to a recipient list, so the host has to be untrusted by construction. Solo-mode benefit (encryption at rest with a passphrase) is immediate; collaborative-mode benefit (each shared brain encrypted to a different recipient set) compounds on top.
 

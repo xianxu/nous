@@ -29,6 +29,8 @@ Two failure modes both have to be handled cleanly:
 1. **Reader has the brain checked out and decrypted.** Reference resolves; agent reads the file as context.
 2. **Reader is not a recipient on the target brain (no keys, possibly no checkout).** Reference fails informatively. The agent gets a "this reference points into brain `<name>` which you don't have access to" hint, *not* a stack trace, and *not* silent elision. Not trying to decrypt is the right posture — the agent should not see encrypted bytes as evidence of anything other than "not for me."
 
+The skip-with-hint posture is a direct consequence of the trust-boundary model in `brain/atlas/threat-model-shared-brain.md`: the encryption boundary is at decryption-on-disk, so a brain we don't have keys for is genuinely unreadable, not a permissions bug to surface. Treating "no keys" as a structured "not for me" rather than an error is how we keep cross-brain references useful in mixed-recipient settings without leaking information about *what* the unreadable brain contains.
+
 Per-person `brains.md` registry (mapping brain names to clone URLs and checkout paths) is deferred until it bites. v1 can hard-code the common case (`@brain:family` → `~/workspace/brain-shared-family` or wherever the user keeps it) and surface "unknown brain name" cleanly.
 
 Out of scope: reference rot detection (when a referenced artifact moves or is deleted). Address with either a CI-style check or lazy-fix-on-encounter — decide once real usage exists.

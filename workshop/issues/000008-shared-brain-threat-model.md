@@ -94,6 +94,10 @@ Buffer rounded up to ~1.5–3 hr to absorb the doc's "what does the threat model
 
 ## Log
 
+
+
+- 2026-05-05: closed M2 — #3 Spec now references the threat-model doc and names macOS Keychain default; #6 Spec adds skip-with-hint rationale paragraph; project file lede links the doc
+- 2026-05-05: closed M1 — threat model written at brain/atlas/threat-model-shared-brain.md (8 sections + open questions + versioning) and indexed in brain/atlas/index.md
 ### 2026-05-05
 
 - Issue created after thread-level discussion on whether shared-brain's encryption boundary is per-file/per-agent or at-decryption-on-disk. Conclusion: at-decryption-on-disk, deliberately, and that posture has consequences worth writing down before any migration happens. Gates `#3` M1.
