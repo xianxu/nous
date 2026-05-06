@@ -1,7 +1,7 @@
 ---
 id: 000003
 status: open
-deps: [nous#8, ariadne#22, brain#10]
+deps: [nous#8, ariadne#22]
 created: 2026-05-05
 updated: 2026-05-06
 estimate_hours: 5
@@ -23,7 +23,7 @@ estimate_hours: 5
 
 Sources: `brain/data/life/42shots/ideas/2026-04-28-01-pensive-collaborative-brain.md` §Privacy and bootstrap, §Build order step 1; threat model at `brain/atlas/threat-model-shared-brain.md` (authored under `nous#8` M1, this is the canonical reference for the encryption posture this issue implements).
 
-**Single-GPG-scheme posture:** all brains — private and shared — are gcrypt-encrypted to a GPG recipient list. brain-private has a single recipient (the user). There is no separate gcrypt symmetric passphrase; the daily-use unlock chain is uniform across machines (gpg-agent + pinentry-mac → Keychain). New-machine bootstrap pulls the GPG private key from iCloud Keychain (recommended default per the threat model), gated on Apple-account hardening tracked in `brain#10`.
+**Single-GPG-scheme posture:** all brains — private and shared — are gcrypt-encrypted to a GPG recipient list. brain-private has a single recipient (the user). There is no separate gcrypt symmetric passphrase; the daily-use unlock chain is uniform across machines (gpg-agent + pinentry-mac → Keychain). New-machine bootstrap pulls the GPG private key from iCloud Keychain (recommended default per the threat model). Apple-account hardening (`brain#10`) is end-of-project follow-on, not gating — the GPG-key blob in iCloud Keychain is itself passphrase-encrypted, so an Apple-ID-account compromise yields ciphertext, not a usable key. Hardening upgrades the channel from "good enough for personal MVP" to "production-grade for shared-brain at family or team scale."
 
 **Safety-net migration shape:** rather than adding a gcrypt remote to the existing `brain` repo and gradually retiring the unencrypted one (which puts the live repo at risk during setup), the migration provisions a *new* `brain-private` repo on GitHub and on disk, mirrors the operational content into it, and verifies end-to-end on a second machine before any cutover. The existing `brain` checkout and remote remain fully intact and operational throughout. Worst-case rollback is "abandon the new repo, keep using the old one" — costs nothing, breaks nothing. Cutover (M3) is the single point at which agent paths switch over; everything before that is non-destructive.
 
@@ -66,7 +66,7 @@ Familiarity ×1.5 applied to impl (gcrypt + GPG-recipient flow is novel-but-boun
 
 Throughout M1, the existing `~/workspace/brain` and the existing GitHub `brain` repo stay untouched. Operationally we keep working in the old one; the new one is a parallel target being filled.
 
-Prereqs (must hold before M1 starts): GPG keypair exists (`gpg --list-secret-keys` shows your key); gpg-agent + pinentry-mac configured (`pinentry-program` line in `~/.gnupg/gpg-agent.conf`); GPG key passphrase stored in macOS login Keychain. If `brain#10`'s Apple-account hardening hasn't landed yet, the iCloud-Keychain bootstrap path on the second machine in M3 will be weaker; flag this if M3 starts before `brain#10` finishes.
+Prereqs (must hold before M1 starts): GPG keypair exists (`gpg --list-secret-keys` shows your key); gpg-agent + pinentry-mac configured (`pinentry-program` line in `~/.gnupg/gpg-agent.conf`); GPG key passphrase stored in macOS login Keychain.
 
 - [ ] **Document the gcrypt setup procedure** in `nous/atlas/` (recipient-list form, remote URL form, push/clone semantics, what GitHub sees). Land before any provisioning so the procedure is the source of truth.
 - [ ] **Identify the GPG public-key fingerprint** to use as recipient. Confirm with `gpg --list-keys --keyid-format LONG`.
@@ -96,7 +96,7 @@ Under the single-GPG-scheme posture, `brain-private` does **not** hold private k
 
 ### M3 — new-machine bootstrap, then cutover
 
-Prereq: `brain#10` Apple-account hardening should ideally have shipped before M3 (so the iCloud-Keychain bootstrap channel is on a hardened Apple ID). M3 can proceed with an unhardened Apple ID for the dry-run, but cutover-on-real-data should wait for `brain#10`.
+`brain#10` Apple-account hardening is end-of-project, not a prereq for M3. The iCloud-Keychain bootstrap channel is workable for personal MVP without it because the GPG-key blob stored in iCloud Keychain is itself passphrase-encrypted — an Apple-ID-account compromise yields ciphertext, not a usable key. Hardening upgrades the channel later; M3 can proceed.
 
 - [ ] **Write the bootstrap procedure** as a checklist in `nous/atlas/` (and pointer from `brain/atlas/threat-model-shared-brain.md`'s *Bootstrap* section). The procedure walks through: install gpg + gcrypt + git on the fresh machine; sign into iCloud + open Keychain Access; find the `[brain GPG]` secure note; copy the ASCII-armored block; `gpg --import`; register the GPG-key passphrase in macOS Keychain (`security add-generic-password ...`); configure pinentry-mac in `~/.gnupg/gpg-agent.conf`; clone `brain-private`.
 - [ ] **Dry-run on a second machine** (VM or actual second laptop). Run through the procedure cold. Verify: (a) `gpg --list-secret-keys` shows the imported key; (b) `gpg --decrypt` of a small test ciphertext succeeds without prompting (key cached via Keychain); (c) `git clone gcrypt::...brain-private` succeeds and decrypts cleanly.
@@ -119,5 +119,5 @@ Prereq: `brain#10` Apple-account hardening should ideally have shipped before M3
   - M1 drops the passphrase wrapper script entirely. gcrypt is configured with `gcrypt-participants <fingerprint>`; gpg-agent + pinentry-mac handle unlock per-machine.
   - M2 reframed: brain-private no longer holds key exports. Layout simplifies to paired-device list + recipient public keys for known shared brains.
   - M3 bootstrap simplifies: no decrypt-then-import dance. New machine pulls GPG private key from iCloud Keychain (recommended channel per threat model), imports, registers passphrase in Keychain, clones brain-private.
-  - New dep: `brain#10` (Apple-account hardening) — gates trust in the iCloud-Keychain bootstrap channel. M3 dry-run can proceed before `brain#10` lands; cutover-on-real-data should wait.
   - Estimate dropped 4–12 hr → 3.5–10 hr (best guess 7 → 5). Wrapper script removed (~0.6 hr saved), M2 simplified (~0.9 hr saved).
+- **`brain#10` repositioned** as end-of-project hardening, not gating. The iCloud-Keychain bootstrap channel is workable for personal MVP without it because the GPG-key blob stored in iCloud Keychain is itself passphrase-encrypted — an Apple-ID-account compromise yields ciphertext, not a usable key. Hardening upgrades the channel later.
