@@ -29,6 +29,13 @@
     - "brain" is a special peer holding cross-cutting state: execution tracking such as datatype `project`, `roadmap`. 
 	- Brain is a mirror of human, contains all private data. 
 	- Shared Brain represents shared mind of a family, team, company.
+	- **Brain identification.** A repo is a brain iff it contains `.brain/config.md` at its root. Tools and agents answer "is this a brain?" by `test -d .brain` — never by directory or repo name (real names will vary: `brain`, `family-brain`, `brain-private`, etc.). The manifest declares:
+		- `mode: private | shared` — private = personal, encrypted to one passphrase; shared = encrypted to a recipient list (GPG keys).
+		- `name: <slug>` — brain identity for cross-brain references (e.g., `@brain:family/...`), decoupled from directory and remote name.
+		- `recipients: [<gpg-fingerprint>, ...]` — for `shared` mode.
+		- `passphrase_source: keychain | op | tty | env` — for `private` mode (default `keychain` on macOS).
+		- `sync_substrate: syncthing | git-daemon | none` — for `shared` mode.
+	- A repo without `.brain/config.md` is not a brain — agents apply brain-aware behavior (encryption, sync, cross-brain reference resolution) only to repos that declare themselves. Full schema, security rationale, and threat-model context live in `brain/atlas/threat-model-shared-brain.md`.
 
 ### 2. Overall Workflow
 - Enter brainstorming mode when requirement is unclear

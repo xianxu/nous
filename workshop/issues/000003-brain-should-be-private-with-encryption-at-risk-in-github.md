@@ -1,7 +1,7 @@
 ---
 id: 000003
 status: open
-deps: [nous#8]
+deps: [nous#8, ariadne#22]
 created: 2026-05-05
 updated: 2026-05-05
 estimate_hours: 7
@@ -70,7 +70,7 @@ Throughout M1, the existing `~/workspace/brain` and the existing GitHub `brain` 
 - [ ] **Passphrase wrapper script.** Tiny script (e.g., `scripts/brain-passphrase.sh`) that reads `.brain/config.md`'s `passphrase_source:` field and fetches from the named source: `tty` (prompt), `keychain` (`security find-generic-password -w`, default), `op` (`op read "op://Personal/brain-private/passphrase"`), or `env` (CI-like contexts). Pipes to gcrypt.
 - [ ] **Create new private GitHub repo** `brain-private` (or appropriate slug). Empty.
 - [ ] **Initialize new local checkout** at `~/workspace/brain-private`. `git init` + add gcrypt remote pointing at the new GitHub repo, configured to use the wrapper script.
-- [ ] **Author `.brain/config.md`** at the new repo's root with `mode: private`, `name: personal`, `passphrase_source: keychain`, `sync_substrate: none`. This is the manifest the threat model's *Brain identification* section names.
+- [ ] **Author `.brain/config.md`** at the new repo's root per the constitutional convention (ariadne `AGENTS.md` §1, established under `ariadne#22`): `mode: private`, `name: personal`, `passphrase_source: keychain`, `sync_substrate: none`.
 - [ ] **Mirror content.** Copy operational content from `~/workspace/brain/` to `~/workspace/brain-private/` (excluding `.git/`, transient build artifacts, anything explicitly listed in a migration ignore-list). Initial commit. Push to gcrypt remote.
 - [ ] **Verify opacity.** Open the new GitHub repo in a browser; confirm contents are opaque (no readable filenames, paths, commit graph).
 - [ ] **Verify continued operation of the existing `brain`.** Run a no-op edit + commit + push on the original `~/workspace/brain` to confirm it's still fully functional. Old repo is the safety net; we keep verifying it works.
