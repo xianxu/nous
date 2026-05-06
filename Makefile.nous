@@ -1,7 +1,13 @@
 # Nous layer targets.
 # Included by consuming repos via: -include Makefile.nous
 
-.PHONY: build test clean trim identity
+# Resolve the actual nous directory even when this Makefile is symlinked
+# into a consuming repo (e.g., brain/Makefile.nous → ../nous/Makefile.nous).
+# `realpath` follows symlinks; `lastword $(MAKEFILE_LIST)` is the path of the
+# Makefile currently being processed.
+NOUS_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
+
+.PHONY: build test clean trim identity moveto
 
 build:
 	@for dir in cmd/*/; do \
@@ -25,7 +31,19 @@ test:
 #
 # Spec: nous#3 M1 Step 0; threat model brain/atlas/threat-model-shared-brain.md.
 identity:
-	@scripts/identity.sh
+	@$(NOUS_DIR)scripts/identity.sh
+
+# Clone the current repo to a new location with full git history. Idempotent;
+# refuses to overwrite an existing target. Strips the auto-created origin in
+# the new clone so the caller can configure a fresh remote without confusion.
+#
+# Usage:
+#   make moveto TARGET=../brain-private
+#
+# Spec: nous#3 M1 step 3 (mirror brain's full git history into brain-private).
+moveto:
+	@[ -n "$(TARGET)" ] || { echo "Usage: make moveto TARGET=<target-path>   (e.g., make moveto TARGET=../brain-private)" >&2; exit 1; }
+	@$(NOUS_DIR)scripts/moveto.sh "$(TARGET)"
 
 clean:
 	@for dir in cmd/*/; do \
