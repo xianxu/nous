@@ -167,6 +167,8 @@ Cleanup landing date should be tracked in the schedule datatype (`ariadne#23`) o
 
 ## Log
 
+
+- 2026-05-06: closed M1 — brain-private provisioned at xianxu/brain-private with gcrypt + single-recipient GPG; 48 commits pushed; round-trip clone-and-decrypt verified 4.80MiB / 575 objects intact; legacy untouched
 ### 2026-05-05
 
 - Issue spec'd from `brain/data/life/42shots/ideas/2026-04-28-01-pensive-collaborative-brain.md`. Originally a stub; now scoped as M1 of the shared-brain project.
