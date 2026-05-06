@@ -1,7 +1,7 @@
 # Nous layer targets.
 # Included by consuming repos via: -include Makefile.nous
 
-.PHONY: build test clean trim
+.PHONY: build test clean trim identity
 
 build:
 	@for dir in cmd/*/; do \
@@ -14,6 +14,18 @@ build:
 
 test:
 	go test ./...
+
+# Bootstrap GPG identity for brain encryption. Idempotent: re-running detects
+# an existing key and skips generation. Configures gpg-agent + pinentry-mac so
+# the GPG passphrase is fetched from macOS login Keychain.
+#
+# Usage:
+#   make identity                                  # uses git config user.name/email
+#   IDENTITY_NAME='Your Name' IDENTITY_EMAIL='you@example.com' make identity
+#
+# Spec: nous#3 M1 Step 0; threat model brain/atlas/threat-model-shared-brain.md.
+identity:
+	@scripts/identity.sh
 
 clean:
 	@for dir in cmd/*/; do \

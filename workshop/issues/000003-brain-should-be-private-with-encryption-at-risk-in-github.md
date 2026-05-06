@@ -71,18 +71,17 @@ Throughout M1, the existing `~/workspace/brain` and the existing GitHub `brain` 
 
 #### Step 0 — establish GPG / gcrypt tooling
 
-- [ ] **0a — install dependencies** via Homebrew: `brew install gnupg pinentry-mac git-remote-gcrypt`. Verify each: `gpg --version`, `which pinentry-mac`, `which git-remote-gcrypt`.
-- [ ] **0b — generate or import the GPG keypair.**
-  - *Generate fresh* (recommended): `gpg --full-generate-key` — RSA 4096, no expiry (or 5-year expiry to match common practice), name `Xianxu Xu`, email `lovchatvol@gmail.com`, comment `brain encryption key`. Set a strong passphrase (long, generated, will be stored in Keychain).
-  - *Import existing* (if a key already exists in 1Password / USB backup / etc.): `gpg --import < /path/to/private-key.asc` and enter the existing passphrase.
-- [ ] **0c — configure gpg-agent + pinentry-mac.** Add to `~/.gnupg/gpg-agent.conf`:
-  ```
-  pinentry-program /opt/homebrew/bin/pinentry-mac
-  default-cache-ttl 600
-  max-cache-ttl 7200
-  ```
-  Restart gpg-agent: `gpgconf --kill gpg-agent`. Test by running `gpg --decrypt` against a small test ciphertext — first time prompts pinentry-mac with "Save in Keychain" checkbox; tick it, enter passphrase. Subsequent prompts are non-interactive (cached) until cache expires.
-- [ ] **0d — verify Keychain stores the passphrase.** `security find-generic-password -s "GnuPG" -g` should now return a result (the saved item from pinentry-mac's "Save in Keychain"). This is the entry charon will fetch in `charon#21`.
+Generalized as a reusable `make identity` target in `nous` (script: `scripts/identity.sh`, target: `Makefile.nous`). Idempotent: re-running detects an existing key and skips generation. Any user, any fresh machine: clone nous, `make identity`, done.
+
+- [ ] **0a — `make identity`** in `nous`. The script (`scripts/identity.sh`):
+  - Installs `gnupg`, `pinentry-mac`, `git-remote-gcrypt` via Homebrew if missing.
+  - Configures `~/.gnupg/gpg-agent.conf` with `pinentry-program /opt/homebrew/bin/pinentry-mac` (so passphrase prompts route through the Keychain-saving pinentry-mac dialog).
+  - Generates a fresh GPG keypair (`gpg --quick-generate-key 'Name <email> (brain encryption key)' rsa4096 default 5y`) if no secret key exists.
+  - Pre-fills name / email from `git config --global user.name|email` unless `IDENTITY_NAME` / `IDENTITY_EMAIL` env vars are set.
+  - Skips key generation idempotently if a secret key already exists.
+  - Prints the resulting fingerprint and "next steps" pointer at the end.
+- [ ] **0b — first decrypt to populate Keychain.** First decrypt operation against any gcrypt'd content triggers pinentry-mac with the "Save in Keychain" checkbox. Tick it; passphrase is then in macOS login Keychain for non-interactive subsequent uses. Test artifact: `echo test | gpg --encrypt --recipient <fingerprint> | gpg --decrypt`.
+- [ ] **0c — verify Keychain entry.** `security find-generic-password -s "GnuPG" -g` should now return a result. This is the entry charon will fetch in `charon#21`.
 
 #### Step 1 — provision the new repo
 
