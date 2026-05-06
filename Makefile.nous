@@ -7,7 +7,7 @@
 # Makefile currently being processed.
 NOUS_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 
-.PHONY: build test clean trim identity moveto
+.PHONY: build test clean trim identity moveto cloneto
 
 build:
 	@for dir in cmd/*/; do \
@@ -33,17 +33,30 @@ test:
 identity:
 	@$(NOUS_DIR)scripts/identity.sh
 
-# Clone the current repo to a new location with full git history. Idempotent;
-# refuses to overwrite an existing target. Strips the auto-created origin in
-# the new clone so the caller can configure a fresh remote without confusion.
+# Clone the current repo to a new location with full git history. Generic
+# primitive: just clones, strips the auto-created origin, prints next steps.
+# Refuses to overwrite an existing target.
 #
 # Usage:
-#   make moveto TARGET=../brain-private
-#
-# Spec: nous#3 M1 step 3 (mirror brain's full git history into brain-private).
+#   make moveto TARGET=../some-other-path
 moveto:
-	@[ -n "$(TARGET)" ] || { echo "Usage: make moveto TARGET=<target-path>   (e.g., make moveto TARGET=../brain-private)" >&2; exit 1; }
+	@[ -n "$(TARGET)" ] || { echo "Usage: make moveto TARGET=<target-path>" >&2; exit 1; }
 	@$(NOUS_DIR)scripts/moveto.sh "$(TARGET)"
+
+# Clone the current git repo to a new location AS a gcrypt-encrypted brain.
+# Interactive end-to-end: prompts for target path if missing, creates or
+# confirms-overwrite of the GitHub target repo, prompts to select a GPG
+# identity (if multiple), configures the gcrypt remote, authors .brain/config.md,
+# force-pushes.
+#
+# Usage:
+#   make cloneto                            # prompts for everything
+#   make cloneto TARGET=../brain-private    # skips just the path prompt
+#
+# Prereqs: `make identity` (a usable GPG keypair); `gh auth login`.
+# Spec: nous#3 M1 step 3.
+cloneto:
+	@$(NOUS_DIR)scripts/cloneto.sh "$(TARGET)"
 
 clean:
 	@for dir in cmd/*/; do \

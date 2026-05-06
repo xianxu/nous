@@ -84,14 +84,40 @@ else
     ok "~/.gnupg/gpg-agent.conf already configured for pinentry-mac."
 fi
 
-# ── 3. Existing key check ────────────────────────────────────────────────────
+# ── 3. Existing key check (local keyring → iCloud Keychain → fresh) ─────────
 existing=$(gpg --list-secret-keys --keyid-format LONG 2>/dev/null | grep '^sec' || true)
 if [ -n "$existing" ]; then
-    warn "Existing GPG secret key(s) found. Skipping generation:"
+    warn "Existing GPG secret key(s) found locally. Skipping generation:"
     gpg --list-secret-keys --keyid-format LONG >&2
 else
+    # No local key — check macOS Keychain for an exported GPG private key.
+    # Convention (per brain#10 M3): a generic-password Keychain item with
+    # service "brain-gpg-key" holds an ASCII-armored, passphrase-encrypted
+    # GPG private key export. iCloud Keychain syncs login-keychain items
+    # across the user's Apple devices, so storing the export there once
+    # makes it available on every machine the user signs into.
+    info "No local GPG key. Checking macOS Keychain for an existing export..."
+    keychain_export=$(security find-generic-password -s "brain-gpg-key" -w 2>/dev/null || true)
+    if [ -n "$keychain_export" ]; then
+        info "Found 'brain-gpg-key' in Keychain. (Synced from iCloud Keychain if you have it enabled.)"
+        if [ -t 0 ]; then
+            read -rp "Import this key into the local keyring? [Y/n] " ans
+            if [[ ! "$ans" =~ ^[Nn] ]]; then
+                echo "$keychain_export" | gpg --import
+                ok "Imported from Keychain."
+                existing=$(gpg --list-secret-keys --keyid-format LONG 2>/dev/null | grep '^sec' || true)
+            fi
+        else
+            warn "Found 'brain-gpg-key' in Keychain but stdin is not a TTY; not importing automatically."
+        fi
+    fi
+fi
+
+if [ -n "$existing" ]; then
+    : # have a key (either from local keyring or just-imported); skip generation
+else
     # ── 4. Generate a new key ───────────────────────────────────────────────
-    info "No GPG secret key found. Setting up a new key."
+    info "No GPG secret key found locally or in Keychain. Setting up a new key."
     info ""
 
     git_name=$(git config --global user.name  2>/dev/null || true)
