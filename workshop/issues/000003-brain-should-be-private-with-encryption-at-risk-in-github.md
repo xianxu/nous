@@ -53,19 +53,24 @@ Familiarity ×1.5 applied to impl (gcrypt is novel-but-bounded — well-document
 
 ### M1 — gcrypt remote on personal brain
 
+- [ ] **Brain manifest.** Author `.brain/config.md` at the personal-brain root with `mode: private`, `name: personal`, `passphrase_source: keychain`, `sync_substrate: none` for now. This is the canonical source of truth other tools read; per the threat model's *Brain identification* section.
 - [ ] Document the gcrypt setup procedure in `atlas/` (passphrase choice, remote URL form, push/clone semantics, what GitHub sees).
 - [ ] Pick the passphrase (long, generated; storage mode chosen below).
-- [ ] **Passphrase storage wrapper.** Tiny script (e.g., `scripts/brain-passphrase.sh`) that fetches the passphrase and pipes to gcrypt. Configurable source via env or config: `tty` (prompt), `keychain` (`security find-generic-password -w`), `op` (`op read "op://Personal/brain-private/passphrase"`), or `env` (for CI-like contexts). Default chosen per `#8` M1's recommendation. Threat-model implications of each mode are documented in `#8`, not duplicated here.
+- [ ] **Passphrase storage wrapper.** Tiny script (e.g., `scripts/brain-passphrase.sh`) that reads `.brain/config.md`'s `passphrase_source:` field and fetches the passphrase from the named source: `tty` (prompt), `keychain` (`security find-generic-password -w`, default), `op` (`op read "op://Personal/brain-private/passphrase"`), or `env` (CI-like contexts). Pipes to gcrypt. Threat-model implications of each mode are in the threat-model doc, not duplicated here.
 - [ ] Configure `brain` repo with a gcrypt remote alongside the existing GitHub remote, using the wrapper.
 - [ ] Push history; verify on GitHub UI that contents are opaque.
 - [ ] Keep the unencrypted remote alive temporarily as a safety net; do not retire until M3 verifies a clean clone-and-decrypt elsewhere.
 
-### M2 — brain-private keyring layout
+### M2 — brain-private *backup* keyring layout
 
-- [ ] Decide where in the brain tree keys live (e.g., `keys/gpg/`, `keys/ssh/`, `keys/syncthing/`, `keys/paired-devices.md`).
-- [ ] Move existing keys into the layout; verify nothing breaks (gpg signing, ssh to github, etc.).
-- [ ] Init script (`scripts/brain-bootstrap.sh` or similar in `nous/`) that reads the layout and installs keys onto a fresh machine.
-- [ ] Document the layout in `atlas/`.
+Per the threat-model revision: brain-private holds passphrase-encrypted *exports* of keys, not the live keys. Operational keys stay in their canonical OS locations (`~/.gnupg/`, `~/.ssh/`, Syncthing config dir).
+
+- [ ] Decide layout for exports under brain-private — proposed: `keys/gpg-export.asc` (passphrase-encrypted GPG export via `gpg --export-secret-keys --armor`), `keys/ssh/` (SSH keys may stay plaintext if the threat-model accepts it; otherwise re-encrypt), `keys/syncthing-cert.tar.gz.enc`, `keys/paired-devices.md`, `keys/recipients/` (public keys of known recipients per brain).
+- [ ] Generate / locate the export passphrase. Store in Keychain alongside the brain-private gcrypt passphrase (separate Keychain entry).
+- [ ] Export existing GPG private key with passphrase protection; place under `keys/gpg-export.asc`. Verify `gpg --import` against the export round-trips on a scratch keyring.
+- [ ] Verify operational keys at `~/.gnupg/` etc. still work; nothing broken (gpg signing, ssh to github, etc.).
+- [ ] Init script (`scripts/brain-bootstrap.sh` or similar in `nous/`) that, on a fresh machine, reads exports from brain-private, prompts once for the export passphrase, imports GPG into `~/.gnupg/`, registers the GPG-key passphrase in Keychain, restores ssh / Syncthing config from exports.
+- [ ] Document the layout and the operational vs backup distinction in the threat-model doc; link from atlas.
 
 ### M3 — new-machine bootstrap
 

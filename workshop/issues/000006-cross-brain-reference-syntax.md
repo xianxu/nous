@@ -64,9 +64,10 @@ Familiarity ×1.0 (parser + resolver are very familiar Go patterns). Spec-qualit
 
 ### M2 — resolver with skip-with-hint
 
-- [ ] Map `<name>` to a checkout path on disk (initial impl: hard-coded conventions; defer the registry until M3 or beyond).
+- [ ] Discover candidate brain checkouts on disk by scanning for `.brain/config.md` manifests under the workspace root (per the threat-model's *Brain identification* convention). Build an in-memory map: `manifest.name` → checkout path.
+- [ ] Resolve `<name>` against this map (not against directory names). A brain renamed or moved on disk still resolves correctly via its manifest.
 - [ ] Resolve the path within the checkout; return the file contents to the caller.
-- [ ] If the brain isn't checked out, or the file doesn't exist, or decryption fails: return a structured hint, *not* the raw error or empty content.
+- [ ] If the brain isn't checked out (no manifest found with that name), or the file doesn't exist, or decryption fails: return a structured hint, *not* the raw error or empty content.
 - [ ] Wire into the agent's read-this-context flow so cross-brain refs in prose actually behave as references.
 
 ### M3 — agent / dispatcher integration
