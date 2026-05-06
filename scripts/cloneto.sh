@@ -45,8 +45,10 @@ if [ -z "$TARGET" ]; then
     if [ ! -t 0 ]; then
         die "TARGET not provided and stdin is not a TTY."
     fi
-    read -rp "Target local path (e.g., ../brain-private): " TARGET
-    [ -n "$TARGET" ] || die "Target path required."
+    SOURCE_NAME=$(basename "$(pwd)")
+    DEFAULT_TARGET="../${SOURCE_NAME}-private"
+    read -rp "Target local path [$DEFAULT_TARGET]: " TARGET
+    TARGET="${TARGET:-$DEFAULT_TARGET}"
 fi
 TARGET_NAME=$(basename "$TARGET")
 TARGET_GITHUB="$GITHUB_OWNER/$TARGET_NAME"
