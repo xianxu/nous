@@ -116,8 +116,16 @@ else
     info "Tick the 'Save in Keychain' checkbox so subsequent uses are non-interactive."
     info ""
 
-    gpg --quick-generate-key "$NAME <$EMAIL> (brain encryption key)" rsa4096 default "$EXPIRY"
-    ok "Key generated."
+    gpg --quick-generate-key "$NAME <$EMAIL> (brain encryption key)" rsa4096 sign "$EXPIRY"
+
+    # --quick-generate-key with rsa4096 produces a primary key with [SC]
+    # (Sign + Certify) capability only — no encrypt subkey. We need an
+    # encrypt subkey for gcrypt to use as a recipient key. Add it explicitly.
+    NEW_FP=$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr:/ {print $10; exit}')
+    info "Adding encrypt subkey (rsa4096) to $NEW_FP..."
+    gpg --quick-add-key "$NEW_FP" rsa4096 encrypt "$EXPIRY"
+
+    ok "Key generated with encrypt subkey."
 fi
 
 # ── 5. Print fingerprint + next steps ────────────────────────────────────────
