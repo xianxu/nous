@@ -51,7 +51,8 @@ Range: **3.5–10 hr**. Best guess: **~5.5 hr**.
 | Atlas / threat-model link maintenance | Atlas/docs | 0.05–0.2 | 0.1–0.3 | 0.15–0.5 |
 | gcrypt + GPG tooling discovery | Real-API discovery | 0 | 0.45–0.9 | 0.45–0.9 |
 | Second-machine dry-run + iterate (M3) | Verification + fix-loop | 0.25–0.75 | 0.45–1.5 | 0.7–2.25 |
-| Cutover + path-reference hunt (M3) | Cross-cutting refactor | 0.2–0.5 | 0.45–1.2 | 0.65–1.7 |
+| Backup creation + rename-and-cutover (M3 step 3b–3d) | Cross-cutting + verification | 0.15–0.4 | 0.3–0.8 | 0.45–1.2 |
+| Verification window dogfood (M3 step 3e) | Verification (mostly wall-clock) | 0–0.1 | 0.1–0.3 | 0.1–0.4 |
 | Mid-flight scope buffer | Mid-flight pivot | 0.1–0.25 | 0.3–0.75 | 0.4–1 |
 | **Subtotal** | | 0.95–3.05 | 3.2–8.65 | 4.15–11.7 |
 | **+30% design buffer** | | +0.3–0.9 | n/a | +0.3–0.9 |
@@ -111,17 +112,58 @@ Under the single-GPG-scheme posture, `brain-private` does **not** hold private k
 - [ ] Verify operational keys at `~/.gnupg/` etc. still work; nothing should be touched here.
 - [ ] Document the layout in the threat-model doc; link from atlas.
 
-### M3 — new-machine bootstrap, then cutover
+### M3 — bootstrap dry-run, then rename-and-cutover
 
 `brain#10` Apple-account hardening is end-of-project, not a prereq for M3. The iCloud-Keychain bootstrap channel is workable for personal MVP without it because the GPG-key blob stored in iCloud Keychain is itself passphrase-encrypted — an Apple-ID-account compromise yields ciphertext, not a usable key. Hardening upgrades the channel later; M3 can proceed.
 
-- [ ] **Write the bootstrap procedure** as a checklist in `nous/atlas/` (and pointer from `brain/atlas/threat-model-shared-brain.md`'s *Bootstrap* section). The procedure walks through: install gpg + gcrypt + git on the fresh machine; sign into iCloud + open Keychain Access; find the `[brain GPG]` secure note; copy the ASCII-armored block; `gpg --import`; register the GPG-key passphrase in macOS Keychain (`security add-generic-password ...`); configure pinentry-mac in `~/.gnupg/gpg-agent.conf`; clone `brain-private`.
-- [ ] **Dry-run on a second machine** (VM or actual second laptop). Run through the procedure cold. Verify: (a) `gpg --list-secret-keys` shows the imported key; (b) `gpg --decrypt` of a small test ciphertext succeeds without prompting (key cached via Keychain); (c) `git clone gcrypt::...brain-private` succeeds and decrypts cleanly.
+The cutover shape preserves on-disk and on-GitHub paths: the encrypted repo ends up at `xianxu/brain` and `~/workspace/brain` exactly where the legacy plaintext lived. No path-reference hunt across project files; no agent re-onboarding. The cost is a deliberate rename + double-backup dance during cutover.
+
+#### Step 3a — bootstrap dry-run on a second machine
+
+- [ ] **Write the bootstrap procedure** as a checklist in `nous/atlas/gcrypt-brain-encryption.md` (or a sibling). The procedure: install gpg + gcrypt + git; sign into iCloud + open Keychain Access; find the `[brain GPG]` secure note; copy the ASCII-armored block; `gpg --import`; configure pinentry-mac in `~/.gnupg/gpg-agent.conf`; trigger first decrypt to populate Keychain via "Save in Keychain"; clone `brain-private`.
+- [ ] **Dry-run on a second machine** (VM or actual second laptop). Run through the procedure cold. Verify: (a) `gpg --list-secret-keys` shows the imported key; (b) `gpg --decrypt` of a small test ciphertext succeeds; (c) `git clone gcrypt::...brain-private` succeeds and decrypts cleanly.
 - [ ] **Fix whatever doesn't work** the first time; iterate until repeatable. Keep the original `brain` operational — we are not committed to cutover until the dry-run is clean.
-- [ ] **Final sync** of operational content from `~/workspace/brain` into `~/workspace/brain-private` via the M1.5 mirror script, immediately before cutover.
-- [ ] **Cutover.** Update agent path conventions and tool references from `~/workspace/brain` to `~/workspace/brain-private`. Update `brain/data/project/*.md`'s sources, `nous/AGENTS.local.md` if it has paths, anything else grep'd for `/workspace/brain` (excluding intended legacy references). Land in one commit per repo so rollback is a single revert.
-- [ ] **Archive the legacy.** `mv ~/workspace/brain ~/workspace/brain.legacy` so accidental writes have no plausible target. Make the legacy GitHub repo private + add a README pointing at the new repo's location for any future archaeology. Do **not** delete the legacy repo for at least one quarter; archived state is cheap insurance.
-- [ ] **Optional:** rename `brain-private` → `brain` on disk and on GitHub once dust settles (a week of clean operation). Defer; not gating issue close.
+
+#### Step 3b — backup the legacy `brain` (two channels)
+
+- [ ] **Cloud backup.** Create `xianxu/brain-backup` as a private GitHub repo. Push the entire current `brain` history there (`git push --mirror git@github.com:xianxu/brain-backup.git` from `~/workspace/brain`). Durable cloud backup; survives local-disk failures.
+- [ ] **Local backup.** `cp -R ~/workspace/brain ~/workspace/brain.legacy`. Survives GitHub-account incidents.
+- [ ] Verify both: clone `brain-backup` into a scratch dir to confirm the cloud copy is complete; `ls ~/workspace/brain.legacy/` to confirm the local copy.
+
+#### Step 3c — final mirror sync
+
+- [ ] **Final mirror sync** of operational content from `~/workspace/brain` into `~/workspace/brain-private` via the M1.5 mirror helper. Immediately before the rename. Confirms the encrypted target is current.
+
+#### Step 3d — rename-and-cutover
+
+The destructive sequence. After `brain-backup` (cloud) and `brain.legacy` (local) are confirmed in step 3b, this is recoverable.
+
+- [ ] `gh repo delete xianxu/brain --confirm` — destructive. Cloud safety net is `brain-backup`.
+- [ ] `gh repo rename brain --repo xianxu/brain-private` — renames brain-private → brain on GitHub.
+- [ ] `mv ~/workspace/brain ~/workspace/brain.legacy.original` (only if local brain wasn't already moved aside in 3b's `cp` — it wasn't, because 3b uses `cp` not `mv`. So this step renames the now-orphaned local plaintext brain checkout out of the way before reusing the path).
+- [ ] `mv ~/workspace/brain-private ~/workspace/brain` — local rename, paths now match the new GitHub state.
+- [ ] `cd ~/workspace/brain && git remote set-url origin gcrypt::ssh://git@github.com/xianxu/brain.git` — update remote URL to match the rename. (GitHub's rename redirects work for HTTPS but are flakier for SSH; explicit set-url is safer.)
+- [ ] `git fetch && git pull` to confirm the renamed remote works end-to-end.
+
+#### Step 3e — verification window
+
+Before any cleanup, **operate in the new `~/workspace/brain` for at least 1 week.** Verify:
+
+- [ ] Multiple push/pull cycles succeed.
+- [ ] `gh browse` (or browser) of `xianxu/brain` shows opaque contents.
+- [ ] An agent-driven workflow edits, commits, pushes; second machine pulls and reads. End-to-end.
+- [ ] Project file references at `/Users/xianxu/workspace/brain/data/project/...` still resolve in any tool that reads them.
+
+If any break, restore is `mv` operations only — no re-encryption needed.
+
+#### Step 3f — cleanup
+
+After at least **1 week of clean operation** for local, **1 month** for cloud:
+
+- [ ] Local: `rm -rf ~/workspace/brain.legacy ~/workspace/brain.legacy.original` (after 1 week).
+- [ ] Cloud: `gh repo delete xianxu/brain-backup --confirm` (after 1 month).
+
+Cleanup landing date should be tracked in the schedule datatype (`ariadne#23`) once it ships, so the 1-month deadline doesn't get forgotten. Until then, manually note the date.
 
 ## Log
 
@@ -138,3 +180,10 @@ Under the single-GPG-scheme posture, `brain-private` does **not** hold private k
   - M3 bootstrap simplifies: no decrypt-then-import dance. New machine pulls GPG private key from iCloud Keychain (recommended channel per threat model), imports, registers passphrase in Keychain, clones brain-private.
   - Estimate dropped 4–12 hr → 3.5–10 hr (best guess 7 → 5). Wrapper script removed (~0.6 hr saved), M2 simplified (~0.9 hr saved).
 - **`brain#10` repositioned** as end-of-project hardening, not gating. The iCloud-Keychain bootstrap channel is workable for personal MVP without it because the GPG-key blob stored in iCloud Keychain is itself passphrase-encrypted — an Apple-ID-account compromise yields ciphertext, not a usable key. Hardening upgrades the channel later.
+- **M3 reshaped to rename-and-cutover** (replacing "swap path references" cutover). End state: encrypted repo at `xianxu/brain` and `~/workspace/brain` — exactly where the legacy plaintext lived. No path-reference hunt across project files; no agent re-onboarding. Cost is a deliberate rename + double-backup dance during cutover. Substep structure:
+  - 3a: bootstrap dry-run on second machine.
+  - 3b: backup legacy via `xianxu/brain-backup` (cloud) + `~/workspace/brain.legacy` (local).
+  - 3c: final mirror sync.
+  - 3d: destructive sequence — delete legacy `xianxu/brain` → rename `xianxu/brain-private` → `xianxu/brain` → local `mv` → update remote URL.
+  - 3e: 1-week verification window in the new `~/workspace/brain` before any cleanup commits.
+  - 3f: cleanup — local after 1 week, `brain-backup` cloud after 1 month. Cleanup deadline goes into the schedule datatype (`ariadne#23`) once it ships.
