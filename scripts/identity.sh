@@ -121,12 +121,12 @@ if [ -n "$existing" ]; then
     warn "Existing GPG secret key(s) found locally. Skipping generation:"
     gpg --list-secret-keys --keyid-format LONG >&2
 else
-    # No local key — check macOS Keychain for an exported GPG private key.
-    # Convention (per brain#10 M3): a generic-password Keychain item with
-    # service "brain-gpg-key" holds an ASCII-armored, passphrase-encrypted
-    # GPG private key export. iCloud Keychain syncs login-keychain items
-    # across the user's Apple devices, so storing the export there once
-    # makes it available on every machine the user signs into.
+    # No local key — opportunistic check for an exported GPG private key
+    # in macOS Keychain. If the user manually placed an ASCII-armored,
+    # passphrase-encrypted export under service "brain-gpg-key", import it.
+    # Sneakernet via an independent channel (AirDrop, encrypted USB, signed
+    # file) is the canonical bootstrap path; this Keychain check is a
+    # convenience for users who happen to have stashed a copy there.
     info "No local GPG key. Checking macOS Keychain for an existing export..."
     keychain_export=$(security find-generic-password -s "brain-gpg-key" -w 2>/dev/null || true)
     if [ -n "$keychain_export" ]; then
