@@ -7,7 +7,7 @@
 # Makefile currently being processed.
 NOUS_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 
-.PHONY: build test clean trim identity moveto cloneto
+.PHONY: build test clean trim identity moveto cloneto new-brain
 
 build:
 	@for dir in cmd/*/; do \
@@ -55,6 +55,30 @@ moveto:
 # Spec: nous#3 M1 step 3.
 cloneto:
 	@$(NOUS_DIR)scripts/cloneto.sh
+
+# Bootstrap a brand-new gcrypt-encrypted brain at a target path. Unlike
+# `cloneto` (which mirrors the current repo's full git history), new-brain
+# provisions an empty brain — fresh git init, no source history. Interactive:
+# prompts for path (if not given), GitHub owner+name, GPG identity. Creates
+# the GitHub repo (private), runs nous/setup.sh --all --yes in the new tree,
+# authors .brain/config.md, commits, pushes.
+#
+# Usage:
+#   make new-brain                  # interactive (prompts for target path)
+#   make new-brain ../brain         # positional path (see catch-all below)
+#
+# Prereqs: `make identity` (a usable GPG keypair); `gh auth login`.
+new-brain:
+	@$(NOUS_DIR)scripts/new-brain.sh $(filter-out $@,$(MAKECMDGOALS))
+
+# Allow positional args after `make new-brain` (e.g. `make new-brain ../brain`)
+# without make complaining "no rule to make target ../brain". Scoped: this
+# catch-all is only defined when `new-brain` is among the requested goals,
+# so it doesn't silently swallow typos in normal `make` invocations.
+ifneq ($(filter new-brain,$(MAKECMDGOALS)),)
+%:
+	@:
+endif
 
 clean:
 	@for dir in cmd/*/; do \
