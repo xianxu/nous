@@ -9,7 +9,8 @@ tap "mutagen-io/mutagen"
 brew "go"
 brew "gh"
 brew "gnupg"
-brew "pinentry-mac"
+brew "pinentry-mac"   # GUI dialog with macOS Keychain integration (default for Aqua sessions)
+brew "pinentry"       # curses/tty variants for SSH/headless contexts
 brew "git-remote-gcrypt"
 brew "mutagen-io/mutagen/mutagen"
 

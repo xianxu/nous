@@ -62,20 +62,29 @@ command -v brew >/dev/null || die "Homebrew is required. Install from https://br
 needs=()
 command -v gpg              >/dev/null || needs+=(gnupg)
 command -v pinentry-mac     >/dev/null || needs+=(pinentry-mac)
+command -v pinentry-curses  >/dev/null || needs+=(pinentry)
 command -v git-remote-gcrypt >/dev/null || needs+=(git-remote-gcrypt)
 if [ ${#needs[@]} -gt 0 ]; then
     info "Installing via Homebrew: ${needs[*]}"
     brew install "${needs[@]}"
 fi
-ok "Dependencies present: gnupg, pinentry-mac, git-remote-gcrypt."
+ok "Dependencies present: gnupg, pinentry-mac, pinentry-curses, git-remote-gcrypt."
 
 # ── 2. Configure gpg-agent.conf ──────────────────────────────────────────────
-# Default to pinentry-mac (production: real Mac with Aqua, integrates with
-# macOS Keychain for passphrase caching). Override with IDENTITY_PINENTRY for
-# headless/SSH testing — e.g., IDENTITY_PINENTRY=/opt/homebrew/bin/pinentry-curses.
+# Pinentry selection:
+#   - Explicit IDENTITY_PINENTRY env var wins (user knows what they want).
+#   - SSH session (SSH_CONNECTION set) → pinentry-curses (no GUI available).
+#   - Otherwise → pinentry-mac (default for Aqua sessions; Keychain-integrated).
 mkdir -p ~/.gnupg
 chmod 700 ~/.gnupg
-PINENTRY_PATH="${IDENTITY_PINENTRY:-$(command -v pinentry-mac)}"
+if [ -n "${IDENTITY_PINENTRY:-}" ]; then
+    PINENTRY_PATH="$IDENTITY_PINENTRY"
+elif [ -n "${SSH_CONNECTION:-}" ]; then
+    PINENTRY_PATH=$(command -v pinentry-curses)
+    info "SSH session detected — using pinentry-curses (override via IDENTITY_PINENTRY)."
+else
+    PINENTRY_PATH=$(command -v pinentry-mac)
+fi
 [ -x "$PINENTRY_PATH" ] || die "pinentry not found or not executable: $PINENTRY_PATH"
 
 # Detect any prior pinentry-program line — broader than the previous
