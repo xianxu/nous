@@ -3,7 +3,8 @@
 #
 # Idempotent: re-running detects an existing key and skips generation.
 # Configures gpg-agent + pinentry-mac so the GPG passphrase is fetched from
-# macOS login Keychain on subsequent uses.
+# macOS login Keychain on subsequent uses. Override the pinentry binary via
+# IDENTITY_PINENTRY (e.g. pinentry-curses for SSH/headless testing).
 #
 # Used by `make identity` (Makefile.nous).
 #
@@ -69,19 +70,27 @@ fi
 ok "Dependencies present: gnupg, pinentry-mac, git-remote-gcrypt."
 
 # ── 2. Configure gpg-agent.conf ──────────────────────────────────────────────
+# Default to pinentry-mac (production: real Mac with Aqua, integrates with
+# macOS Keychain for passphrase caching). Override with IDENTITY_PINENTRY for
+# headless/SSH testing — e.g., IDENTITY_PINENTRY=/opt/homebrew/bin/pinentry-curses.
 mkdir -p ~/.gnupg
 chmod 700 ~/.gnupg
-PINENTRY_PATH=$(command -v pinentry-mac)
-if ! grep -q "^pinentry-program.*pinentry-mac" ~/.gnupg/gpg-agent.conf 2>/dev/null; then
+PINENTRY_PATH="${IDENTITY_PINENTRY:-$(command -v pinentry-mac)}"
+[ -x "$PINENTRY_PATH" ] || die "pinentry not found or not executable: $PINENTRY_PATH"
+
+# Detect any prior pinentry-program line — broader than the previous
+# `*pinentry-mac`-only check, which mis-fired when the user (or a prior run)
+# had pointed at a different pinentry binary, causing duplicate config blocks.
+if ! grep -q "^pinentry-program" ~/.gnupg/gpg-agent.conf 2>/dev/null; then
     cat >> ~/.gnupg/gpg-agent.conf <<EOF
 pinentry-program $PINENTRY_PATH
 default-cache-ttl 600
 max-cache-ttl 7200
 EOF
     gpgconf --kill gpg-agent 2>/dev/null || true
-    ok "Wrote ~/.gnupg/gpg-agent.conf with pinentry-mac."
+    ok "Wrote ~/.gnupg/gpg-agent.conf with pinentry: $PINENTRY_PATH"
 else
-    ok "~/.gnupg/gpg-agent.conf already configured for pinentry-mac."
+    ok "~/.gnupg/gpg-agent.conf already has a pinentry-program line — leaving untouched."
 fi
 
 # ── 3. Existing key check (local keyring → iCloud Keychain → fresh) ─────────
@@ -117,7 +126,14 @@ if [ -n "$existing" ]; then
     : # have a key (either from local keyring or just-imported); skip generation
 else
     # ── 4. Generate a new key ───────────────────────────────────────────────
-    info "No GPG secret key found locally or in Keychain. Setting up a new key."
+    info "No GPG secret key found locally or in Keychain."
+    echo >&2
+    warn "If you're recovering an existing brain on this machine, STOP NOW."
+    warn "Press Ctrl+C, import your existing key, then re-run this script:"
+    warn "    gpg --import path/to/your-exported-key.asc"
+    warn "  This script will detect the imported key and skip generation."
+    echo >&2
+    info "Otherwise (first-time setup, no existing brain), continue to generate a new key."
     info ""
 
     git_name=$(git config --global user.name  2>/dev/null || true)

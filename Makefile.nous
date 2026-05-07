@@ -7,7 +7,7 @@
 # Makefile currently being processed.
 NOUS_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 
-.PHONY: build test clean trim identity moveto cloneto new-brain nous-bootstrap
+.PHONY: build test clean trim identity moveto cloneto new-brain nous-bootstrap nous-test-bootstrap nous-test-snapshot nous-test-roundtrip
 
 build:
 	@for dir in cmd/*/; do \
@@ -32,6 +32,47 @@ test:
 # Spec: workshop/issues/000011-nous-bootstrap.md.
 nous-bootstrap:
 	@$(NOUS_DIR)scripts/nous-bootstrap.sh
+
+# Run nous-bootstrap end-to-end inside a disposable tart VM, with a gcrypt
+# round-trip verification using a throwaway GPG fixture from
+# testdata/test-bootstrap/. Always recreates the VM from `tahoe-base`; always
+# tears down on exit.
+#
+# Usage:
+#   make nous-test-bootstrap
+#
+# Prereqs (host): tart installed, `tahoe-base` image present locally, sshpass
+# auto-installed via Homebrew on first run.
+#
+# Spec: workshop/issues/000011-nous-bootstrap.md M2.
+nous-test-bootstrap:
+	@$(NOUS_DIR)scripts/nous-test-bootstrap.sh
+
+# Build the `tahoe-bootstrapped` tart VM — a stopped clone of `tahoe-base`
+# with `nous-bootstrap.sh` already applied. `make nous-test-roundtrip` clones
+# this snapshot for a fast (~25s) iteration test that skips the ~125s
+# Brewfile install. Run when `Brewfile` or `scripts/nous-bootstrap.sh` changes.
+#
+# Usage:
+#   make nous-test-snapshot
+#
+# Spec: workshop/issues/000011-nous-bootstrap.md M3.
+nous-test-snapshot:
+	@$(NOUS_DIR)scripts/nous-test-snapshot.sh
+
+# Fast gcrypt round-trip test using the `tahoe-bootstrapped` snapshot. ~25s.
+# Skips the bootstrap layer — only validates GPG import + encrypt/decrypt
+# round-trip. Use during round-trip / pinentry / gcrypt iteration. Use
+# `make nous-test-bootstrap` when you've changed Brewfile or nous-bootstrap.sh.
+#
+# Usage:
+#   make nous-test-roundtrip
+#
+# Prereqs: `make nous-test-snapshot` (one-time, refresh on Brewfile change).
+#
+# Spec: workshop/issues/000011-nous-bootstrap.md M3.
+nous-test-roundtrip:
+	@$(NOUS_DIR)scripts/nous-test-roundtrip.sh
 
 # Bootstrap GPG identity for brain encryption. Idempotent: re-running detects
 # an existing key and skips generation. Configures gpg-agent + pinentry-mac so

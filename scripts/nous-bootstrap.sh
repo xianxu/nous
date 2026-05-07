@@ -32,7 +32,20 @@ if xcode-select -p >/dev/null 2>&1; then
 else
     info "Triggering Xcode CLT install (a system dialog will appear)..."
     xcode-select --install || true
-    die "Re-run this script after the Xcode CLT install completes."
+    info "Click 'Install' in the system dialog. Polling every 30s for up to 20 min."
+    for attempt in $(seq 1 40); do
+        sleep 30
+        if xcode-select -p >/dev/null 2>&1; then
+            ok "Xcode CLT installed at $(xcode-select -p)."
+            break
+        fi
+        # Status update every 2 minutes so the user sees progress.
+        if [ $((attempt % 4)) -eq 0 ]; then
+            info "  ($((attempt / 2))m elapsed; still waiting for CLT install...)"
+        fi
+    done
+    xcode-select -p >/dev/null 2>&1 \
+        || die "Xcode CLT install did not complete within 20 min. Re-run when ready."
 fi
 
 # ── 2. Homebrew ──────────────────────────────────────────────────────────────
@@ -58,21 +71,83 @@ brew bundle install --file="$BREWFILE"
 ok "Brewfile applied."
 
 # ── 4. Identity (GPG) ────────────────────────────────────────────────────────
-info "Bootstrapping GPG identity..."
-"$NOUS_DIR/scripts/identity.sh"
+# Set NOUS_BOOTSTRAP_SKIP_IDENTITY=1 to skip — used by the test harness, which
+# manages its own GPG environment (custom pinentry + pre-staged test key).
+if [ "${NOUS_BOOTSTRAP_SKIP_IDENTITY:-}" = "1" ]; then
+    info "Skipping GPG identity bootstrap (NOUS_BOOTSTRAP_SKIP_IDENTITY=1)."
+else
+    info "Bootstrapping GPG identity..."
+    "$NOUS_DIR/scripts/identity.sh"
+fi
 
 # ── 5. Workflow tools (gh auth, openshell, mutagen) ──────────────────────────
 # `.openshell/Makefile`'s `bootstrap` runs `gh auth login` if not authenticated,
 # installs the openshell CLI, and ensures mutagen is present. Overlap with the
 # Brewfile is intentional — its idempotent gh-auth gate is the value-add.
-if [ -f "$NOUS_DIR/.openshell/Makefile" ]; then
+#
+# Set NOUS_BOOTSTRAP_SKIP_OPENSHELL=1 to skip — used by the test harness, which
+# can't drive interactive `gh auth login` in a non-TTY SSH session. The same
+# gate also disables the GitHub SSH-key flow below (both touch GitHub state).
+if [ "${NOUS_BOOTSTRAP_SKIP_OPENSHELL:-}" = "1" ]; then
+    info "Skipping .openshell bootstrap (NOUS_BOOTSTRAP_SKIP_OPENSHELL=1)."
+elif [ -f "$NOUS_DIR/.openshell/Makefile" ]; then
     info "Running .openshell bootstrap (gh auth, openshell CLI)..."
     (cd "$NOUS_DIR" && make bootstrap)
 else
     warn ".openshell/Makefile not found; skipping openshell bootstrap."
 fi
 
-# ── 6. fzf shell hook ────────────────────────────────────────────────────────
+# ── 6. GitHub SSH key ────────────────────────────────────────────────────────
+# Required for `gcrypt::ssh://...` brain remotes and any `git@github.com:...`
+# clone/push. Generates an ed25519 key if missing, registers with GitHub via
+# `gh ssh-key add` if not already there. Idempotent.
+if [ "${NOUS_BOOTSTRAP_SKIP_OPENSHELL:-}" = "1" ]; then
+    info "Skipping GitHub SSH-key check (NOUS_BOOTSTRAP_SKIP_OPENSHELL=1)."
+elif command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    info "Checking GitHub SSH key..."
+    SSH_PUB=""
+    if   [ -f "$HOME/.ssh/id_ed25519.pub" ]; then SSH_PUB="$HOME/.ssh/id_ed25519.pub"
+    elif [ -f "$HOME/.ssh/id_rsa.pub" ];     then SSH_PUB="$HOME/.ssh/id_rsa.pub"
+    fi
+
+    if [ -z "$SSH_PUB" ]; then
+        if [ -t 0 ]; then
+            email=$(git config --global user.email 2>/dev/null || echo "$(whoami)@$(hostname -s)")
+            info "No SSH key found. Generating ed25519 key with no passphrase..."
+            mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
+            ssh-keygen -t ed25519 -C "$email" -f "$HOME/.ssh/id_ed25519" -N "" >/dev/null
+            SSH_PUB="$HOME/.ssh/id_ed25519.pub"
+            ok "SSH key generated at $SSH_PUB."
+        else
+            warn "No SSH key and stdin is not a TTY. Generate manually: ssh-keygen -t ed25519"
+        fi
+    else
+        ok "SSH key found: $SSH_PUB."
+    fi
+
+    # Check whether the local pubkey is already registered with GitHub.
+    if [ -n "$SSH_PUB" ]; then
+        local_keymat=$(awk '{print $2}' "$SSH_PUB")
+        if gh api user/keys --jq '.[].key' 2>/dev/null | awk '{print $2}' | grep -qF "$local_keymat"; then
+            ok "SSH key already registered with GitHub."
+        elif [ -t 0 ]; then
+            read -rp "Register $SSH_PUB with GitHub? [Y/n] " confirm
+            if [[ ! "$confirm" =~ ^[Nn] ]]; then
+                title="$(hostname -s)-$(date +%Y%m%d)"
+                gh ssh-key add "$SSH_PUB" --title "$title"
+                ok "SSH key registered with GitHub as '$title'."
+            else
+                warn "Skipping SSH-key registration. Add later: gh ssh-key add $SSH_PUB --title <name>"
+            fi
+        else
+            warn "stdin is not a TTY; skipping SSH-key registration. Add later: gh ssh-key add $SSH_PUB --title <name>"
+        fi
+    fi
+else
+    warn "gh not authenticated; skipping GitHub SSH-key check."
+fi
+
+# ── 7. fzf shell hook ────────────────────────────────────────────────────────
 FZF_INSTALL="$(brew --prefix)/opt/fzf/install"
 if [ -x "$FZF_INSTALL" ]; then
     info "Installing fzf shell key bindings + completion..."
@@ -82,7 +157,7 @@ else
     warn "fzf install script not at $FZF_INSTALL; skipping shell hook."
 fi
 
-# ── 7. Verify go on PATH ─────────────────────────────────────────────────────
+# ── 8. Verify go on PATH ─────────────────────────────────────────────────────
 if command -v go >/dev/null 2>&1; then
     ok "Go on PATH: $(go version)"
 else
@@ -94,7 +169,5 @@ ok "Nous bootstrap complete."
 echo
 echo "Next steps:"
 echo "  - Open a new shell so PATH and shell hooks pick up."
-echo "  - Clone peer repos if not present:"
-echo "      git clone https://github.com/xianxu/ariadne.git ../ariadne"
 echo "  - Bootstrap an encrypted brain: make new-brain ../brain"
 echo "  - Build nous binaries:          make build"
