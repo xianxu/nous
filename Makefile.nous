@@ -7,7 +7,7 @@
 # Makefile currently being processed.
 NOUS_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 
-.PHONY: build test clean trim identity moveto cloneto new-brain
+.PHONY: build test clean trim identity moveto cloneto new-brain nous-bootstrap
 
 build:
 	@for dir in cmd/*/; do \
@@ -20,6 +20,18 @@ build:
 
 test:
 	go test ./...
+
+# Bootstrap the nous developer toolchain on a fresh Mac. Installs Xcode CLT
+# (if needed), Homebrew (if needed), packages from Brewfile, GPG identity (via
+# scripts/identity.sh), openshell + gh auth (via .openshell/Makefile), and the
+# fzf shell hook. Idempotent — re-running on a complete machine is a no-op.
+#
+# Usage:
+#   make nous-bootstrap
+#
+# Spec: workshop/issues/000011-nous-bootstrap.md.
+nous-bootstrap:
+	@$(NOUS_DIR)scripts/nous-bootstrap.sh
 
 # Bootstrap GPG identity for brain encryption. Idempotent: re-running detects
 # an existing key and skips generation. Configures gpg-agent + pinentry-mac so

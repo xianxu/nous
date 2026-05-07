@@ -1,0 +1,33 @@
+# Brewfile — nous developer toolchain.
+# Source of truth for `make nous-bootstrap`.
+# Apply manually with: brew bundle install --file=Brewfile
+# Scope rationale: workshop/issues/000011-nous-bootstrap.md.
+
+tap "mutagen-io/mutagen"
+
+# ── Core (nous-required) ─────────────────────────────────────────────────────
+brew "go"
+brew "gh"
+brew "gnupg"
+brew "pinentry-mac"
+brew "git-remote-gcrypt"
+brew "mutagen-io/mutagen/mutagen"
+
+# ── Dev runtimes ─────────────────────────────────────────────────────────────
+brew "deno"
+brew "lua@5.4"
+brew "luarocks"
+brew "node"
+
+# ── Daily CLI ────────────────────────────────────────────────────────────────
+brew "ripgrep"
+brew "fzf"
+brew "bat"
+brew "zoxide"
+brew "tree"
+brew "watch"
+brew "glow"
+
+# ── Casks ────────────────────────────────────────────────────────────────────
+cask "claude"
+cask "font-hack-nerd-font"
