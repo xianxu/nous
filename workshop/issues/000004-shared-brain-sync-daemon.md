@@ -57,24 +57,25 @@ Rounded down to **5–12 hr** because the upper-bound stack assumes substrate de
 
 ### M1 — substrate decision spike
 
-- [x] Stand up a Syncthing test between two machines on a throwaway folder; characterize: latency, conflict-file format, what happens when one peer is offline, whether device-cert exchange is workable as a one-time setup. — Done via host + tart `scratch` VM peers; ~30s cold sync, ~10–15s steady-state, conflict files named `<base>.sync-conflict-<YYYYMMDD>-<HHMMSS>-<peer-id-prefix>.<ext>`.
-- [x] ~~Stand up a git + auto-sync daemon prototype on the same folder; characterize the same axes.~~ — Skipped (Method B sketch). Syncthing was the obvious answer for the family case before the prototype confirmed it; git+daemon held in reserve for audit-trail-heavy brains later.
-- [x] Decide for the family case (Syncthing). Tradeoff documented in `brain/atlas/sync-substrate-decision.md`.
-- [x] Write down the behavioral semantics both substrates must implement: first-pushed-wins, loser written as `*.sync-conflict-*` file, both peers see both files, manual resolve = read-decide-replace. Documented in the atlas decision doc.
+- [x] Stand up a Syncthing test between two machines on a throwaway folder; characterize: latency, conflict-file format, peer connection model. — Done via host + tart `scratch` VM peers; ~30s cold sync, ~10–15s steady-state, conflict files named `<base>.sync-conflict-<YYYYMMDD>-<HHMMSS>-<peer-id-prefix>.<ext>`.
+- [x] ~~Stand up a git + auto-sync daemon prototype on the same folder; characterize the same axes.~~ — Skipped at spike time (Method B sketch). Decision flipped to git+daemon based on agent-driven-workflow analysis; daemon implementation lives in M2.
+- [x] **Decide for the family case → git+daemon (revised 2026-05-07).** Original recommendation was Syncthing; flipped after weighting the four-writer reality (wife + her agent + me + my agent). Rationale + tradeoff + daemon outline in `brain/atlas/sync-substrate-decision.md`.
+- [x] Write down the behavioral semantics: file-level conflict resolution only (never content-merge); first-pushed-wins; loser written as `<file>.conflict-<peer>-<YYYYMMDDTHHMMSSZ>.<ext>`; both peers see both files; manual resolve = read-decide-replace. Documented in the atlas decision doc.
 
-### M2 — pre-tool / post-tool sync hooks
+### M2 — git+daemon implementation + pre/post-tool hooks
 
-- [ ] Pre-tool hook: before any agent tool that writes to a shared brain path, ensure the working copy is fresh (pull or sync).
-- [ ] Post-tool hook: after writes, push or sync.
-- [ ] File-watcher daemon to cover hand edits (nvim, finder, anything not going through the agent).
+- [ ] Build `cmd/brain-sync` (Go daemon, fsnotify-based). Per the outline in `brain/atlas/sync-substrate-decision.md`: watch each shared-brain repo, debounce edits, file-level conflict resolution (loser → conflict file, never content-merge), commit + push to gcrypt'd github, retry-on-rejection loop.
+- [ ] Pre-tool hook: before any agent tool that writes to a shared brain path, run a pull (with file-level resolve as needed).
+- [ ] Post-tool hook: after writes, trigger commit + push (or trust the file-watcher debounce; functionally equivalent if the agent supplies a commit message).
 - [ ] Wire into the nous agent runtime so shared-brain paths trigger the sync flow, private brain paths do not.
+- [ ] Ignore `.git/` events; reject non-markdown commits with a warning per the brain content scope.
 
 ### M3 — conflict-file convention + manual resolve flow
 
-- [ ] Decide on the conflict-file naming convention (Syncthing default vs. our own); document.
-- [ ] Synthetic conflict test: two peers edit the same file offline, reconverge, verify both versions are visible and resolvable.
-- [ ] Document the manual resolve-by-hand flow as the v1 fallback (read both, merge in editor, save, sync clears the conflict). This is the workflow until issue #5 lands.
-- [ ] Atlas entry: how shared-brain sync works, where conflict files appear, how to resolve.
+- [x] Decide on the conflict-file naming convention. **Decided:** `<file>.conflict-<peer-id>-<YYYYMMDDTHHMMSSZ>.<ext>` (our own, not Syncthing's default — slightly cleaner timestamp format and embedded peer-id is human-readable rather than the Syncthing-style ID prefix). Documented in atlas decision doc.
+- [ ] Synthetic conflict test: two peers edit the same file with one offline, reconverge, verify both versions are visible and resolvable. Run inside the tart VM as the second peer (same setup as M1).
+- [x] Document the manual resolve-by-hand flow as the v1 fallback (read both, decide, replace canonical, delete conflict file, sync re-converges). This is the workflow until issue #5 lands. Documented in atlas decision doc.
+- [x] Atlas entry: how shared-brain sync works, where conflict files appear, how to resolve. **Done** in `brain/atlas/sync-substrate-decision.md`.
 
 ### M4 — wife/me forcing-function dogfood
 
@@ -90,10 +91,24 @@ Rounded down to **5–12 hr** because the upper-bound stack assumes substrate de
 
 ### 2026-05-07 — M1 closed (substrate = Syncthing)
 
-Method A prototype between host MacBook + tart `scratch` VM peers. Both running `syncthing 2.0.16` from Homebrew. Pairing flow validated (CLI device-add on each side); shared-folder offer auto-propagates to the second peer. Three test scenarios (host→VM, VM→host, simultaneous-edit-conflict) all behave per design — see `brain/atlas/sync-substrate-decision.md` for characterization + decision doc.
+Method A prototype between host MacBook + tart `scratch` VM peers. Both running `syncthing 2.0.16` from Homebrew. Pairing flow validated (CLI device-add on each side); shared-folder offer auto-propagates to the second peer. Three test scenarios (host→VM, VM→host, simultaneous-edit-conflict) all behave per design.
 
-Skipped the git+daemon prototype (Method B sketch in the decision doc). The prototype's purpose was to validate Syncthing's family-case fit; it did. Git+daemon stays a documented option for audit-trail-heavy shared brains (e.g. `brain-shared-42shots` later).
+Skipped the git+daemon prototype (Method B sketch in the decision doc). The prototype's purpose was to validate Syncthing's family-case fit; it did.
 
-Substrate: **Syncthing** for `brain-shared-family`. Peer-to-peer over TLS1.3 with device-cert auth. Layered with periodic git push to gcrypt'd github for backup + recovery. `.stignore` excludes `.git/` to avoid syncing git internals.
+### 2026-05-07 — M1 revisited: substrate flipped to git+daemon
 
-Actual ~1h spike (close to estimate's 0.9–2h Syncthing prototype + 0.65–1.3h Method B sketch). M2 (file-watcher + hooks) is next; M3 (conflict convention is already documented in the atlas doc); M4 (wife/me dogfood) waits for wife's machine + brain-shared-family provisioning.
+Same day, after writing up the M1 decision, the operator surfaced the **four-writer concern**: shared brain isn't "two humans typing" — it's wife + her agent + me + my agent, plus continuous Syncthing sync between. Agents read → think for tens of seconds → write; the working tree is mutating under them via Syncthing during that window. Stale-state agent writes are the failure mode.
+
+Under that re-framing, the comparison shifts:
+- Atomic commits matter more than they did in the human-only framing — agents need a coherent state to read and write against.
+- Commit messages capture intent (`agent: summarize Day 3 itinerary`); filesystem mtimes don't. Genuinely useful retrospectively.
+- `git log paris.md` is the right primitive for "who changed what when, with what intent." Syncthing has no answer.
+- A bad agent edit is `git revert <sha>` away; under Syncthing it's a manual restore from a conflict file (if you got lucky and the bad version became the loser).
+
+Latency penalty (~30–60s vs ~10–15s) is acceptable for async trip-planning pace. Daemon implementation cost (Go, ~500–1500 LOC) is real but one-time, and dovetails with `nous#5`'s need for per-edit history.
+
+**Conflict resolution rule:** strictly file-level, never content-merge. Brain content is markdown-only by convention (code lives in code repos); auto-merging prose invents content; humans are the right resolver. Loser → conflict file; canonical → first-pushed-wins.
+
+Decision doc updated with full Revisions section; M2 plan re-spec'd around the daemon outline; M3 conflict-file convention finalized (`<file>.conflict-<peer-id>-<YYYYMMDDTHHMMSSZ>.<ext>`).
+
+Spike actual ~1.5h (test + write + flip + rewrite). M2 is next when there's a wife-laptop or test-loop ready to exercise the daemon.
