@@ -1,10 +1,11 @@
 ---
 id: 000008
-status: working
+status: done
 deps: []
 created: 2026-05-05
-updated: 2026-05-05
+updated: 2026-05-07
 estimate_hours: 2
+actual_hours: 2
 ---
 
 # shared-brain threat model
@@ -88,9 +89,9 @@ Buffer rounded up to ~1.5–3 hr to absorb the doc's "what does the threat model
 
 ### M3 — review with wife before `brain-shared-family` is provisioned
 
-- [ ] Walk through the document together, paying particular attention to the "all agents on her laptop read all of brain-shared-family" implication.
-- [ ] Capture any concerns / desired posture changes back in the document.
-- [ ] Confirm informed consent before `#4` M4 (the trip-planning dogfood) provisions a real shared brain.
+- [x] Walk through the document together, paying particular attention to the "all agents on her laptop read all of brain-shared-family" implication.
+- [x] Capture any concerns / desired posture changes back in the document.
+- [x] Confirm informed consent before `#4` M4 (the trip-planning dogfood) provisions a real shared brain.
 
 ## Log
 
@@ -101,3 +102,6 @@ Buffer rounded up to ~1.5–3 hr to absorb the doc's "what does the threat model
 ### 2026-05-05
 
 - Issue created after thread-level discussion on whether shared-brain's encryption boundary is per-file/per-agent or at-decryption-on-disk. Conclusion: at-decryption-on-disk, deliberately, and that posture has consequences worth writing down before any migration happens. Gates `#3` M1.
+
+### 2026-05-07 — M3 closed, issue done
+Threat model reviewed with wife. Walked through the agent-access posture (all agents on her laptop will be able to read all of brain-shared-family), the per-recipient commitment (admission is durable; revocation = heavy + assume past content leaked), and the bootstrap channel (sneakernet via independent channel, not iCloud Keychain — captured in the 2026-05-07 threat-model revision). Informed consent confirmed; brain-shared-family provisioning (`nous#4` M4) is unblocked.
