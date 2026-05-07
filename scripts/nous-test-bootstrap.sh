@@ -172,7 +172,9 @@ ok "Source + fixtures copied."
 phase "rsync + scp"
 
 # ── Drive bootstrap + round-trip in VM ───────────────────────────────────────
-info "Running bootstrap + round-trip test in VM (this can take a few minutes)..."
+# Wrapped in a function so we can retry if sshd flakes on auth
+# (occasionally happens despite the readiness check passing).
+run_vmscript() {
 sshpass -p "$VM_PASS" ssh $SSH_OPTS "$VM_USER@$VM_IP" 'bash -s' <<'VMSCRIPT'
 set -euo pipefail
 trap 'echo "VM-INSIDE: aborted at line $LINENO" >&2' ERR
@@ -264,7 +266,15 @@ else
     exit 1
 fi
 VMSCRIPT
+}
 
+info "Running bootstrap + round-trip test in VM (this can take a few minutes)..."
+for attempt in 1 2 3; do
+    if run_vmscript; then break; fi
+    [ $attempt -eq 3 ] && die "ssh bootstrap+roundtrip failed after 3 attempts."
+    warn "ssh attempt $attempt failed, retrying in 5s..."
+    sleep 5
+done
 phase "VM-INSIDE total"
 ok "Bootstrap + round-trip succeeded in VM."
 

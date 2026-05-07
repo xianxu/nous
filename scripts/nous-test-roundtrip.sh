@@ -139,7 +139,8 @@ ok "Fixtures copied."
 phase "scp"
 
 # ── GPG setup + round-trip ───────────────────────────────────────────────────
-info "Running round-trip..."
+# Wrapped in a function so we can retry if sshd flakes on auth.
+run_vmscript() {
 sshpass -p "$VM_PASS" ssh $SSH_OPTS "$VM_USER@$VM_IP" 'bash -s' <<'VMSCRIPT'
 set -euo pipefail
 trap 'echo "VM-INSIDE: aborted at line $LINENO" >&2' ERR
@@ -205,6 +206,15 @@ else
     exit 1
 fi
 VMSCRIPT
+}
+
+info "Running round-trip..."
+for attempt in 1 2 3; do
+    if run_vmscript; then break; fi
+    [ $attempt -eq 3 ] && die "ssh round-trip failed after 3 attempts."
+    warn "ssh round-trip attempt $attempt failed, retrying in 5s..."
+    sleep 5
+done
 phase "round-trip in VM"
 
 ok "Round-trip succeeded."

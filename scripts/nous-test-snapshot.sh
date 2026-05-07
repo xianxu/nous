@@ -115,7 +115,8 @@ done
 ok "Source copied."
 
 # ── Run bootstrap + clean up state ───────────────────────────────────────────
-info "Running nous-bootstrap.sh inside VM (this is the slow part — Brewfile install)..."
+# Wrapped in a function so we can retry if sshd flakes on auth.
+run_vmscript() {
 sshpass -p "$VM_PASS" ssh $SSH_OPTS "$VM_USER@$VM_IP" 'bash -s' <<'VMSCRIPT'
 set -euo pipefail
 cd ~/nous
@@ -132,6 +133,15 @@ brew cleanup -s 2>/dev/null || true
 # Flush filesystem caches so the snapshot disk image is consistent.
 sync
 VMSCRIPT
+}
+
+info "Running nous-bootstrap.sh inside VM (this is the slow part — Brewfile install)..."
+for attempt in 1 2 3; do
+    if run_vmscript; then break; fi
+    [ $attempt -eq 3 ] && die "ssh bootstrap failed after 3 attempts."
+    warn "ssh bootstrap attempt $attempt failed, retrying in 5s..."
+    sleep 5
+done
 ok "Bootstrap applied. Snapshot footprint cleaned."
 
 # ── Graceful shutdown ────────────────────────────────────────────────────────
