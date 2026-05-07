@@ -57,10 +57,10 @@ Rounded down to **5–12 hr** because the upper-bound stack assumes substrate de
 
 ### M1 — substrate decision spike
 
-- [ ] Stand up a Syncthing test between two machines on a throwaway folder; characterize: latency, conflict-file format, what happens when one peer is offline, whether device-cert exchange is workable as a one-time setup.
-- [ ] Stand up a git + auto-sync daemon prototype on the same folder; characterize the same axes.
-- [ ] Decide for the family case (likely Syncthing). Document the tradeoff in `atlas/` so future repos with different needs (audit trail, larger contributor set) can pick differently with eyes open.
-- [ ] Write down the *behavioral semantics* both substrates must implement: who-wins on divergence, conflict-file naming, where conflict files appear, how peers discover them.
+- [x] Stand up a Syncthing test between two machines on a throwaway folder; characterize: latency, conflict-file format, what happens when one peer is offline, whether device-cert exchange is workable as a one-time setup. — Done via host + tart `scratch` VM peers; ~30s cold sync, ~10–15s steady-state, conflict files named `<base>.sync-conflict-<YYYYMMDD>-<HHMMSS>-<peer-id-prefix>.<ext>`.
+- [x] ~~Stand up a git + auto-sync daemon prototype on the same folder; characterize the same axes.~~ — Skipped (Method B sketch). Syncthing was the obvious answer for the family case before the prototype confirmed it; git+daemon held in reserve for audit-trail-heavy brains later.
+- [x] Decide for the family case (Syncthing). Tradeoff documented in `brain/atlas/sync-substrate-decision.md`.
+- [x] Write down the behavioral semantics both substrates must implement: first-pushed-wins, loser written as `*.sync-conflict-*` file, both peers see both files, manual resolve = read-decide-replace. Documented in the atlas decision doc.
 
 ### M2 — pre-tool / post-tool sync hooks
 
@@ -87,3 +87,13 @@ Rounded down to **5–12 hr** because the upper-bound stack assumes substrate de
 ### 2026-05-05
 
 - Issue spec'd from `brain/data/life/42shots/ideas/2026-04-28-01-pensive-collaborative-brain.md`. M2 of the shared-brain project.
+
+### 2026-05-07 — M1 closed (substrate = Syncthing)
+
+Method A prototype between host MacBook + tart `scratch` VM peers. Both running `syncthing 2.0.16` from Homebrew. Pairing flow validated (CLI device-add on each side); shared-folder offer auto-propagates to the second peer. Three test scenarios (host→VM, VM→host, simultaneous-edit-conflict) all behave per design — see `brain/atlas/sync-substrate-decision.md` for characterization + decision doc.
+
+Skipped the git+daemon prototype (Method B sketch in the decision doc). The prototype's purpose was to validate Syncthing's family-case fit; it did. Git+daemon stays a documented option for audit-trail-heavy shared brains (e.g. `brain-shared-42shots` later).
+
+Substrate: **Syncthing** for `brain-shared-family`. Peer-to-peer over TLS1.3 with device-cert auth. Layered with periodic git push to gcrypt'd github for backup + recovery. `.stignore` excludes `.git/` to avoid syncing git internals.
+
+Actual ~1h spike (close to estimate's 0.9–2h Syncthing prototype + 0.65–1.3h Method B sketch). M2 (file-watcher + hooks) is next; M3 (conflict convention is already documented in the atlas doc); M4 (wife/me dogfood) waits for wife's machine + brain-shared-family provisioning.
