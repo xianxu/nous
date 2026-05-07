@@ -1,10 +1,11 @@
 ---
 id: 000003
-status: working
+status: done
 deps: [nous#8, ariadne#22]
 created: 2026-05-05
 updated: 2026-05-06
 estimate_hours: 6
+actual_hours: 11
 ---
 
 # brain should be private with encryption at rest in github
@@ -106,11 +107,11 @@ Generalized as a reusable `make identity` target in `nous` (script: `scripts/ide
 
 Under the single-GPG-scheme posture, `brain-private` does **not** hold private key material. The GPG private key stays at `~/.gnupg/` on each device; bootstrap arrives via iCloud Keychain (M3). What `brain-private` does hold is the cross-cutting trust metadata that survives across machines.
 
-- [ ] Decide layout — proposed: `keys/paired-devices.md` (list of devices admitted to brain-private + brain-shared-\*'s; freeform markdown), `keys/recipients/<brain-name>/<fingerprint>.asc` (public keys of known recipients per shared brain, for use when adding them to a new shared brain's recipient list).
-- [ ] Author the initial `paired-devices.md` listing the current laptop + any other Apple devices the user uses with iCloud.
-- [ ] If shared brains exist yet: place recipient public keys under `keys/recipients/<brain-name>/`. (Likely empty at MVP — first shared brain provisioning happens in `nous#4` M4.)
-- [ ] Verify operational keys at `~/.gnupg/` etc. still work; nothing should be touched here.
-- [ ] Document the layout in the threat-model doc; link from atlas.
+- [x] Decide layout — `brain/keys/paired-devices.md` (markdown list of devices, one section per device) + `brain/keys/recipients/<brain-name>/<fingerprint>.asc` (recipient pubkeys per shared brain, empty until first shared brain). Layout doc at `brain/keys/README.md`.
+- [x] Author the initial `paired-devices.md` — primary MacBook Pro entry with fingerprint `0ECF6AC0...3872C2F0` and bootstrap date 2026-05-06.
+- [x] `keys/recipients/` left unmaterialized at MVP — first shared brain provisioning happens in `nous#4` M4; directory created on first admission, not pre-emptively.
+- [x] Verified `~/.gnupg/` and gcrypt remote operations untouched — M2 added new files only, no changes to existing key material.
+- [x] Threat-model doc has a new `## Paired devices and recipient layout` section (between `## Per-recipient commitments` and `## GPG key bootstrap`). Atlas index links `keys/README.md`.
 
 ### M3 — bootstrap dry-run, then rename-and-cutover
 
@@ -120,9 +121,7 @@ The cutover shape preserves on-disk and on-GitHub paths: the encrypted repo ends
 
 #### Step 3a — bootstrap dry-run on a second machine
 
-- [ ] **Write the bootstrap procedure** as a checklist in `nous/atlas/gcrypt-brain-encryption.md` (or a sibling). The procedure: install gpg + gcrypt + git; sign into iCloud + open Keychain Access; find the `[brain GPG]` secure note; copy the ASCII-armored block; `gpg --import`; configure pinentry-mac in `~/.gnupg/gpg-agent.conf`; trigger first decrypt to populate Keychain via "Save in Keychain"; clone `brain-private`.
-- [ ] **Dry-run on a second machine** (VM or actual second laptop). Run through the procedure cold. Verify: (a) `gpg --list-secret-keys` shows the imported key; (b) `gpg --decrypt` of a small test ciphertext succeeds; (c) `git clone gcrypt::...brain-private` succeeds and decrypts cleanly.
-- [ ] **Fix whatever doesn't work** the first time; iterate until repeatable. Keep the original `brain` operational — we are not committed to cutover until the dry-run is clean.
+- [→] ~~Step 3a moved to `nous#10`~~ — second-machine bootstrap dry-run is now its own issue; depends on this one. The original three checklist items (procedure doc, dry-run, fix-loop) are carried into `#10`'s plan. Cleanup deadlines (`brain.legacy*` after 1 week, `xianxu/brain-backup` after 1 month) gated on `#10`'s completion.
 
 #### Step 3b — backup the legacy `brain` (two channels)
 
@@ -149,10 +148,7 @@ The destructive sequence. After `brain-backup` (cloud) and `brain.legacy` (local
 
 Before any cleanup, **operate in the new `~/workspace/brain` for at least 1 week.** Verify:
 
-- [ ] Multiple push/pull cycles succeed.
-- [ ] `gh browse` (or browser) of `xianxu/brain` shows opaque contents.
-- [ ] An agent-driven workflow edits, commits, pushes; second machine pulls and reads. End-to-end.
-- [ ] Project file references at `/Users/xianxu/workspace/brain/data/project/...` still resolve in any tool that reads them.
+- [→] Wall-clock-tracked outside this issue. Started 2026-05-06; passive observation. Multiple push/pull cycles already succeed (cloneto's round-trip; subsequent commits land opaque on GitHub). End-to-end second-machine confirmation depends on `nous#10`.
 
 If any break, restore is `mv` operations only — no re-encryption needed.
 
@@ -160,14 +156,26 @@ If any break, restore is `mv` operations only — no re-encryption needed.
 
 After at least **1 week of clean operation** for local, **1 month** for cloud:
 
-- [ ] Local: `rm -rf ~/workspace/brain.legacy ~/workspace/brain.legacy.original` (after 1 week).
-- [ ] Cloud: `gh repo delete xianxu/brain-backup --confirm` (after 1 month).
+- [→] Local: `rm -rf ~/workspace/brain.legacy ~/workspace/brain.legacy.original` — gated on `nous#10` (need a clean second-machine dry-run before the local safety net is removable). Earliest date 2026-05-13 absent #10 completion.
+- [→] Cloud: `gh repo delete xianxu/brain-backup --confirm` — earliest 2026-06-06.
 
 Cleanup landing date should be tracked in the schedule datatype (`ariadne#23`) once it ships, so the 1-month deadline doesn't get forgotten. Until then, manually note the date.
 
 ## Log
 
+### 2026-05-06 — session summary (close)
 
+Closed at `actual_hours: 11` against estimate of 6 (P50; range 4–12 hr). Computed via the new `actual_hours` procedure in `xx-issues` SKILL.md: `active-time.py` over the issue's commit window (2026-05-05 22:52 → 2026-05-06 21:29) across `~/.claude/projects/-Users-xianxu-workspace-{nous,brain}` returned 10.82 hr unified-wall-clock attribution to `#3` (mention-weighted). Rounded up to 11. Calibration note: above P50, within range. The ×1.5 familiarity factor on novel gcrypt+GPG work clearly under-priced it; the `make new-brain` side-quest also extended the tail.
+
+Closing decisions:
+
+- **M2 done inline.** `brain/keys/README.md` + `brain/keys/paired-devices.md` authored; threat-model gained `## Paired devices and recipient layout` section; atlas index linked. Layout deferred `keys/recipients/` materialization to first shared-brain provisioning (`nous#4` M4) rather than pre-emptively creating an empty tree.
+- **3a punted to `nous#10`** — second-machine bootstrap dry-run gets its own issue (`deps: [000003]`). This honors the accepted-risk deferral from cutover without leaving #3 open indefinitely.
+- **3e (1-week verification window) and 3f (cleanup)** marked as wall-clock-tracked outside this issue. 3f local cleanup is now gated on `nous#10` rather than a fixed date — if the dry-run uncovers a gap, we want the safety net intact while we fix it.
+
+Side-quest landed in this session: `make new-brain` (nous, commit `6c9c8f2`) — bootstrap target for fresh gcrypt'd brains, infrastructure for spinning up `brain-shared-family` when `nous#4`/`#5` get there. Not in any milestone's plan; recorded in `## Side quests`.
+
+### Older entries
 - 2026-05-06: closed M1 — brain-private provisioned at xianxu/brain-private with gcrypt + single-recipient GPG; 48 commits pushed; round-trip clone-and-decrypt verified 4.80MiB / 575 objects intact; legacy untouched
 - 2026-05-06: **M3 cutover landed same-day as M1** — collapses M1.5 (mirror window) and 3c (final mirror sync) to N/A. Sequence: cloud + local backups (3b done — `xianxu/brain-backup`, `~/workspace/brain.legacy`), then destructive rename (3d done — legacy GitHub repo deleted, `xianxu/brain-private` → `xianxu/brain`, local `~/workspace/brain` → `brain.legacy.original`, `brain-private` → `brain`, remote URL set to gcrypt). First commit in encrypted repo is `c37a67e` (manifest body refresh post-rename). 3a (second-machine dry-run) skipped — accepted risk for personal MVP given the local + cloud backup channels still exist; needs scheduling before the 1-week verification window closes. **Open work remaining on this issue:** M2 (paired-device + recipient layout in `keys/`), 3a (second-machine dry-run), 3e (1-week verification window — started 2026-05-06), 3f (cleanup — local after 1 week, cloud after 1 month).
 - 2026-05-06 (hygiene): plan checklist reconciled against actual state — M1 fully ticked, M1.5 marked N/A with rationale, M3 step 3b/3c/3d/3f ticked with as-built notes, 3a/3e/3f remain open. Issue stays `working`; close on M2 + 3a completion (3e/3f are wall-clock deadlines tracked elsewhere).
@@ -192,3 +200,7 @@ Cleanup landing date should be tracked in the schedule datatype (`ariadne#23`) o
   - 3d: destructive sequence — delete legacy `xianxu/brain` → rename `xianxu/brain-private` → `xianxu/brain` → local `mv` → update remote URL.
   - 3e: 1-week verification window in the new `~/workspace/brain` before any cleanup commits.
   - 3f: cleanup — local after 1 week, `brain-backup` cloud after 1 month. Cleanup deadline goes into the schedule datatype (`ariadne#23`) once it ships.
+
+## Side quests
+
+- `make new-brain` bootstrap target (~1.5 hr) — `6c9c8f2`. Fresh-gcrypt'd-brain provisioning for future `brain-shared-*` work. Differs from `make cloneto` (which mirrors current repo's history); bootstraps an empty repo with GH create + GPG identity selection + `nous/setup.sh --all --yes` + manifest.
