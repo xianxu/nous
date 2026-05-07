@@ -102,6 +102,19 @@ else
     ok "~/.gnupg/gpg-agent.conf already has a pinentry-program line — leaving untouched."
 fi
 
+# Ensure GPG_TTY is exported in user's shell rc — required by terminal-mode
+# pinentry (curses/tty) so it can render in the active TTY. pinentry-mac
+# doesn't need it but having it set is harmless.
+GPG_TTY_LINE='export GPG_TTY=$(tty)'
+SHELL_RC="$HOME/.zshrc"
+if [ -f "$SHELL_RC" ] && ! grep -qF "GPG_TTY" "$SHELL_RC"; then
+    echo "$GPG_TTY_LINE" >> "$SHELL_RC"
+    ok "Appended 'export GPG_TTY=\$(tty)' to ~/.zshrc."
+    info "For this shell, also run: export GPG_TTY=\$(tty)"
+elif [ -f "$SHELL_RC" ]; then
+    ok "GPG_TTY already configured in ~/.zshrc."
+fi
+
 # ── 3. Existing key check (local keyring → iCloud Keychain → fresh) ─────────
 existing=$(gpg --list-secret-keys --keyid-format LONG 2>/dev/null | grep '^sec' || true)
 if [ -n "$existing" ]; then
