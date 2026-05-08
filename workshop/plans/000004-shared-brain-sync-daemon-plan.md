@@ -4,17 +4,15 @@
 
 **Goal:** Build `brain-sync`, a single-binary Go daemon that watches shared-brain repos and propagates edits between peers via gcrypt'd github with file-level conflict resolution (loser → conflict file, never content-merge).
 
-**Architecture:** Mirror charon's CLI shape — cobra-based subcommands, 🤖<`daemon`>[the opposite is true, daemon means background. you should follow charon convention, brain-sync itself is foreground, but when you run with `brain-sync service install`, it installs as service] for foreground run, `service install/uninstall/start/stop/status` for launchd integration, 🤖<`pre-write`/`post-write`>[this is too aggressive. we should wait till new commits are made. a commit is an atomic unit] for Claude Code PreToolUse/PostToolUse hooks. 🤖<fsnotify>[too aggressive, see comment on atomic unit] for file events; debounce; resolve conflicts at file level via custom algorithm (no `git merge`); `git fetch` + `git commit` + `git push` with retry-on-rejection.
+**Architecture:** Mirror charon's CLI shape — cobra-based subcommands. The bare `brain-sync` invocation runs the foreground watcher (charon-style verb-named-foreground, `serve`-equivalent). `brain-sync service install/uninstall/start/stop/status` installs that foreground process as a launchd agent. **Commit-driven sync, not edit-driven**: the watcher fsnotifies on `.git/refs/heads/main` of each shared brain, so local commits (the atomic unit) are the trigger to push — not per-file edits. A periodic timer fetches origin and fast-forwards if working tree is clean. Push-rejection triggers the file-level conflict resolve algorithm (no `git merge` content); cap retries at 5.
 
 **Tech Stack:**
 - Go 1.22 (already nous's version)
 - `github.com/spf13/cobra` — CLI (charon uses it, nous already has it as transitive via brew installs but will need explicit add to go.mod)
-- `github.com/fsnotify/fsnotify` — filesystem events
+- `github.com/fsnotify/fsnotify` — filesystem events. Scope: `.git/refs/heads/main` of each registered brain (commits as events), NOT the working tree.
 - Standard library `os/exec` for `git` (don't pull in go-git; we want exact behavior of system git including gcrypt)
 - `text/template` for launchd plist (charon pattern)
-- No third-party logging — `log/slog` standard library
-
-🤖[generally speaking, just follow charon pattern in tool ergonomic. this includes single binary, etc. when unsure, ask. ]
+- Standard library `log` for output (charon convention) — to stderr; launchd captures via plist `StandardErrorPath`
 
 **Spec source:**
 - `nous/workshop/issues/000004-shared-brain-sync-daemon.md` (M2 plan items)
@@ -35,8 +33,8 @@ nous/
     └── brainsync/
         ├── discovery.go         # walk filesystem, find .brain/config.md, identify shared brains
         ├── discovery_test.go
-        ├── watcher.go           # fsnotify wrapper + debouncing
-        ├── watcher_test.go
+        ├── refwatcher.go        # fsnotify on .git/refs/heads/main per brain (local-commit events)
+        ├── refwatcher_test.go
         ├── git.go               # git ops: fetch / status / add / commit / push
         ├── git_test.go
         ├── resolve.go           # file-level conflict resolution algorithm
@@ -47,7 +45,7 @@ nous/
         └── service_darwin.go    # launchd plist + plist-management
 ```
 
-**Why `lib/brainsync/` not `internal/brainsync/`:** nous already uses `lib/` (per `lib/gmail/`); follow established convention. `internal/` is charon's choice. Both are fine; consistency within nous is the value. 🤖[agree] 
+**Why `lib/brainsync/` not `internal/brainsync/`:** nous already uses `lib/` (per `lib/gmail/`); follow established convention. `internal/` is charon's choice. Both are fine; consistency within nous is the value.
 
 **Why split files this way:** each file has one responsibility — discovery, watching, git ops, resolution, daemon orchestration, service install. Tests next to the unit they cover. The daemon.go file ties them together with thin orchestration code; if it grows past ~250 lines, split further.
 
@@ -60,17 +58,22 @@ nous/
 ```
 brain-sync                           # foreground watcher; Ctrl+C to stop
 brain-sync service install           # write launchd plist; doesn't start
+brain-sync service start             # launchctl load
+brain-sync service stop              # launchctl unload
 brain-sync service status            # is it running, last log lines
 brain-sync service uninstall         # rm plist
-brain-sync resolve <path>            # (deferred to future) interactive resolve helper
 ```
 
-🤖[the `brain-sync resolve` like would be done inside an agent, not driven by brain-sync and essentially subagent, because the agent, while user's chatting, have more context.]
+`brain-sync` itself (no subcommand) is the foreground watcher — same shape as `charon serve` but charon's `Use` is verb-named while brain-sync's primary action is the bare binary, since "watching" is the only foreground mode. The cobra root command's `RunE` is wired to the watch handler.
+
+**No `resolve` subcommand.** When a conflict file appears, the resolution is *semantic* — read both versions, decide what to keep, replace the canonical file. That's an agent task (the chat session has the context to make sensible merges), not a brain-sync responsibility. `nous#5` formalizes the agent-driven resolve flow.
+
+**No `pre-write` / `post-write` subcommands.** Commits are the atomic sync unit, not file edits. The watcher reacts to local commits (via `.git/refs/heads/main`), not to per-file writes. Hooks at the editor / agent layer aren't needed.
 
 ### Brain discovery: explicit + auto-discoverable
 
 Two modes:
-- **Explicit** (v1, simpler to test): `brain-sync daemon --brain ~/workspace/brain-shared-family --brain ~/workspace/another` — repeatable flag.
+- **Explicit** (v1, simpler to test): `brain-sync --brain ~/workspace/brain-shared-family --brain ~/workspace/another` — repeatable flag.
 - **Auto-discovery** (v1.5, follow-on): default to walking `$HOME/workspace/`, finding `.brain/config.md`, auto-watching ones with `mode: shared`.
 
 Plan ships explicit-flag for v1; auto-discovery is one extra task at the end.
@@ -98,23 +101,17 @@ When the daemon's `git push` is rejected:
 8. on rejection: goto 1 (will normally succeed second time; cap at 5 retries)
 ```
 
-🤖[brain-sync might need to be a menu tray application so that when conflict happen, we can send a notification to the user. same charon pattern. ]
-
-🤖[separately, now we have two programs in the "personal assistant domain" that need user attention in certain cases and user interaction outside terminal. we may need to create later an uber app so user only need to isntall one visible menubar app]
-
 Reference implementation in `lib/brainsync/resolve.go`. Extensively tested in `resolve_test.go` with synthetic conflicts (no real git ops needed for the algorithm tests — operate on in-memory data structures).
 
-### Per-peer ID
+### Per-peer ID — derived from git config
 
-Stored at `~/.config/brain-sync/peer-id` (or `$XDG_CONFIG_HOME/brain-sync/peer-id`). Generated on first daemon run if missing — short slug like `xianxu-mbp-2026` (hostname-based default; user can edit). Used in conflict-file naming so it's human-readable.
+Conflict-file names embed the peer that lost the race so the user can tell whose version is in the loser file (e.g., `paris.conflict-xianxu-mbp-20260507T221604Z.md` vs `paris.conflict-yifei-laptop-...md`). Without it, two-peer cases are fine but >2 recipients on a brain become ambiguous.
 
-🤖[what's this for?]
+Source: derive from `git config user.name` (lowercased, hyphenated). Already set per-machine as part of the user's normal git setup; no separate brain-sync config file needed. If a user wants a different peer label per machine, they can `git config --local` it inside the brain repo.
 
 ### Logging
 
-`log/slog` (stdlib). Default JSON to stderr (so launchd captures it cleanly). Verbose flag for human-readable text format. Logs include the brain path, file changed, and operation.
-
-🤖[follow charon convention to log to stderr I think]
+Standard library `log` (charon convention). All output to stderr. launchd's plist sets `StandardErrorPath` to capture it. Plain text format — `log.Printf("brainsync: ...")` style. No structured/JSON logging in v1; revisit if log volume needs filtering.
 
 ### Test strategy
 
@@ -125,6 +122,15 @@ Three layers:
 3. **VM-based end-to-end** — the M3 synthetic conflict test runs in tart VM with two peers (host + VM) hitting a shared bare git repo over file://. Same shape as `nous-test-roundtrip.sh`.
 
 `gcrypt` is intentionally not exercised in the daemon's unit/integration tests — gcrypt is a pure transport layer (git remote helper); if our daemon's `git push` works against `file:///tmp/test-bare.git`, it works against `gcrypt::ssh://...`. The two-layer model in the atlas doc keeps gcrypt orthogonal.
+
+---
+
+## Future enhancements (post-M2)
+
+Captured here so the design surface is visible without bloating M2:
+
+- **Menubar / tray UI for conflict notifications.** When `brain-sync` writes a conflict file, the user should learn about it without checking the directory. macOS Notification Center post + a tray icon showing N pending conflicts is the right shape. Same pattern as charon's tray. Tracked separately when M2 is shipping and friction surfaces.
+- **Unified personal-assistant menubar app.** Two daemons on the user's Mac now occupy "needs-user-attention-outside-terminal" surface area: charon (credential lifecycle) and brain-sync (conflict notifications). Long-term these consolidate into one menubar app the user installs, that fans out to per-domain daemons internally. Not gating; cross-cutting issue when 2-3 daemons exist and the surface gets cluttered.
 
 ---
 
@@ -321,11 +327,11 @@ func TestIsSharedBrain(t *testing.T) {
 - [ ] Create `nous/cmd/brain-sync/main.go`:
 
 ```go
-// brain-sync — git-based sync daemon for shared brains.
+// brain-sync — git-based sync for shared brains.
 //
 // Watches shared-brain repos (those declaring `mode: shared` in
-// .brain/config.md), commits and pushes edits with file-level conflict
-// resolution. See workshop/plans/000004-shared-brain-sync-daemon-plan.md.
+// .brain/config.md), pushes local commits and pulls remote ones with
+// file-level conflict resolution. See workshop/plans/000004-shared-brain-sync-daemon-plan.md.
 package main
 
 import (
@@ -338,27 +344,19 @@ import (
 func main() {
 	root := &cobra.Command{
 		Use:   "brain-sync",
-		Short: "Git-based sync daemon for shared brains",
-		Long:  "Watches shared-brain repos and propagates edits via gcrypt'd github with file-level conflict resolution.",
+		Short: "Git-based sync for shared brains",
+		Long:  "Watches shared-brain repos and propagates commits via gcrypt'd github with file-level conflict resolution.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Println("watcher not yet implemented — see chunk 5")
+			return nil
+		},
 	}
 
-	root.AddCommand(daemonCmd())
-	// service, pre-write, post-write commands added in later chunks.
+	// service subcommand added in chunk 6.
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
-	}
-}
-
-// daemonCmd is a stub; real implementation in chunk 6.
-func daemonCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "daemon",
-		Short: "Run the watcher daemon (foreground)",
-		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("daemon not yet implemented — see chunk 6")
-		},
 	}
 }
 ```
@@ -366,7 +364,7 @@ func daemonCmd() *cobra.Command {
 ### Step 1.9: Build + run
 
 - [ ] Run: `cd ~/workspace/nous && go build -o cmd/brain-sync/bin/brain-sync ./cmd/brain-sync && ./cmd/brain-sync/bin/brain-sync --help`
-- [ ] Expected: cobra usage output naming `daemon` subcommand.
+- [ ] Expected: cobra usage output. Bare `brain-sync` runs the (stubbed) watcher; subcommands will show up after chunk 6.
 
 ### Step 1.10: Commit chunk 1
 
@@ -377,7 +375,8 @@ cd ~/workspace/nous
 git add cmd/brain-sync/main.go lib/brainsync/discovery.go lib/brainsync/discovery_test.go go.mod go.sum
 git commit -m "#4 M2: brain-sync skeleton + brain discovery
 
-cmd/brain-sync entrypoint with cobra root and stubbed 'daemon' subcommand.
+cmd/brain-sync entrypoint with cobra root; bare invocation will run the
+foreground watcher (stubbed for now, real impl in chunk 5).
 lib/brainsync.FindSharedBrains walks root paths, reads .brain/config.md
 manifests, returns paths whose mode is 'shared'.
 
@@ -386,231 +385,170 @@ Tests cover happy path, empty root, missing root, mode parsing edge cases."
 
 ---
 
-## Chunk 2: Filesystem watcher + debouncing
+## Chunk 2: Ref-watcher (commits as events)
 
 **Files:**
-- Create: `nous/lib/brainsync/watcher.go`
-- Create: `nous/lib/brainsync/watcher_test.go`
+- Create: `nous/lib/brainsync/refwatcher.go`
+- Create: `nous/lib/brainsync/refwatcher_test.go`
 - Modify: `nous/go.mod` (add fsnotify)
+
+### Design
+
+Each shared brain has a file at `<brain>/.git/refs/heads/main` whose contents are the SHA of the latest local commit on `main`. Git rewrites this file on commit, push, fetch, etc. We fsnotify that single file per brain and emit an event whenever it changes — once per local commit.
+
+This is dramatically simpler than the working-tree-watching design we were considering before flipping the substrate decision: no debouncing, no markdown filter, no recursive directory tracking. The kernel-level event fires exactly when there's news to act on.
+
+A subtlety: `fetch` also rewrites `.git/refs/heads/main`'s mtime in some configurations. That's fine — the watcher emits, the daemon checks `git rev-parse HEAD vs origin/main`, and if there's nothing local-only to push, does nothing. False-positive cost is one `git rev-parse` per fetch. Cheap.
 
 ### Step 2.1: Add fsnotify dependency
 
 - [ ] Run: `cd ~/workspace/nous && go get github.com/fsnotify/fsnotify@latest`
 
-### Step 2.2: Write tests for the debouncer first (no real fs)
+### Step 2.2: Write the test first
 
-- [ ] Create `nous/lib/brainsync/watcher_test.go`:
+- [ ] Create `nous/lib/brainsync/refwatcher_test.go`:
 
 ```go
 package brainsync
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 )
 
-func TestDebouncer_BatchesNearbyEvents(t *testing.T) {
-	d := newDebouncer(50 * time.Millisecond)
-	defer d.Close()
+func TestRefWatcher_FiresOnLocalCommit(t *testing.T) {
+	repo := initRepoForTest(t) // helper: git init + identity, returns repo path
 
-	out := d.C()
-	for i := 0; i < 5; i++ {
-		d.Add("/a/file.md")
-		time.Sleep(10 * time.Millisecond)
+	w, err := NewRefWatcher([]string{repo})
+	if err != nil {
+		t.Fatal(err)
 	}
+	defer w.Close()
+
+	// Make a commit; expect an event for `repo` on the channel.
+	if err := os.WriteFile(filepath.Join(repo, "a.md"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustRun(t, repo, "git", "add", "a.md")
+	mustRun(t, repo, "git", "commit", "-q", "-m", "first")
 
 	select {
-	case batch := <-out:
-		if len(batch) != 1 {
-			t.Errorf("want 1 unique file in batch, got %d", len(batch))
+	case got := <-w.Events():
+		if got != repo {
+			t.Errorf("got %s, want %s", got, repo)
 		}
-		if batch[0] != "/a/file.md" {
-			t.Errorf("want /a/file.md, got %s", batch[0])
-		}
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("debouncer did not emit within timeout")
+	case <-time.After(2 * time.Second):
+		t.Fatal("no event after commit")
 	}
 }
 
-func TestDebouncer_Deduplicates(t *testing.T) {
-	d := newDebouncer(30 * time.Millisecond)
-	defer d.Close()
+// initRepoForTest is the same helper used in git_test.go (chunk 3).
+// During chunk 2 we copy/import it here; in chunk 3 it gets unified.
+func initRepoForTest(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main"},
+		{"config", "user.email", "test@nous.local"},
+		{"config", "user.name", "Test"},
+	} {
+		mustRun(t, dir, "git", args...)
+	}
+	return dir
+}
 
-	d.Add("/a/foo.md")
-	d.Add("/a/bar.md")
-	d.Add("/a/foo.md") // duplicate — should not appear twice
-
-	select {
-	case batch := <-d.C():
-		if len(batch) != 2 {
-			t.Errorf("want 2 unique files, got %d: %v", len(batch), batch)
-		}
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("timeout")
+func mustRun(t *testing.T, dir, name string, args ...string) {
+	t.Helper()
+	c := exec.Command(name, append([]string{"-C", dir}, args...)...)
+	if name != "git" {
+		c = exec.Command(name, args...)
+		c.Dir = dir
+	}
+	if out, err := c.CombinedOutput(); err != nil {
+		t.Fatalf("%s %v: %v: %s", name, args, err, out)
 	}
 }
 ```
 
-### Step 2.3: Run — expect FAIL (debouncer undefined)
+### Step 2.3: Run — expect FAIL (NewRefWatcher undefined)
 
-- [ ] Run: `go test ./lib/brainsync/ -run TestDebouncer -v`
+- [ ] Run: `go test ./lib/brainsync/ -run TestRefWatcher -v`
 
-### Step 2.4: Implement debouncer
+### Step 2.4: Implement RefWatcher
 
-- [ ] Create `nous/lib/brainsync/watcher.go`:
+- [ ] Create `nous/lib/brainsync/refwatcher.go`:
 
 ```go
 package brainsync
 
 import (
-	"sync"
-	"time"
+	"path/filepath"
+
+	"github.com/fsnotify/fsnotify"
 )
 
-// debouncer collects file paths and emits them as a deduplicated batch
-// once `quiet` time has passed since the last Add.
-type debouncer struct {
-	quiet time.Duration
-
-	mu       sync.Mutex
-	pending  map[string]struct{}
-	timer    *time.Timer
-	out      chan []string
-	closed   bool
+// RefWatcher emits the brain path on every change to its
+// .git/refs/heads/main file, which corresponds to a local commit (or a
+// fetch updating the local ref). Consumers verify whether there's
+// something local-only to push before acting.
+//
+// One RefWatcher serves multiple brains; events identify which brain
+// changed by absolute path.
+type RefWatcher struct {
+	fs    *fsnotify.Watcher
+	out   chan string
+	stop  chan struct{}
+	done  chan struct{}
+	// pathToBrain maps the watched ref-file path back to its containing brain.
+	pathToBrain map[string]string
 }
 
-func newDebouncer(quiet time.Duration) *debouncer {
-	return &debouncer{
-		quiet:   quiet,
-		pending: make(map[string]struct{}),
-		out:     make(chan []string, 8),
-	}
-}
-
-func (d *debouncer) C() <-chan []string { return d.out }
-
-func (d *debouncer) Add(path string) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.closed {
-		return
-	}
-	d.pending[path] = struct{}{}
-	if d.timer != nil {
-		d.timer.Stop()
-	}
-	d.timer = time.AfterFunc(d.quiet, d.flush)
-}
-
-func (d *debouncer) flush() {
-	d.mu.Lock()
-	if d.closed || len(d.pending) == 0 {
-		d.mu.Unlock()
-		return
-	}
-	batch := make([]string, 0, len(d.pending))
-	for p := range d.pending {
-		batch = append(batch, p)
-	}
-	d.pending = make(map[string]struct{})
-	d.mu.Unlock()
-
-	d.out <- batch
-}
-
-func (d *debouncer) Close() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.closed {
-		return
-	}
-	d.closed = true
-	if d.timer != nil {
-		d.timer.Stop()
-	}
-	close(d.out)
-}
-```
-
-### Step 2.5: Run — expect PASS
-
-- [ ] Run: `go test ./lib/brainsync/ -run TestDebouncer -v`
-
-### Step 2.6: Add fsnotify-backed Watcher with `.git/` ignore
-
-- [ ] Append to `watcher.go`:
-
-```go
-import "github.com/fsnotify/fsnotify"
-
-// Watcher wires fsnotify events into a debouncer, filtering out paths we
-// don't care about (.git/, hidden dotfiles, non-markdown).
-type Watcher struct {
-	fs        *fsnotify.Watcher
-	deb       *debouncer
-	roots     []string
-	stop      chan struct{}
-	stopped   chan struct{}
-}
-
-// NewWatcher creates a watcher that monitors each root recursively
-// (excluding .git/) and emits debounced batches of changed paths.
-func NewWatcher(roots []string, quiet time.Duration) (*Watcher, error) {
+// NewRefWatcher watches each brain's .git/refs/heads/main.
+func NewRefWatcher(brains []string) (*RefWatcher, error) {
 	fs, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
 	}
-	w := &Watcher{
-		fs:      fs,
-		deb:     newDebouncer(quiet),
-		roots:   roots,
-		stop:    make(chan struct{}),
-		stopped: make(chan struct{}),
+	w := &RefWatcher{
+		fs:          fs,
+		out:         make(chan string, 16),
+		stop:        make(chan struct{}),
+		done:        make(chan struct{}),
+		pathToBrain: make(map[string]string),
 	}
-	for _, r := range roots {
-		if err := w.addTree(r); err != nil {
+	for _, b := range brains {
+		ref := filepath.Join(b, ".git", "refs", "heads", "main")
+		if err := fs.Add(ref); err != nil {
 			fs.Close()
 			return nil, err
 		}
+		w.pathToBrain[ref] = b
 	}
 	go w.loop()
 	return w, nil
 }
 
-// addTree adds root and all its non-.git/ subdirectories to fsnotify.
-// fsnotify needs explicit dir watches — recursive watches aren't a thing
-// on Linux/macOS at the kernel level.
-func (w *Watcher) addTree(root string) error {
-	return filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() {
-			return nil
-		}
-		if filepath.Base(p) == ".git" {
-			return filepath.SkipDir
-		}
-		return w.fs.Add(p)
-	})
-}
-
-func (w *Watcher) loop() {
-	defer close(w.stopped)
+func (w *RefWatcher) loop() {
+	defer close(w.done)
 	for {
 		select {
 		case ev, ok := <-w.fs.Events:
 			if !ok {
 				return
 			}
-			if !shouldTrack(ev.Name, ev.Op) {
+			// Any modification to the ref file = potential commit. Emit; the
+			// daemon decides whether there's actually something to push.
+			if ev.Op&(fsnotify.Write|fsnotify.Create) == 0 {
 				continue
 			}
-			w.deb.Add(ev.Name)
-			// Newly created dir? watch it too. (One level deep — re-walk on dir creates.)
-			if ev.Op&fsnotify.Create != 0 {
-				if info, err := os.Stat(ev.Name); err == nil && info.IsDir() && filepath.Base(ev.Name) != ".git" {
-					_ = w.fs.Add(ev.Name)
+			if brain, ok := w.pathToBrain[ev.Name]; ok {
+				select {
+				case w.out <- brain:
+				case <-w.stop:
+					return
 				}
 			}
 		case <-w.stop:
@@ -619,110 +557,32 @@ func (w *Watcher) loop() {
 	}
 }
 
-func (w *Watcher) Events() <-chan []string { return w.deb.C() }
+// Events returns a channel of brain paths whose ref changed.
+func (w *RefWatcher) Events() <-chan string { return w.out }
 
-func (w *Watcher) Close() {
+func (w *RefWatcher) Close() {
 	close(w.stop)
-	<-w.stopped
+	<-w.done
 	w.fs.Close()
-	w.deb.Close()
-}
-
-// shouldTrack returns true if the event is one we care about.
-// Filters: ignore .git/, hidden files (.X), non-markdown extensions.
-// Markdown-only is a brain-content-scope decision (atlas doc).
-func shouldTrack(path string, op fsnotify.Op) bool {
-	base := filepath.Base(path)
-	if strings.HasPrefix(base, ".") {
-		return false
-	}
-	if strings.Contains(path, "/.git/") {
-		return false
-	}
-	if !strings.HasSuffix(base, ".md") {
-		return false
-	}
-	// Track writes/creates/removes/renames; ignore Chmod-only events.
-	return op&(fsnotify.Write|fsnotify.Create|fsnotify.Remove|fsnotify.Rename) != 0
+	close(w.out)
 }
 ```
 
-### Step 2.7: Add test for shouldTrack
+### Step 2.5: Run — expect PASS
 
-- [ ] Append to `watcher_test.go`:
+- [ ] Run: `go test ./lib/brainsync/ -run TestRefWatcher -v`
+- [ ] Expected: PASS.
 
-```go
-import "github.com/fsnotify/fsnotify"
-
-func TestShouldTrack(t *testing.T) {
-	tests := []struct{
-		name string
-		path string
-		op   fsnotify.Op
-		want bool
-	}{
-		{"markdown write",  "/brain/notes.md",         fsnotify.Write,  true},
-		{"markdown create", "/brain/notes.md",         fsnotify.Create, true},
-		{"git internal",    "/brain/.git/index",       fsnotify.Write,  false},
-		{"hidden dotfile",  "/brain/.DS_Store",        fsnotify.Write,  false},
-		{"non-markdown",    "/brain/photo.jpg",        fsnotify.Write,  false},
-		{"chmod only",      "/brain/notes.md",         fsnotify.Chmod,  false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := shouldTrack(tc.path, tc.op); got != tc.want {
-				t.Errorf("shouldTrack(%s, %v) = %v, want %v", tc.path, tc.op, got, tc.want)
-			}
-		})
-	}
-}
-```
-
-### Step 2.8: Test the full Watcher with a real temp dir
-
-- [ ] Append:
-
-```go
-func TestWatcher_DetectsMarkdownWrite(t *testing.T) {
-	root := t.TempDir()
-	w, err := NewWatcher([]string{root}, 30*time.Millisecond)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer w.Close()
-
-	if err := os.WriteFile(filepath.Join(root, "hello.md"), []byte("hi"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	select {
-	case batch := <-w.Events():
-		if len(batch) != 1 || filepath.Base(batch[0]) != "hello.md" {
-			t.Errorf("unexpected batch: %v", batch)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("watcher didn't emit event")
-	}
-}
-```
-
-### Step 2.9: Run all watcher tests
-
-- [ ] Run: `go test ./lib/brainsync/ -v`
-- [ ] Expected: all pass.
-
-### Step 2.10: Commit chunk 2
-
-- [ ] Run:
+### Step 2.6: Commit chunk 2
 
 ```bash
-git add lib/brainsync/watcher.go lib/brainsync/watcher_test.go go.mod go.sum
-git commit -m "#4 M2: brainsync watcher + debouncer
+git add lib/brainsync/refwatcher.go lib/brainsync/refwatcher_test.go go.mod go.sum
+git commit -m "#4 M2: ref-watcher (commits as events)
 
-debouncer collects path events and emits a deduplicated batch after
-'quiet' time has elapsed since last Add. Watcher wraps fsnotify, walks
-the brain directory tree (excluding .git/), filters to markdown-only
-content per brain content scope decision."
+fsnotify on each brain's .git/refs/heads/main. The kernel-level event
+fires on local commit (and on fetch — the daemon dedup-checks whether
+there's actually something to push). No debouncer needed; commits are
+themselves discrete atomic events."
 ```
 
 ---
@@ -1329,52 +1189,114 @@ content lands as a .conflict-* file."
 
 ---
 
-## Chunk 5: Daemon main loop
+## Chunk 5: Watcher main loop (commit-driven)
 
 **Files:**
-- Create: `nous/lib/brainsync/daemon.go`
-- Create: `nous/lib/brainsync/daemon_test.go`
+- Create: `nous/lib/brainsync/watch.go`
+- Create: `nous/lib/brainsync/watch_test.go`
 
-### What the daemon does
+### What the watcher does
+
+Two event sources:
+1. **Local commits** — RefWatcher (chunk 2) emits brain path on each `.git/refs/heads/main` change. Daemon checks `git rev-parse HEAD vs origin/main`; if local has unpushed commits, push (with resolve+retry on rejection).
+2. **Periodic fetch** — every 30s, for each registered brain: `git fetch origin`; if working tree is clean and HEAD is strictly behind origin/main, `git pull --ff-only`. If working tree is dirty or there's a divergence, do nothing — the user will commit when ready and the push-side resolve will handle it.
 
 Pseudocode:
 
 ```
 on startup:
-  brains = explicit brains from --brain flags (or auto-discover)
-  peer  = read peer-id from ~/.config/brain-sync/peer-id (or generate)
-  for each brain b:
-    watcher_b = NewWatcher([b], 2s)
+  brains = brains from --brain flags
+  peer   = peerIDFor(brains[0])  // git config user.name slug
+  rw     = NewRefWatcher(brains)
+  ticker = NewTicker(30s)
   loop:
     select {
-      case batch := <-watcher_b.Events():
-        sync(b, batch, peer)
+      case b := <-rw.Events():
+        pushBrain(b, peer)
+      case <-ticker.C:
+        for b in brains: pullBrain(b)
       case <-ctx.Done(): return
     }
 
-sync(repo, paths, peer):
-  retry := 0
+pushBrain(repo, peer):
+  if !hasUnpushedCommits(repo): return
   for retry < 5:
-    err := AddCommitPush(repo, msg(paths))
-    if err == nil: return nil
-    if err != ErrPushRejected: log and return
-    err := Resolve(repo, peer, time.Now())
-    if err != nil: log and return
+    err := Push(repo)                // git push origin
+    if err == nil: return
+    if err != ErrPushRejected: log; return
+    if err := Resolve(repo, peer, time.Now()); err != nil: log; return
     retry++
   log "exceeded retries"
+
+pullBrain(repo):
+  if err := Fetch(repo); err != nil: log; return
+  if !cleanWorkingTree(repo): return        // skip; let user commit
+  if behind, _ := isStrictlyBehind(repo); !behind: return
+  if err := PullFF(repo); err != nil: log
 ```
 
-### Step 5.1: Test the sync helper
+### Step 5.1: Add Push, PullFF, hasUnpushedCommits to git.go
 
-- [ ] Create `nous/lib/brainsync/daemon_test.go` covering:
-  - sync call with no rejection: commits and pushes
-  - sync with rejection on first push, succeeds after Resolve
+- [ ] Append to `lib/brainsync/git.go`:
 
-(Detailed test code follows the same pattern as `TestResolve_FileLevelConflict`; ~80 lines.)
+```go
+// Push runs `git push origin`. Returns ErrPushRejected on non-fast-forward.
+func Push(repo string) error {
+	if _, err := RunGit(repo, "push", "origin"); err != nil {
+		if strings.Contains(err.Error(), "rejected") || strings.Contains(err.Error(), "non-fast-forward") {
+			return ErrPushRejected
+		}
+		return err
+	}
+	return nil
+}
 
-### Step 5.2: Implement daemon
+// PullFF runs `git pull --ff-only origin main`.
+func PullFF(repo string) error {
+	_, err := RunGit(repo, "pull", "--ff-only", "origin", "main")
+	return err
+}
 
-- [ ] Create `nous/lib/brainsync/daemon.go`:
+// HasUnpushedCommits returns true if HEAD is ahead of origin/main.
+func HasUnpushedCommits(repo string) (bool, error) {
+	out, err := RunGit(repo, "rev-list", "--count", "origin/main..HEAD")
+	if err != nil {
+		// First push (no upstream yet) — treat as having commits.
+		if strings.Contains(err.Error(), "unknown revision") {
+			return true, nil
+		}
+		return false, err
+	}
+	return strings.TrimSpace(string(out)) != "0", nil
+}
+
+// CleanWorkingTree returns true iff there are no uncommitted changes.
+func CleanWorkingTree(repo string) (bool, error) {
+	out, err := RunGit(repo, "status", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(out)) == "", nil
+}
+
+// IsStrictlyBehind returns true iff origin/main is ahead of HEAD AND HEAD
+// has nothing origin/main lacks (i.e., a fast-forward is possible).
+func IsStrictlyBehind(repo string) (bool, error) {
+	ahead, err := RunGit(repo, "rev-list", "--count", "origin/main..HEAD")
+	if err != nil {
+		return false, err
+	}
+	behind, err := RunGit(repo, "rev-list", "--count", "HEAD..origin/main")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(ahead)) == "0" && strings.TrimSpace(string(behind)) != "0", nil
+}
+```
+
+### Step 5.2: Implement the watch loop
+
+- [ ] Create `nous/lib/brainsync/watch.go`:
 
 ```go
 package brainsync
@@ -1382,74 +1304,99 @@ package brainsync
 import (
 	"context"
 	"errors"
-	"fmt"
-	"log/slog"
+	"log"
 	"strings"
 	"time"
 )
 
-// Sync does add+commit+push, with conflict resolution + retry on rejection.
-// Caps retries to avoid pathological loops.
-func Sync(repo, peer string, paths []string, now func() time.Time) error {
-	msg := buildEditMsg(paths, peer)
+// PeerIDFor derives a stable peer label from `git config user.name` in the
+// given repo (lowercased, hyphenated). Falls back to "unknown-peer" if not
+// set.
+func PeerIDFor(repo string) string {
+	out, err := RunGit(repo, "config", "user.name")
+	if err != nil {
+		return "unknown-peer"
+	}
+	name := strings.TrimSpace(string(out))
+	name = strings.ReplaceAll(strings.ToLower(name), " ", "-")
+	if name == "" {
+		return "unknown-peer"
+	}
+	return name
+}
+
+// PushBrain pushes any unpushed commits, resolving + retrying on rejection.
+// Caps retries at 5.
+func PushBrain(repo, peer string, now func() time.Time) error {
+	hasNew, err := HasUnpushedCommits(repo)
+	if err != nil {
+		return err
+	}
+	if !hasNew {
+		return nil
+	}
 	for retry := 0; retry < 5; retry++ {
-		err := AddCommitPush(repo, msg)
+		err := Push(repo)
 		if err == nil {
 			return nil
 		}
 		if !errors.Is(err, ErrPushRejected) {
 			return err
 		}
-		slog.Info("push rejected, resolving", "repo", repo, "retry", retry)
+		log.Printf("brainsync: push rejected for %s, resolving (retry %d)", repo, retry)
 		if err := Resolve(repo, peer, now()); err != nil {
-			return fmt.Errorf("resolve: %w", err)
-		}
-	}
-	return fmt.Errorf("exceeded retries for %s", repo)
-}
-
-func buildEditMsg(paths []string, peer string) string {
-	if len(paths) == 1 {
-		return fmt.Sprintf("edit: %s", paths[0])
-	}
-	return fmt.Sprintf("edit: %d files (%s)", len(paths), strings.Join(paths, ", "))
-}
-
-// Daemon ties watcher + sync. Run blocks until ctx cancelled.
-func Daemon(ctx context.Context, brains []string, peer string) error {
-	type brainState struct {
-		path    string
-		watcher *Watcher
-	}
-	var states []brainState
-	for _, b := range brains {
-		w, err := NewWatcher([]string{b}, 2*time.Second)
-		if err != nil {
 			return err
 		}
-		defer w.Close()
-		states = append(states, brainState{b, w})
 	}
-	slog.Info("brain-sync started", "brains", brains, "peer", peer)
+	return errors.New("exceeded retries")
+}
 
-	// Multiplex: one goroutine per brain emits to a shared sync channel,
-	// or use reflect.Select. Keep it simple — one goroutine per brain.
-	type event struct{ repo string; paths []string }
-	syncCh := make(chan event, 16)
-	for _, st := range states {
-		st := st
-		go func() {
-			for batch := range st.watcher.Events() {
-				syncCh <- event{st.path, batch}
-			}
-		}()
+// PullBrain fetches and fast-forwards if possible. Skips if working tree
+// is dirty (lets user commit first; resolve happens on push).
+func PullBrain(repo string) error {
+	if err := Fetch(repo); err != nil {
+		return err
 	}
+	clean, err := CleanWorkingTree(repo)
+	if err != nil || !clean {
+		return err
+	}
+	behind, err := IsStrictlyBehind(repo)
+	if err != nil || !behind {
+		return err
+	}
+	return PullFF(repo)
+}
+
+// Watch ties RefWatcher events + a periodic fetch ticker to push/pull.
+// Blocks until ctx is cancelled.
+func Watch(ctx context.Context, brains []string, fetchEvery time.Duration) error {
+	if len(brains) == 0 {
+		return errors.New("no brains to watch")
+	}
+	peer := PeerIDFor(brains[0])
+	log.Printf("brainsync: watching %d brain(s) as peer %q", len(brains), peer)
+
+	rw, err := NewRefWatcher(brains)
+	if err != nil {
+		return err
+	}
+	defer rw.Close()
+
+	ticker := time.NewTicker(fetchEvery)
+	defer ticker.Stop()
 
 	for {
 		select {
-		case ev := <-syncCh:
-			if err := Sync(ev.repo, peer, ev.paths, time.Now); err != nil {
-				slog.Error("sync failed", "repo", ev.repo, "err", err)
+		case b := <-rw.Events():
+			if err := PushBrain(b, peer, time.Now); err != nil {
+				log.Printf("brainsync: push %s: %v", b, err)
+			}
+		case <-ticker.C:
+			for _, b := range brains {
+				if err := PullBrain(b); err != nil {
+					log.Printf("brainsync: pull %s: %v", b, err)
+				}
 			}
 		case <-ctx.Done():
 			return nil
@@ -1458,84 +1405,76 @@ func Daemon(ctx context.Context, brains []string, peer string) error {
 }
 ```
 
-### Step 5.3: Wire daemon into cmd
+### Step 5.3: Wire watch into the cobra root command
 
-- [ ] Modify `nous/cmd/brain-sync/main.go` to replace the stub `daemonCmd()` with a real implementation:
+- [ ] Modify `nous/cmd/brain-sync/main.go`:
 
 ```go
 import (
 	"context"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/xianxu/nous/lib/brainsync"
 )
 
 var (
 	brainPaths []string
-	peerID     string
+	fetchEvery time.Duration
 )
 
-func daemonCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "daemon",
-		Short: "Run the watcher daemon (foreground)",
+func main() {
+	root := &cobra.Command{
+		Use:   "brain-sync",
+		Short: "Git-based sync for shared brains",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer cancel()
-
-			peer, err := loadOrCreatePeerID()
-			if err != nil {
-				return err
-			}
-			if peerID != "" {
-				peer = peerID // explicit override
-			}
 			if len(brainPaths) == 0 {
 				return fmt.Errorf("--brain required (one or more)")
 			}
-			return brainsync.Daemon(ctx, brainPaths, peer)
+			return brainsync.Watch(ctx, brainPaths, fetchEvery)
 		},
 	}
-	cmd.Flags().StringSliceVar(&brainPaths, "brain", nil, "absolute path to a shared brain (repeatable)")
-	cmd.Flags().StringVar(&peerID, "peer-id", "", "override peer ID for this run")
-	return cmd
-}
+	root.Flags().StringSliceVar(&brainPaths, "brain", nil, "absolute path to a shared brain (repeatable)")
+	root.Flags().DurationVar(&fetchEvery, "fetch-every", 30*time.Second, "periodic fetch interval")
 
-func loadOrCreatePeerID() (string, error) {
-	dir := filepath.Join(os.Getenv("HOME"), ".config", "brain-sync")
-	p := filepath.Join(dir, "peer-id")
-	if data, err := os.ReadFile(p); err == nil {
-		return strings.TrimSpace(string(data)), nil
+	root.AddCommand(serviceCmd()) // chunk 6
+
+	if err := root.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	host, _ := os.Hostname()
-	id := strings.ReplaceAll(host, " ", "-")
-	if err := os.WriteFile(p, []byte(id+"\n"), 0o644); err != nil {
-		return "", err
-	}
-	return id, nil
 }
 ```
 
-### Step 5.4: Build + smoke
+### Step 5.4: Test PushBrain happy path + rejection retry
 
-- [ ] Run: `go build -o cmd/brain-sync/bin/brain-sync ./cmd/brain-sync && ./cmd/brain-sync/bin/brain-sync daemon --brain /tmp/no-such-brain` — expect graceful error.
+- [ ] Create `nous/lib/brainsync/watch_test.go` — uses the `twoPeerRepo` helper from chunk 4:
+  - `TestPushBrain_NoUnpushed_NoOp`: clean repo, returns nil without error.
+  - `TestPushBrain_HappyPath`: peer commits, PushBrain pushes successfully.
+  - `TestPushBrain_RejectedThenResolves`: both peers commit different content to same file, second peer's PushBrain triggers Resolve, eventually pushes.
 
-### Step 5.5: Commit chunk 5
+(Test code mirrors `TestResolve_FileLevelConflict` shape; ~80 lines.)
 
-- [ ] Commit:
+### Step 5.5: Build + smoke
+
+- [ ] Run: `go build -o cmd/brain-sync/bin/brain-sync ./cmd/brain-sync && ./cmd/brain-sync/bin/brain-sync --brain /tmp/no-such-brain` — expect graceful error.
+
+### Step 5.6: Commit chunk 5
 
 ```bash
-git add lib/brainsync/daemon.go lib/brainsync/daemon_test.go cmd/brain-sync/main.go
-git commit -m "#4 M2: daemon main loop + brain-sync daemon CLI
+git add lib/brainsync/watch.go lib/brainsync/watch_test.go lib/brainsync/git.go cmd/brain-sync/main.go
+git commit -m "#4 M2: watch loop (commit-driven push + periodic ff-pull)
 
-Daemon ties Watcher events to Sync (commit + push, resolve + retry on
-rejection). One goroutine per brain feeds a shared event channel.
-Peer ID generated from hostname on first run, persisted to
-~/.config/brain-sync/peer-id."
+RefWatcher events → PushBrain (which resolves+retries on rejection).
+Periodic ticker (default 30s) → fetch + ff-only-pull per brain (skipped
+if working tree dirty; lets user commit before sync touches anything).
+
+Bare 'brain-sync' invocation is now the foreground watcher (charon
+serve-equivalent). Peer ID derived from git config user.name; no
+separate config file."
 ```
 
 ---
@@ -1691,7 +1630,8 @@ func serviceCmd() *cobra.Command {
 			if err != nil { return err }
 			bin, err := os.Executable()
 			if err != nil { return err }
-			args := []string{"daemon"}
+			// Bare brain-sync is the foreground watcher; pass --brain flags only.
+			var args []string
 			for _, b := range brainPaths {
 				args = append(args, "--brain", b)
 			}
@@ -1736,67 +1676,7 @@ launchd-specific implementation behind darwin build tag. plist gets
 
 ---
 
-## Chunk 7: pre-write / post-write hook subcommands
-
-**Files:**
-- Modify: `nous/cmd/brain-sync/main.go`
-
-### What they do
-
-`pre-write <path>`:
-- Find the brain containing `<path>` (walk up to `.brain/config.md`).
-- If not a shared brain: exit 0 silently.
-- Else: `git fetch`; if remote has new content for any of our locally-modified files, run Resolve to surface conflict files BEFORE the agent writes. (This shrinks the agent's stale-state window.)
-
-`post-write <path>`:
-- Find the brain.
-- If shared: trigger a sync immediately (don't wait for fs-watcher debounce). This is essentially calling `Sync(repo, peer, [path], time.Now)`.
-
-These are short-lived CLI invocations; they're fine to spawn the daemon's git work synchronously.
-
-### Step 7.1: Add to main.go
-
-- [ ] Add subcommands:
-
-```go
-func preWriteCmd() *cobra.Command {
-	return &cobra.Command{
-		Use: "pre-write <path>", Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			repo, ok := findContainingBrain(args[0])
-			if !ok || !brainsync.IsSharedBrainPath(repo) { return nil }
-			if err := brainsync.Fetch(repo); err != nil { return err }
-			peer, _ := loadOrCreatePeerID()
-			return brainsync.PreWriteResolve(repo, peer, time.Now())
-		},
-	}
-}
-
-func postWriteCmd() *cobra.Command {
-	return &cobra.Command{
-		Use: "post-write <path>", Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			repo, ok := findContainingBrain(args[0])
-			if !ok || !brainsync.IsSharedBrainPath(repo) { return nil }
-			peer, _ := loadOrCreatePeerID()
-			return brainsync.Sync(repo, peer, []string{args[0]}, time.Now)
-		},
-	}
-}
-```
-
-(Helper functions `findContainingBrain`, `IsSharedBrainPath`, `PreWriteResolve` are added to `lib/brainsync/`.)
-
-### Step 7.2: Commit chunk 7
-
-```bash
-git add cmd/brain-sync/main.go lib/brainsync/...
-git commit -m "#4 M2: pre-write / post-write hook subcommands"
-```
-
----
-
-## Chunk 8: Synthetic conflict test in tart VM
+## Chunk 7: Synthetic conflict test in tart VM
 
 **Files:**
 - Create: `nous/scripts/test-brain-sync.sh` (modeled on `nous-test-roundtrip.sh`)
@@ -1805,15 +1685,17 @@ git commit -m "#4 M2: pre-write / post-write hook subcommands"
 
 - Spin up a tart VM (`brain-sync-test`).
 - Set up two peers: host + VM.
-- Create a local bare repo on host (or use github gcrypt'd brain-vm-test from earlier).
-- Both peers clone, both run `brain-sync daemon` against the brain dir.
-- Trigger a simultaneous edit on both, wait, verify the canonical + conflict file appears on both peers.
+- Create a local bare repo on host (or use the github gcrypt'd brain-vm-test from earlier).
+- Both peers clone, both run `brain-sync --brain <path>` (foreground watcher) against the brain dir.
+- On peer A: edit a file, `git commit`; verify peer B sees the new file content within ~30s (after the periodic ff-pull).
+- On peer A and B: edit the same file, both commit before either has fetched; verify both peers converge to canonical + conflict file.
+- Tear down.
 
-### Step 8.1: Write the test script
+### Step 7.1: Write the test script
 
-- [ ] Mirror `nous-test-roundtrip.sh` shape: pre-flight, clone snapshot, boot, ssh in, install brain-sync (rsync from host), run scenarios, tear down.
+- [ ] Mirror `nous-test-roundtrip.sh` shape: pre-flight, clone snapshot, boot, ssh in, build + rsync brain-sync binary from host, run scenarios, tear down.
 
-### Step 8.2: Add `make test-brain-sync` target
+### Step 7.2: Add `make test-brain-sync` target
 
 - [ ] Add to `Makefile.nous`:
 
@@ -1822,7 +1704,7 @@ test-brain-sync:
 	@$(NOUS_DIR)scripts/test-brain-sync.sh
 ```
 
-### Step 8.3: Run + commit
+### Step 7.3: Run + commit
 
 ```bash
 make test-brain-sync
@@ -1832,48 +1714,66 @@ git commit -m "#4 M2: VM-based synthetic conflict test for brain-sync"
 
 ---
 
-## Chunk 9: Claude Code hook wiring + auto-discovery
+## Chunk 8: Auto-discovery
 
 **Files:**
-- Modify: `nous/.claude/settings.json` (add PreToolUse / PostToolUse hooks for brain-sync)
-- Modify: `lib/brainsync/discovery.go` (add auto-discover-from-$HOME/workspace mode)
+- Modify: `nous/lib/brainsync/discovery.go`
+- Modify: `nous/cmd/brain-sync/main.go`
 
-### Hooks
+### Goal
 
-- [ ] In `nous/.claude/settings.json`, add:
+When `--brain` is not specified, walk `$HOME/workspace/`, find all directories with `.brain/config.md` declaring `mode: shared`, watch those automatically. Operator's normal layout works without configuration.
 
-```json
-{
-  "hooks": {
-    "PreToolUse": [{
-      "matcher": "Edit|Write|NotebookEdit",
-      "hooks": [{
-        "type": "command",
-        "command": "brain-sync pre-write \"${TOOL_INPUT_FILE_PATH}\""
-      }]
-    }],
-    "PostToolUse": [{
-      "matcher": "Edit|Write|NotebookEdit",
-      "hooks": [{
-        "type": "command",
-        "command": "brain-sync post-write \"${TOOL_INPUT_FILE_PATH}\""
-      }]
-    }]
-  }
+### Step 8.1: Add `FindAllSharedBrainsInWorkspace()` to discovery.go
+
+- [ ] Append to `lib/brainsync/discovery.go`:
+
+```go
+// FindAllSharedBrainsInWorkspace looks under $HOME/workspace/ (or
+// $WORKSPACE_ROOT if set) for shared brains. Wrapper over FindSharedBrains
+// for the auto-discovery default.
+func FindAllSharedBrainsInWorkspace() ([]string, error) {
+	root := os.Getenv("WORKSPACE_ROOT")
+	if root == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, err
+		}
+		root = filepath.Join(home, "workspace")
+	}
+	return FindSharedBrains([]string{root})
 }
 ```
 
-(Exact field names per Claude Code's hook schema; verify against current docs.)
+### Step 8.2: Wire fallback in main.go
 
-### Auto-discovery
+- [ ] In the root command's `RunE`:
 
-- [ ] Add `FindAllSharedBrainsInWorkspace()` that walks `$HOME/workspace/`. Use as default when `--brain` is not specified.
+```go
+if len(brainPaths) == 0 {
+	auto, err := brainsync.FindAllSharedBrainsInWorkspace()
+	if err != nil { return err }
+	if len(auto) == 0 {
+		return fmt.Errorf("no shared brains found under $HOME/workspace; pass --brain explicitly")
+	}
+	brainPaths = auto
+	log.Printf("brainsync: auto-discovered %d shared brain(s)", len(auto))
+}
+```
 
-### Step 9.1: Wire + test + commit
+### Step 8.3: Tests
+
+- [ ] Add a test for `FindAllSharedBrainsInWorkspace` using `WORKSPACE_ROOT` env override + temp dir setup.
+
+### Step 8.4: Commit
 
 ```bash
-git add nous/.claude/settings.json lib/brainsync/discovery.go
-git commit -m "#4 M2: Claude Code hooks + auto-discovery"
+git add lib/brainsync/discovery.go cmd/brain-sync/main.go
+git commit -m "#4 M2: auto-discover shared brains under \$HOME/workspace
+
+Bare 'brain-sync' (no --brain flags) walks workspace dir and watches
+every .brain/config.md with mode: shared. Honors WORKSPACE_ROOT env
+for testability and non-default layouts."
 ```
 
 ---
@@ -1882,9 +1782,9 @@ git commit -m "#4 M2: Claude Code hooks + auto-discovery"
 
 - [ ] `go test ./lib/brainsync/...` — all pass.
 - [ ] `go build -o cmd/brain-sync/bin/brain-sync ./cmd/brain-sync` — builds clean.
-- [ ] `./cmd/brain-sync/bin/brain-sync --help` — lists daemon, service, pre-write, post-write.
+- [ ] `./cmd/brain-sync/bin/brain-sync --help` — root command shows `--brain` flag and `service` subcommand.
 - [ ] `make test-brain-sync` — VM end-to-end conflict test passes.
-- [ ] Manual smoke: run daemon against a real shared brain on host, edit a file, verify commit lands on github.
+- [ ] Manual smoke: run `brain-sync` foreground against a real shared brain on host, commit a file, verify the commit lands on github (gcrypt-encrypted).
 - [ ] Update `nous#4` issue: tick M2 plan items, log close, attach actual_hours.
 - [ ] Update `brain/data/project/shared-brain.md`: tick M2 task, optional detail block.
-- [ ] Atlas update: extend `brain/atlas/sync-substrate-decision.md` "Daemon outline" section if implementation diverged from outline.
+- [ ] Atlas update: extend `brain/atlas/sync-substrate-decision.md` "Daemon outline" section if implementation diverged from outline (e.g., commit-driven trigger replaced the originally-sketched fsnotify-on-working-tree).

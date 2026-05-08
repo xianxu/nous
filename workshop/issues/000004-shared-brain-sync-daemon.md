@@ -1,9 +1,9 @@
 ---
 id: 000004
-status: open
+status: working
 deps: [nous#3]
 created: 2026-05-05
-updated: 2026-05-05
+updated: 2026-05-07
 estimate_hours: 8
 ---
 
@@ -62,13 +62,15 @@ Rounded down to **5–12 hr** because the upper-bound stack assumes substrate de
 - [x] **Decide for the family case → git+daemon (revised 2026-05-07).** Original recommendation was Syncthing; flipped after weighting the four-writer reality (wife + her agent + me + my agent). Rationale + tradeoff + daemon outline in `brain/atlas/sync-substrate-decision.md`.
 - [x] Write down the behavioral semantics: file-level conflict resolution only (never content-merge); first-pushed-wins; loser written as `<file>.conflict-<peer>-<YYYYMMDDTHHMMSSZ>.<ext>`; both peers see both files; manual resolve = read-decide-replace. Documented in the atlas decision doc.
 
-### M2 — git+daemon implementation + pre/post-tool hooks
+### M2 — brain-sync daemon (commit-driven)
 
-- [ ] Build `cmd/brain-sync` (Go daemon, fsnotify-based). Per the outline in `brain/atlas/sync-substrate-decision.md`: watch each shared-brain repo, debounce edits, file-level conflict resolution (loser → conflict file, never content-merge), commit + push to gcrypt'd github, retry-on-rejection loop.
-- [ ] Pre-tool hook: before any agent tool that writes to a shared brain path, run a pull (with file-level resolve as needed).
-- [ ] Post-tool hook: after writes, trigger commit + push (or trust the file-watcher debounce; functionally equivalent if the agent supplies a commit message).
-- [ ] Wire into the nous agent runtime so shared-brain paths trigger the sync flow, private brain paths do not.
-- [ ] Ignore `.git/` events; reject non-markdown commits with a warning per the brain content scope.
+- [x] Build `cmd/brain-sync` (Go, single binary, charon-pattern CLI). Bare `brain-sync` is the foreground watcher; `brain-sync service install/uninstall/start/stop/status` for launchd integration.
+- [x] RefWatcher: fsnotify on each brain's `.git/refs/heads/main` (commits-as-events, not per-file edits — rebased after the M1 substrate flip).
+- [x] File-level conflict resolution algorithm in `lib/brainsync/resolve.go` (loser → `<file>.conflict-<peer>-<utc>.<ext>`, soft-reset HEAD to origin/main, commit conflict files, retry up to 5 times).
+- [x] Watch loop: RefWatcher events → push (with resolve+retry on rejection); periodic `git fetch` ticker → ff-only-pull if working tree clean.
+- [x] Auto-discovery of shared brains under `$HOME/workspace/` (`mode: shared` in `.brain/config.md`); explicit `--brain` flags override.
+- [x] ~~Pre-tool / post-tool hooks~~ — dropped after M1 substrate flip. Commits ARE the atomic sync unit; no per-edit hooks needed.
+- [x] Local two-process integration test (`make nous-test-brain-sync`): bare + two clones, two brain-sync daemons, propagation + conflict scenarios. ~15s end-to-end. No VM dependency.
 
 ### M3 — conflict-file convention + manual resolve flow
 
@@ -112,3 +114,22 @@ Latency penalty (~30–60s vs ~10–15s) is acceptable for async trip-planning p
 Decision doc updated with full Revisions section; M2 plan re-spec'd around the daemon outline; M3 conflict-file convention finalized (`<file>.conflict-<peer-id>-<YYYYMMDDTHHMMSSZ>.<ext>`).
 
 Spike actual ~1.5h (test + write + flip + rewrite). M2 is next when there's a wife-laptop or test-loop ready to exercise the daemon.
+
+### 2026-05-07 — M2 closed (brain-sync daemon shipped)
+
+Eight-chunk plan executed end-to-end (`workshop/plans/000004-shared-brain-sync-daemon-plan.md`). Single-session ~3h focused work — well below the 5–12h estimate, helped by the merge-base-relative diff bug being the only real surprise (the original two-dot syntax in `Resolve()` made remote-only-changes incorrectly look like our changes; switched to three-dot `A...B`).
+
+Implementation summary:
+
+- **`cmd/brain-sync/`**: cobra-based CLI. Bare `brain-sync` runs the foreground watcher (charon `serve`-pattern). `brain-sync service install/uninstall/start/stop/status` for launchd integration. Auto-discovers shared brains under `$HOME/workspace/` if no `--brain` flags.
+- **`lib/brainsync/`**: discovery, RefWatcher (fsnotify on `.git/refs/heads/`), git ops layer, file-level resolve algorithm, watch loop (commit events + 30s fetch ticker), service manager (darwin/launchd).
+- **Tests**: 18 unit/integration tests across 5 `_test.go` files. Full bare+clone scenarios for resolve and watch behavior. Plus `scripts/test-brain-sync.sh` running two real brain-sync processes against a local bare repo, exercising propagation (~3s) and conflict resolution (~10s) end-to-end.
+
+Bugs caught + fixed during execution:
+1. RefWatcher initially watched `.git/refs/heads/main` directly, but that file doesn't exist until first commit. Switched to watching the parent directory, filtering events to `main`.
+2. `git push origin` requires upstream tracking; explicit `git push origin main` works for first push and steady state.
+3. Resolve used `git diff A..B` (symmetric two-dot), should have used `A...B` (three-dot, merge-base-relative). Manifested as remote-only changes being mis-categorized as local changes.
+4. Test script's `wait` (no args) blocked on long-running brain-sync background jobs. Fixed with explicit PID waits.
+5. Auto-discovery vs misconfigured brains: a `.brain/config.md` directory without `.git/` would crash RefWatcher. Now skips with a warning.
+
+Ready for M3/M4 (synthetic conflict tests + wife/me dogfood) once `brain-shared-family` is provisioned.
