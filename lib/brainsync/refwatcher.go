@@ -1,6 +1,8 @@
 package brainsync
 
 import (
+	"log"
+	"os"
 	"path/filepath"
 
 	"github.com/fsnotify/fsnotify"
@@ -41,6 +43,10 @@ func NewRefWatcher(brains []string) (*RefWatcher, error) {
 	}
 	for _, b := range brains {
 		dir := filepath.Join(b, ".git", "refs", "heads")
+		if _, err := os.Stat(dir); err != nil {
+			log.Printf("brainsync: skipping %s (no %s — not a git repo yet?)", b, dir)
+			continue
+		}
 		if err := fs.Add(dir); err != nil {
 			fs.Close()
 			return nil, err
