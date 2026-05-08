@@ -126,3 +126,17 @@ Bugs caught and fixed during harness build (each one a real SSH-automation gotch
 All four fixes are now in `scripts/nous-test-bootstrap.sh` with comments documenting the *why*.
 
 Test runtime: ~4 min from invocation to teardown (Homebrew install + Brewfile fetch dominates). Acceptable as an iterate-and-fix harness; not optimized for CI cadence.
+
+### 2026-05-07 — close
+
+**Actual:** 8 hr (rounded from 7.91).
+
+Computed via the `xx-issues` SKILL.md procedure: `active-time.py` over `~/.claude/projects/-Users-xianxu-workspace-{nous,brain}` with `--threshold-min 15 --include-assistant`, since/until set to the #11 commit window (09:54 PDT first commit `d3ee05c` → 22:12 PDT close commit `3fbc71e`). Three sessions in window; the brain-side session `114e54d1` carried 491 min of unified wall-clock active time. Mention-weighted gap assignment attributed 475 min (7.91 hr) to `#11` and 16 min to unattributed.
+
+End state:
+- `make nous-bootstrap` ships a fresh-Mac toolchain installer.
+- `make nous-test-bootstrap` (~2:30) is the cold-start regression test.
+- `make nous-test-snapshot` + `make nous-test-roundtrip` (~25s) is the fast iteration loop.
+- Atlas entry at `atlas/nous/bootstrap-entry-points.md` documents how the four `make` targets relate.
+
+Honest methodology note: the original close commit message (`3fbc71e`) hand-waved a per-milestone breakdown ("M1 ~2.5h + M2 ~3h + M3 ~1.5h + atlas ~1h"). That breakdown was a guess, not a measurement. The total (8) happens to match what the script later produced, but the per-milestone splits in that commit message shouldn't be cited as data. This log entry has the real number derived per procedure.
