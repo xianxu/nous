@@ -42,6 +42,75 @@ def info(msg): print(f"{CYAN}==>{RESET} {msg}", file=sys.stderr)
 def ok(msg):   print(f"  {GREEN}[ok]{RESET} {msg}", file=sys.stderr)
 def warn(msg): print(f"  {YELLOW}[!]{RESET} {msg}", file=sys.stderr)
 
+# ── Warmup: print procedure on first N invocations per shell session ─────────
+# An agent that has never read the v3 procedure can guess ACTUAL=8 and slip
+# through unchallenged. The warmup pattern surfaces the procedure in their
+# transcript on the first 2 invocations from a given shell session, so by
+# the third close they've seen the contract twice. After that, silent mode.
+#
+# Tracking key: process group ID. Stable across subshells of the same
+# controlling shell; resets on new shell / new Claude Code session.
+
+WARMUP_THRESHOLD = 2  # show explanation this many times per shell session
+
+
+def warmup_state_path() -> Path:
+    try:
+        sess = os.getpgrp()
+    except OSError:
+        sess = 0
+    return Path("/tmp") / f"close-issue-warmup-{sess}"
+
+
+def warmup_count() -> int:
+    p = warmup_state_path()
+    try:
+        return int(p.read_text().strip())
+    except (FileNotFoundError, ValueError, OSError):
+        return 0
+
+
+def warmup_increment():
+    p = warmup_state_path()
+    try:
+        p.write_text(str(warmup_count() + 1))
+    except OSError:
+        pass
+
+
+def print_semantic_warmup():
+    """Print the close-issue contract. Shown on the first WARMUP_THRESHOLD
+    invocations per shell session, regardless of whether all params are
+    present — so an agent that 'guesses through' still has the procedure
+    in their transcript. After the threshold, silent."""
+    n = warmup_count()
+    if n >= WARMUP_THRESHOLD:
+        return
+    msg = []
+    msg.append(f"{CYAN}── close-issue contract ── (warmup {n + 1}/{WARMUP_THRESHOLD}){RESET}")
+    msg.append("")
+    msg.append(f"  Closing an issue records two values that feed into velocity")
+    msg.append(f"  calibration. Both must be earned, not guessed:")
+    msg.append("")
+    msg.append(f"  {CYAN}ACTUAL{RESET}   = focused dev-hours, derived via the v3 procedure.")
+    msg.append(f"             Run active-time-v3.py over the issue's commit window")
+    msg.append(f"             with --commit-weight 1.0; read the per-issue total.")
+    msg.append(f"             See brain/data/life/42shots/velocity/baseline-v3.md.")
+    msg.append(f"             Pass FORCE=1 only if you genuinely cannot run the script")
+    msg.append(f"             (e.g., wontfix issue with no commits) — record the reason.")
+    msg.append("")
+    msg.append(f"  {CYAN}VERIFIED{RESET} = one-line evidence of behavior matching done-when.")
+    msg.append(f"             'tests pass' beats 'code written'. See AGENTS.md §5.")
+    msg.append("")
+    msg.append(f"  This warmup auto-suppresses after {WARMUP_THRESHOLD} invocations per shell session.")
+    msg.append("")
+    print("\n".join(msg), file=sys.stderr)
+    warmup_increment()
+
+
+print_semantic_warmup()
+
+
 # ── Validate inputs ──────────────────────────────────────────────────────────
 if not ISSUE: die("ISSUE=<n> required")
 if not ISSUE.isdigit(): die(f"ISSUE must be numeric, got '{ISSUE}'")
