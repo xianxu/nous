@@ -22,6 +22,8 @@ func serviceCmd() *cobra.Command {
 	c.AddCommand(statusCmd())
 	c.PersistentFlags().StringSliceVar(&brainPaths, "brain", nil,
 		"shared brain path (repeatable; used by 'install')")
+	c.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false,
+		"persist --verbose into the plist (used by 'install')")
 	return c
 }
 
@@ -38,10 +40,13 @@ func installCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// Bare brain-sync is the foreground watcher; pass --brain flags only.
+			// Bare brain-sync is the foreground watcher.
 			var pargs []string
 			for _, b := range brainPaths {
 				pargs = append(pargs, "--brain", b)
+			}
+			if verbose {
+				pargs = append(pargs, "--verbose")
 			}
 			if err := m.Install(bin, pargs); err != nil {
 				return err

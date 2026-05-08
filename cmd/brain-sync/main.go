@@ -22,6 +22,7 @@ import (
 var (
 	brainPaths []string
 	fetchEvery time.Duration
+	verbose    bool
 )
 
 func main() {
@@ -45,11 +46,12 @@ func main() {
 				log.Printf("brainsync: auto-discovered %d shared brain(s)", len(auto))
 			}
 
-			return brainsync.Watch(ctx, brainPaths, fetchEvery)
+			return brainsync.Watch(ctx, brainPaths, fetchEvery, verbose)
 		},
 	}
 	root.Flags().StringSliceVar(&brainPaths, "brain", nil, "absolute path to a shared brain (repeatable)")
 	root.Flags().DurationVar(&fetchEvery, "fetch-every", 30*time.Second, "periodic fetch interval")
+	root.Flags().BoolVarP(&verbose, "verbose", "v", false, "log every successful push/pull")
 
 	root.AddCommand(serviceCmd())
 

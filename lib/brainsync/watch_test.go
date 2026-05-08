@@ -3,15 +3,19 @@ package brainsync
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
 
 func TestPushBrain_NoUnpushed_NoOp(t *testing.T) {
 	_, peerA, _ := twoPeerRepo(t)
-	// peerA is at origin/main; nothing to push.
-	if err := PushBrain(peerA, "peerA", time.Now); err != nil {
-		t.Errorf("expected nil, got %v", err)
+	pushed, err := PushBrain(peerA, "peerA", time.Now)
+	if err != nil {
+		t.Errorf("expected nil err, got %v", err)
+	}
+	if pushed {
+		t.Error("nothing to push but pushed=true")
 	}
 }
 
@@ -21,8 +25,12 @@ func TestPushBrain_HappyPath(t *testing.T) {
 	mustGit(t, peerA, "add", "tokyo.md")
 	mustGit(t, peerA, "commit", "-q", "-m", "tokyo")
 
-	if err := PushBrain(peerA, "peerA", time.Now); err != nil {
+	pushed, err := PushBrain(peerA, "peerA", time.Now)
+	if err != nil {
 		t.Errorf("PushBrain: %v", err)
+	}
+	if !pushed {
+		t.Error("expected pushed=true after fresh commit")
 	}
 }
 
@@ -41,7 +49,7 @@ func TestPushBrain_RejectedThenResolves(t *testing.T) {
 	at := time.Date(2026, 5, 7, 22, 16, 4, 0, time.UTC)
 	now := func() time.Time { return at }
 
-	if err := PushBrain(peerB, "peerB", now); err != nil {
+	if _, err := PushBrain(peerB, "peerB", now); err != nil {
 		t.Fatalf("PushBrain: %v", err)
 	}
 	// Verify B's working tree has both canonical (A's content) + conflict file.
@@ -61,15 +69,17 @@ func TestPushBrain_RejectedThenResolves(t *testing.T) {
 func TestPullBrain_FastForward(t *testing.T) {
 	_, peerA, peerB := twoPeerRepo(t)
 
-	// A pushes a new file.
 	must(t, os.WriteFile(filepath.Join(peerA, "tokyo.md"), []byte("plan\n"), 0o644))
 	mustGit(t, peerA, "add", "tokyo.md")
 	mustGit(t, peerA, "commit", "-q", "-m", "A: tokyo")
 	mustGit(t, peerA, "push", "-q", "origin", "main")
 
-	// B fetches + ff-pulls; should bring tokyo.md.
-	if err := PullBrain(peerB); err != nil {
+	pulled, err := PullBrain(peerB)
+	if err != nil {
 		t.Fatalf("PullBrain: %v", err)
+	}
+	if !pulled {
+		t.Error("expected pulled=true (remote was strictly ahead)")
 	}
 	if _, err := os.Stat(filepath.Join(peerB, "tokyo.md")); err != nil {
 		t.Errorf("tokyo.md should be present after PullBrain: %v", err)
@@ -79,23 +89,23 @@ func TestPullBrain_FastForward(t *testing.T) {
 func TestPullBrain_DirtyWorkTree_Skips(t *testing.T) {
 	_, peerA, peerB := twoPeerRepo(t)
 
-	// A pushes a new file.
 	must(t, os.WriteFile(filepath.Join(peerA, "tokyo.md"), []byte("plan\n"), 0o644))
 	mustGit(t, peerA, "add", "tokyo.md")
 	mustGit(t, peerA, "commit", "-q", "-m", "A: tokyo")
 	mustGit(t, peerA, "push", "-q", "origin", "main")
 
-	// B has uncommitted edit; PullBrain should skip the ff-pull.
 	must(t, os.WriteFile(filepath.Join(peerB, "paris.md"), []byte("draft B\n"), 0o644))
 
-	if err := PullBrain(peerB); err != nil {
+	pulled, err := PullBrain(peerB)
+	if err != nil {
 		t.Fatalf("PullBrain: %v", err)
 	}
-	// tokyo.md should NOT have been pulled in (skipped due to dirty WT).
+	if pulled {
+		t.Error("expected pulled=false (dirty work tree)")
+	}
 	if _, err := os.Stat(filepath.Join(peerB, "tokyo.md")); err == nil {
 		t.Error("tokyo.md should NOT be present (PullBrain should skip on dirty work tree)")
 	}
-	// B's edit to paris.md should still be there.
 	got, err := os.ReadFile(filepath.Join(peerB, "paris.md"))
 	must(t, err)
 	if string(got) != "draft B\n" {
@@ -108,5 +118,23 @@ func TestPeerIDFor(t *testing.T) {
 	got := PeerIDFor(repo)
 	if got != "test" {
 		t.Errorf("got %q, want %q", got, "test")
+	}
+}
+
+func TestPeerIDFor_FallbackToHostname(t *testing.T) {
+	repo := initRepoForTest(t)
+	// Unset user.name so PeerIDFor has to fall back.
+	mustGit(t, repo, "config", "--unset", "user.name")
+	got := PeerIDFor(repo)
+	// Should be the hostname (lowercased, .local stripped). Anything but
+	// "unknown-peer" is good — we know hostname is set on macOS test runners.
+	if got == "unknown-peer" {
+		t.Errorf("PeerIDFor with no user.name returned 'unknown-peer'; expected hostname-derived")
+	}
+	if got != strings.ToLower(got) {
+		t.Errorf("expected lowercased: got %q", got)
+	}
+	if strings.HasSuffix(got, ".local") || strings.HasSuffix(got, ".lan") {
+		t.Errorf("expected no .local/.lan suffix: got %q", got)
 	}
 }

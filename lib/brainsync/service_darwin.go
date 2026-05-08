@@ -33,6 +33,15 @@ const (
     <string>{{.LogPath}}</string>
     <key>StandardErrorPath</key>
     <string>{{.LogPath}}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- launchd's default PATH lacks /opt/homebrew/bin; without it
+             git can't find git-remote-gcrypt, gnupg, etc. -->
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>{{.Home}}</string>
+    </dict>
 </dict>
 </plist>
 `
@@ -63,10 +72,11 @@ func (m *launchdServiceManager) Install(binary string, args []string) error {
 		return err
 	}
 	defer f.Close()
+	home, _ := os.UserHomeDir()
 	return tpl.Execute(f, struct {
-		Label, Binary, LogPath string
-		Args                   []string
-	}{serviceLabel, binary, logPath(), args})
+		Label, Binary, LogPath, Home string
+		Args                         []string
+	}{serviceLabel, binary, logPath(), home, args})
 }
 
 func (m *launchdServiceManager) Uninstall() error {
