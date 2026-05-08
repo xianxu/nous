@@ -4,7 +4,7 @@ status: done
 deps: [000003]
 created: 2026-05-06
 updated: 2026-05-07
-actual_hours: 1
+actual_hours: 0.5
 ---
 
 # second-machine bootstrap dry-run for the encrypted brain
@@ -64,6 +64,6 @@ End-to-end dry-run completed in a tart `tahoe-base` VM via SSH. Took ~1h (mostly
 
 **End state:** procedure validated; nous#11 codifies the friction-fixes as test infra; cleanup of `brain.legacy*` and `xianxu/brain-backup` unblocked (track outside this issue against the wall-clock deadlines). Closing.
 
-**actual_hours: 1 (estimate)** — frontmatter value is a judgment guess, not script-derived. The focused work was running the VM dry-run + writing this log + scope decision. Roughly 1 hour of attention attributable to #10 specifically.
+**actual_hours: 0.5** (rounded from 0.45 per `active-time-v3.py --commit-weight 1.0`).
 
-**Methodology note**: `active-time.py` returns 15.28 hr mention-weighted attribution across the commit window — wildly over-counted because the same 8-hour brain session that closed #10 also drove `#3` post-close, `#4` M1/M2, `#11` test infra build-out, and `#8` M3. The script's mention-weighting can't distinguish which issue *drove* the work in heavy multi-issue sessions; #10 was mentioned in most segments because it was being closed, but the work being done was mostly `#11`'s test harness. The honest focused-on-#10 number is ~1 hr; treat that as the calibration data point, not 15.28.
+**Methodology note**: original v2.1 mention-weighting gave 15.28 hr (multi-issue session over-attribution; see `brain/data/life/42shots/velocity/baseline-v3.md`). Honest focused-on-#10 work was the 21-min segment between commits `0972cf8 #11: GPG_TTY` (14:12) and `ac57c92 #10: close` (14:33) — the VM dry-run + log writeup + scope decision. v3 attributes 27 min ≈ 0.45 hr. Most "VM-related" time in the session was `#11` test-infra work; commit-anchored attribution sends that to `#11` correctly. Issue ratio: 0.3× of original 1.5 hr estimate — substantially under because the v2.1 estimate assumed a more elaborate procedure than what shipped post-iCloud-Keychain-drop.

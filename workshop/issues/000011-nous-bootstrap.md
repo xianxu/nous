@@ -3,7 +3,7 @@ id: 000011
 status: done
 created: 2026-05-07
 updated: 2026-05-07
-actual_hours: 8
+actual_hours: 4.3
 ---
 
 # `make nous-bootstrap` — fresh-Mac dev toolchain installer
@@ -129,9 +129,9 @@ Test runtime: ~4 min from invocation to teardown (Homebrew install + Brewfile fe
 
 ### 2026-05-07 — close
 
-**Actual:** 8 hr (rounded from 7.91).
+**Actual:** 4.3 hr (rounded from 4.28 per `active-time-v3.py --commit-weight 1.0`).
 
-Computed via the `xx-issues` SKILL.md procedure: `active-time.py` over `~/.claude/projects/-Users-xianxu-workspace-{nous,brain}` with `--threshold-min 15 --include-assistant`, since/until set to the #11 commit window (09:54 PDT first commit `d3ee05c` → 22:12 PDT close commit `3fbc71e`). Three sessions in window; the brain-side session `114e54d1` carried 491 min of unified wall-clock active time. Mention-weighted gap assignment attributed 475 min (7.91 hr) to `#11` and 16 min to unattributed.
+Computed via v3 commit-anchored segment-local attribution (`brain/data/life/42shots/velocity/baseline-v3.md`). The previous v2.1 mention-weighted figure (7.91 hr) over-counted because cross-issue mentions in chat (`#10`, `#4`, `#8` cross-references in `#11`-focused segments) inflated `#11`'s share of session time. Commit-anchored attribution gives the cleaner number: 4.28 hr of segments whose commit-end-message says `#11`.
 
 End state:
 - `make nous-bootstrap` ships a fresh-Mac toolchain installer.
@@ -139,4 +139,4 @@ End state:
 - `make nous-test-snapshot` + `make nous-test-roundtrip` (~25s) is the fast iteration loop.
 - Atlas entry at `atlas/nous/bootstrap-entry-points.md` documents how the four `make` targets relate.
 
-Honest methodology note: the original close commit message (`3fbc71e`) hand-waved a per-milestone breakdown ("M1 ~2.5h + M2 ~3h + M3 ~1.5h + atlas ~1h"). That breakdown was a guess, not a measurement. The total (8) happens to match what the script later produced, but the per-milestone splits in that commit message shouldn't be cited as data. This log entry has the real number derived per procedure.
+Honest methodology trail: the original close commit message (`3fbc71e`) hand-waved a per-milestone breakdown ("M1 ~2.5h + M2 ~3h + M3 ~1.5h + atlas ~1h") which was a guess, not a measurement. v2.1's session-wide mention-weighting then "validated" 8 hr (cf7ee82). v3 commit-anchored attribution shows the real focused-on-#11 work was 4.28 hr — the rest of the session-wide active time was on adjacent work (`#4`, `#10`, `#8` close), correctly attributed to those issues by their commit anchors. The earlier 8-hr figure was wrong; this log entry has the v3-derived number, paired with `baseline-v3.md` for method.
