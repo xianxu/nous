@@ -1,8 +1,9 @@
 ---
 id: 000011
-status: working
+status: done
 created: 2026-05-07
 updated: 2026-05-07
+actual_hours: 8
 ---
 
 # `make nous-bootstrap` — fresh-Mac dev toolchain installer
@@ -50,7 +51,7 @@ Excluded by design (install on demand): ruby/chruby, postgresql, zig, elixir, ai
 - [x] Poll-don't-die for Xcode CLT install (no manual re-run after dialog).
 - [x] GitHub SSH-key flow (generate ed25519 if missing, register via `gh ssh-key add`).
 - [x] Drop "clone ariadne" from next-steps (ariadne is private; nous vendors what brain needs).
-- [ ] Atlas: brief entry under `atlas/` listing the four bootstrap entry points (`make identity`, `make nous-bootstrap`, `make new-brain`, `.openshell` `bootstrap`) and their relationships.
+- [x] Atlas: brief entry under `atlas/nous/bootstrap-entry-points.md` listing the four bootstrap entry points (`make identity`, `make nous-bootstrap`, `make new-brain`, `.openshell` `bootstrap`), order on fresh Mac, dependency graph, test infrastructure.
 
 ## Plan — M2 (automated test harness)
 
