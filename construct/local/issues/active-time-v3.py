@@ -243,8 +243,13 @@ def main():
     ap.add_argument("--until", help="ISO timestamp; events/commits after are skipped")
     ap.add_argument("--issue", action="append", default=[],
                     help="Issue number to track (without #); repeatable.")
-    ap.add_argument("--commit-weight", type=float, default=0.5,
-                    help="Fraction of segment active time attributed by commit refs (default 0.5)")
+    ap.add_argument("--commit-weight", type=float, default=1.0,
+                    help="Fraction of segment active time attributed by commit refs (default 1.0)")
+    ap.add_argument("--prefix-commit-weight", type=float, default=None,
+                    help="Commit-weight for the pre-first-commit prefix segment specifically. "
+                         "Defaults to --commit-weight. Useful for long-prefix sessions where "
+                         "early planning may not have been about the eventual first commit's "
+                         "issue (try 0.5 to mix in mention signal).")
     ap.add_argument("--threshold-min", type=int, default=15,
                     help="Gap-truncation threshold in minutes (default 15)")
     ap.add_argument("--include-assistant", action="store_true",
@@ -263,8 +268,13 @@ def main():
     events = load_events(args.dir, issue_pat, args.include_assistant, since, until)
     commits = load_commits(args.git_repo, since, until, issue_pat)
 
+    prefix_weight = args.prefix_commit_weight if args.prefix_commit_weight is not None else args.commit_weight
+
     print(f"# v3 segment-anchored attribution")
-    print(f"# commit-weight: {args.commit_weight}  •  threshold: {args.threshold_min} min")
+    if prefix_weight != args.commit_weight:
+        print(f"# commit-weight: {args.commit_weight} (prefix: {prefix_weight})  •  threshold: {args.threshold_min} min")
+    else:
+        print(f"# commit-weight: {args.commit_weight}  •  threshold: {args.threshold_min} min")
     print(f"# issues: {', '.join('#' + i for i in issues)}")
     print(f"# events in window: {len(events)}  •  commits in window: {len(commits)}")
     print()
@@ -289,6 +299,11 @@ def main():
     # time to this commit time), suffix (events after last commit).
     boundaries = [events[0][0]] + [c[0] for c in commits] + [events[-1][0] + timedelta(seconds=1)]
     boundaries = sorted(set(boundaries))
+
+    # Detect whether there's a real pre-first-commit prefix: only true if
+    # the first event's timestamp is strictly before the first commit's.
+    # (When user opens a session and immediately commits, there's no prefix.)
+    has_prefix = events[0][0] < commits[0][0]
 
     # Walk segments. For each segment, find which commit "anchors" it
     # (the segment-ending commit; for suffix, treat as no commit).
@@ -318,13 +333,18 @@ def main():
             for iss, n in m.items():
                 mentions[iss] = mentions.get(iss, 0) + n
 
-        alloc = attribute_segment(active, commit_issues, mentions, args.commit_weight)
+        # Use prefix_weight for the very first segment iff there's a real
+        # pre-first-commit prefix; otherwise use the standard commit_weight.
+        is_prefix = has_prefix and i == 0
+        weight = prefix_weight if is_prefix else args.commit_weight
+        alloc = attribute_segment(active, commit_issues, mentions, weight)
         seg_results.append({
             "seg_start": seg_start, "seg_end": seg_end,
             "active": active,
             "commit": anchor,
             "mentions": mentions,
             "alloc": alloc,
+            "is_prefix": is_prefix,
         })
 
     # Per-segment table
@@ -342,6 +362,8 @@ def main():
         else:
             commit_str = "(no anchor)"
             iss_str = ""
+        if sr.get("is_prefix"):
+            commit_str = "[prefix] " + commit_str
         ment_str = ",".join(f"#{i}={c}" for i, c in sorted(sr["mentions"].items()))
         alloc_str = ",".join(f"#{i}={m:.1f}m" for i, m in sorted(sr["alloc"].items()))
         print(f"{n:>3}  {sr['seg_start'].astimezone().strftime('%Y-%m-%d %H:%M'):<19}  "
