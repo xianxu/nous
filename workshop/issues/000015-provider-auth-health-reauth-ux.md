@@ -151,6 +151,16 @@ Familiarity ×1: charon's TUI is bubbletea + lipgloss; pattern is known. The OAu
 - **Why filed as its own issue, not folded into nous#14**: nous#14 is about CLI/TUI structure (cobra surface, lib organization, service unification). This is about the *auth state model* itself — different concern, different files (lib/provider/oauth, lib/charoncli's TUI views), no dependency on nous#14's M4-M5 work.
 - **Not in shared-brain mvp_scope**: `nous provider` is the credential proxy surface; brain-shared-family uses gcrypt+SSH for git, not OAuth. Shared-brain done-when isn't gated on this. Tracked separately as a charon-side UX improvement.
 
+### Why we can't prevent refresh-token death (only detect it)
+
+Worth surfacing the OAuth model so anyone implementing this doesn't waste time looking for a "keep tokens warm" path:
+
+- **Refresh tokens are not refreshed by use.** Google issues one at initial auth; charon stores it and exchanges it on-demand for new short-lived access tokens. Frequent use exercises the refresh token but doesn't extend its lifetime — there's no notion of "renewing" it.
+- **Lifetime is determined by Google's side**: explicit user revocation (Google Account → Security → Third-party apps), 6 months unused (n/a for active accounts), password reset on the user, OAuth client verification-status changes, suspicious-activity flags, or hitting Google's per-user-per-client refresh-token cap (~200 active).
+- **Charon's arm/disarm doesn't affect this**: disarmed = refuse incoming proxy CONNECTs; it doesn't reach into the OAuth flow or invalidate stored tokens. Re-arming after disarmed period uses the same stored refresh token, which is still subject to Google-side validity.
+
+Implication: the design has to assume tokens can die externally between sessions. **Active health-check at TUI startup** is the right primitive (detect early); there's no upstream prevention to invest in. No background refresh-warming job; that wouldn't help.
+
 ## Log
 
 ### 2026-05-09 — created
