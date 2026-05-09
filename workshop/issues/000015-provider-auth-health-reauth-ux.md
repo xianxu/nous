@@ -5,7 +5,7 @@ deps: [000014]
 created: 2026-05-09
 updated: 2026-05-09
 estimate_hours: 4
-actual_hours: 0.5
+actual_hours: 2
 ---
 
 # `nous provider` auth health + reauth UX
@@ -176,6 +176,13 @@ Implication: the design has to assume tokens can die externally between sessions
 ## Log
 
 
-- 2026-05-09: closed — 5 sub-commits all green; oauth health unit tests + 5 TUI synthetic tests pass; binaries build clean; live CheckHealth verified against operator vault. 2 plan items deliberately deferred: enter-on-needs-reauth scope-view bypass (operator can press r directly from picker) + manual e2e operator-driven token revocation test (synthetic suite proves wiring; e2e is a dogfood verification step)
+- 2026-05-09: closed — 5 sub-commits all green; oauth health unit tests + 5 TUI synthetic tests pass; binaries build clean; live CheckHealth verified against operator vault. 2 plan items deliberately deferred: enter-on-needs-reauth scope-view bypass (operator can press r directly from picker) + manual e2e operator-driven token revocation test (synthetic suite proves wiring; e2e is a dogfood verification step). Initial actuals: 0.5h.
+- 2026-05-09: post-close polish (~1.5h, raises actuals to 2h). Smoke-test surfaced gaps not blocking but visible; rolled in rather than re-opening:
+  - `nous provider <unknown>` swallowed as no-op → cobra `NoArgs` (170c40f).
+  - Scope-view didn't surface health (Level 3 was missed in M2). Added title badge `NEEDS REAUTH (^r)` red / `✓ checked` muted (c0bb570).
+  - `^r` in scope view rebound from revoke → reauth (revoke remained reachable from picker); cheatsheet rewritten (ff33e08).
+  - `r reauth` / `R revoke` collapsed to a single context-aware keystroke after operator pointed out the two states are mutually exclusive — first uppercase `R` (3c94755), then lowercase `r` (5621ebb).
+  - Reauth was using `forceFresh=true` (reductive — Google shows granular per-scope checkboxes; one stray click drops scopes). Switched to additive (`forceFresh=false`, `include_granted_scopes=true`) + scope-reduction warning when the post-reauth credential has fewer scopes than the pre-reauth count (e3d7b43).
+- 2026-05-09: smoke-test pass roughly verified by operator. Forward-fix posture for any remaining issues. Final actuals: 2h.
 ### 2026-05-09 — created
 Surfaced during nous#14 M3 smoke-testing. Operator opened `nous provider` after Google API returned 401 in an unrelated session; the TUI's local-state checkmarks suggested healthy auth, but action triggered `invalid_grant`. Recovery worked (charon's existing auto-fallback to browser reauth) but the path was confusing. Operator outlined the four UX improvements + asked whether direct reauth-flow trigger is achievable (yes — charon already has the code, just needs surfacing). Filed for follow-up.
