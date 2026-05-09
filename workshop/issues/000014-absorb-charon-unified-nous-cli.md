@@ -32,7 +32,7 @@ nous                          # default: TUI status board (brains + providers + 
 nous identity ...             # GPG keys + agent + peers
 nous brain ...                # brains: provision, sync, recipients, resolve
 nous provider ...             # AI providers: config, auth, proxy daemon
-nous obs ...                  # observability + service control (status, doctor, install/start/stop)
+nous service ...                  # observability + service control (status, doctor, install/start/stop)
 
 nous instructions             # canonical agent guide (charon's existing pattern)
 nous manifest                 # machine-readable state introspection
@@ -46,9 +46,9 @@ The clusters emerged from walking through actual use cases:
 | Generate keypair, export pubkey, import & verify peer key, gpg-agent lifecycle | `nous identity` |
 | Provision brain (private/shared), recipient list/add/remove, sync daemon, resolve conflicts | `nous brain` |
 | Configure AI provider, OAuth, paste API key, run proxy daemon | `nous provider` |
-| Status board, health checks, install/start/stop services | `nous obs` |
+| Status board, health checks, install/start/stop services | `nous service` |
 
-`nous obs` is the cross-cutting cluster that absorbs both observability (was: scattered across `charon-security` + `brain-sync status` + ad-hoc) and service-management (install/start/stop launchd plists). Per-subsystem service control still lives in the cluster (`nous brain sync install`, `nous provider proxy install`) because it's natural there; `nous obs` adds the *unified view* across all of them.
+`nous service` is the cross-cutting cluster that absorbs both observability (was: scattered across `charon-security` + `brain-sync status` + ad-hoc) and service-management (install/start/stop launchd plists). Per-subsystem service control still lives in the cluster (`nous brain sync install`, `nous provider proxy install`) because it's natural there; `nous service` adds the *unified view* across all of them.
 
 ### Subcommand tree (full)
 
@@ -78,10 +78,10 @@ nous provider auth <name>       OAuth dance or rotate key (was: charon auth)
 nous provider proxy             foreground proxy (was: bare charon / charon serve)
 nous provider proxy install/start/stop/status
 
-nous obs status                 unified state dump (scriptable, cron-able, --json available)
-nous obs doctor                 prescriptive checks with verdicts + named fixes
-nous obs services               all installed launchd services + state (across brain sync, provider proxy)
-nous obs audit [--since ...]    unified audit log (proxy requests + brain ops + recipient changes)
+nous service status                 unified state dump (scriptable, cron-able, --json available)
+nous service doctor                 prescriptive checks with verdicts + named fixes
+nous service list                   all installed launchd services + state (across brain sync, provider proxy)
+nous service audit [--since ...]    unified audit log (proxy requests + brain ops + recipient changes)
 
 nous instructions               canonical agent guide (composed from the agent-facing --help)
 nous manifest                   machine-readable: version, config paths, capabilities
@@ -143,7 +143,7 @@ This applies to skill-as-script (per `brain/data/life/42shots/ideas/2026-05-07-0
   1. Run `nous` (no subcommand) and see the TUI status board for both brains and providers.
   2. Run `nous brain new ../brain-private-ying` interactively and end up with a working private brain.
   3. Run `nous brain recipient add ../brain-shared-family` against a sneakernet'd pubkey, complete the verify-fingerprint dance, and have her husband admitted.
-  4. Run `nous obs doctor` and see green/yellow/red verdicts across GPG, agent, brains, providers, services.
+  4. Run `nous service doctor` and see green/yellow/red verdicts across GPG, agent, brains, providers, services.
 - All four recipient safeguards fire and have unit tests.
 - `mode:` removed from `.brain/config.md` schema; brain-sync auto-discovery replaced with explicit registration.
 - Atlas reorganized: `nous/atlas/nous/cli.md` (new) describes the unified surface; charon's existing atlas content moves under `nous/atlas/charon/` where still relevant; legacy entries marked archived.
@@ -158,7 +158,7 @@ Range: **12–22 hr**. Best guess: **~16 hr**.
 | M1 — subtree-merge charon → nous; both binaries build, tests pass | Cross-cutting refactor | 1.5–3 |
 | M2 — extract `lib/tui/`, `lib/agent/`, `lib/service/` shared libs (no behavior change) | Refactor | 1.5–3 |
 | M3 — introduce `cmd/nous/` cobra root; move existing subcommands under it; gpg-agent (charon#21 absorbed) | Greenfield Go (medium) + cobra restructuring | 3–5 |
-| M4 — net-new commands: `nous identity` cluster; `nous brain recipient` w/ safeguards; `nous brain new` guided; `nous obs status/doctor/services/audit` | Greenfield Go (medium) | 3–5 |
+| M4 — net-new commands: `nous identity` cluster; `nous brain recipient` w/ safeguards; `nous brain new` guided; `nous service status/doctor/services/audit` | Greenfield Go (medium) | 3–5 |
 | M5 — TUI shell (bubbletea status board + drill-in submenus for each cluster) | Bubbletea (familiar from charon) | 3–5 |
 | **+30% design buffer** | | +0.5–1.5 |
 | **Total** | | **~12.5–22.5** |
@@ -202,10 +202,10 @@ Familiarity ×1: cobra + bubbletea + gpg/git pipelines all known from charon; th
 - [ ] `nous brain new <path>`: guided multi-recipient flow. Drops `mode:` from generated manifests. Replaces `make new-brain`. Deletes bash scripts.
 - [ ] `nous brain recipient list/add/remove`: full surface with all four safeguards (self-removal guard, last-recipient guard, verify-before-add, revocation warning).
 - [ ] `nous brain resolve`: mechanical conflict-find + preserve + commit (uses `lib/brainsync/`). The `/nous-resolve` Claude Code skill is updated to call this for mechanical bits while still doing the agent-driven semantic merge in-session.
-- [ ] `nous obs status`: scriptable JSON-or-text dump. List of brains, providers, services with state.
-- [ ] `nous obs doctor`: prescriptive checks (gpg setup, agent reachable, remotes pingable, services running, recipient validity). Each red item names a fix.
-- [ ] `nous obs services`: all installed launchd services across all subsystems + state.
-- [ ] `nous obs audit`: unified audit log query (proxy requests + brain ops + recipient changes).
+- [ ] `nous service status`: scriptable JSON-or-text dump. List of brains, providers, services with state.
+- [ ] `nous service doctor`: prescriptive checks (gpg setup, agent reachable, remotes pingable, services running, recipient validity). Each red item names a fix.
+- [ ] `nous service services`: all installed launchd services across all subsystems + state.
+- [ ] `nous service audit`: unified audit log query (proxy requests + brain ops + recipient changes).
 - [ ] Drop `mode:` from `.brain/config.md` schema. Migration: scan existing brains, auto-register via `nous brain sync install`.
 
 ### M5 — TUI shell
@@ -226,7 +226,7 @@ Familiarity ×1: cobra + bubbletea + gpg/git pipelines all known from charon; th
 - **charon's open issues**: `charon#21` (gpg-agent lifecycle) absorbs into M3-M4 explicitly. Other charon issues that are still relevant: file new `nous#` issues for them at cutover. Closed charon issues stay in the archived repo for historical reference.
 - **charon-security menubar**: comes along on the move (M1). Continued life as separate cmd until eventual menubar-merge phase (deferred — not in this issue).
 - **`nous#13` (brain CLI unification)** — wontfix, superseded by this issue. Captured the design transition in #13's Log.
-- **Why "nous obs" vs the more obvious "nous status"**: top-level `nous status` is reserved for one-shot dump. The cluster `nous obs` covers the broader observability + ops surface (status, doctor, services, audit). `nous obs status` and the bare `nous status` are aliases of each other.
+- **Top-level `nous status` aliases `nous service status`**: shorthand for the most-used read. `nous service` covers the broader surface (status, doctor, list, audit); the cluster name `service` matches the user's framing of "where I go to see what's running."
 - **TUI library budget**: bubbletea + bubbles + lipgloss already in charon's go.mod; no new dependencies introduced.
 
 ## Log
@@ -237,8 +237,8 @@ Surfaced from `nous#12 M1` (provision brain-shared-family) ergonomics review. In
 
 Key design decisions captured at creation:
 
-1. **Use cases drive subcommand structure**, not "translate existing tools." Resulting clusters: `identity`, `brain`, `provider`, `obs`. Top-level: `instructions`, `manifest`, `menubar`.
+1. **Use cases drive subcommand structure**, not "translate existing tools." Resulting clusters: `identity`, `brain`, `provider`, `service`. Top-level: `instructions`, `manifest`, `menubar`.
 2. **Agent-vs-human help split**: subcommand `--help` is the agent's manual (skill-as-script applies); TUI is the human's UI. Both wrap shared lib operations. Separation prevents mutual pollution.
-3. **`nous obs` cluster** absorbs observability + service management (start/stop spans many subsystems; folding it into observability rather than as its own `nous service` cluster keeps it clean).
+3. **`nous service` cluster** absorbs both observability (status, doctor, audit) and unified service-control views (list across all subsystems). Per-subsystem install/start/stop stays in the cluster (`nous brain sync install`, `nous provider proxy install`) — discoverable where the user already is. The cluster name `service` (not `obs`) reflects the user's framing: this is where you go to see what's running, fix what's broken, and inspect what happened.
 4. **Subtree-merge over rewrite**: preserve charon's git history under `cmd/charon/` initially via subtree, then restructure piece by piece. Lower-risk than a full rewrite.
 5. **`nous` is the binary name**: matches repo, replaces `brain-sync` and `charon`, backward-compat via aliases during transition.
