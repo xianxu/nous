@@ -7,7 +7,7 @@
 # Makefile currently being processed.
 NOUS_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 
-.PHONY: build nous-all test clean trim identity moveto cloneto new-brain nous-bootstrap nous-test-bootstrap nous-test-snapshot nous-test-roundtrip nous-test-brain-sync
+.PHONY: build nous-dev test clean trim identity moveto cloneto new-brain nous-bootstrap nous-test-bootstrap nous-test-snapshot nous-test-roundtrip nous-test-brain-sync
 
 build:
 	@for dir in cmd/*/; do \
@@ -18,7 +18,18 @@ build:
 		go build -o "$$dir/bin/$$name" "./$$dir"; \
 	done
 
-# Build every cmd/<name>/ binary to a single top-level bin/ directory.
+# Build every cmd/<name>/ binary unsigned to top-level bin/ for
+# development. Stops the launchd-installed production services first
+# so port 8230 is free for foreground `bin/charon serve` testing
+# (and so the running prod instance doesn't keep doing work while
+# you iterate on dev binaries).
+#
+# Unsigned binaries → charon-dev keychain namespace at runtime
+# (charon's lib/provider/vault/keychain/service.go::ResolveServiceName
+# inspects code-signing state). Isolated from the production install's
+# charon namespace — no chance of dev iteration corrupting prod
+# OAuth state.
+#
 # Layout (post nous#14):
 #   bin/nous              unified CLI/TUI (cluster subcommands)
 #   bin/charon            legacy entry — same surface, slim shim over lib/charoncli
@@ -28,20 +39,28 @@ build:
 #
 # Sibling-binary layout matches what `nous service install` expects:
 # nous looks for charon and brain-sync next to itself in bin/, so
-# `make nous-all && bin/nous service install` works without further
+# `make nous-dev && bin/nous service install` works without further
 # path config.
 #
-# Skips main_*.go-only build constraints; mirrors `build`'s discovery
-# (cmd/*/main.go presence). Adds dirs that match nothing? skip.
-nous-all:
+# See nous#16 for the eventual single-binary `nous serve` workflow
+# where nous-dev runs the unified foreground daemon directly.
+nous-dev:
+	@echo "==> Stopping launchd-installed services (best-effort)..."
+	@launchctl bootout gui/$$(id -u) com.charon.proxy 2>/dev/null || true
+	@launchctl bootout gui/$$(id -u) com.xianxu.brain-sync 2>/dev/null || true
+	@echo "==> Building all binaries unsigned to bin/..."
 	@mkdir -p bin
 	@for dir in cmd/*/; do \
 		[ -f "$$dir/main.go" ] || continue; \
 		name=$$(basename "$$dir"); \
-		echo "building bin/$$name"; \
+		echo "  building bin/$$name"; \
 		go build -o "bin/$$name" "./$$dir"; \
 	done
-	@echo "all binaries → bin/"; ls -la bin/
+	@echo "==> Done. bin/ contents:"; ls -la bin/
+	@echo ""
+	@echo "Dev binaries use the charon-dev keychain namespace (unsigned)."
+	@echo "Run interactively: ./bin/nous provider, ./bin/charon serve, etc."
+	@echo "Re-install production with: ./bin/nous service install (signs eventually; today, see nous#16)."
 
 test:
 	go test ./...
