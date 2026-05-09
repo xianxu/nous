@@ -1,15 +1,23 @@
 # Charon — credential proxy + provider auth
 
-The charon-origin code lives here as part of nous's substrate. Original charon GitHub repo (`xianxu/charon`) is being archived (per `nous#14`); the substantive code moved to `nous/cmd/charon/`, `nous/cmd/nous-security/`, and `nous/internal/charon/` in commit landing M1 of `nous#14`.
+The charon-origin code lives in nous's substrate. Original charon GitHub repo (`xianxu/charon`) is being archived (per `nous#14`); the substantive code moved into `nous` via M1 (flat copy) and M2 (disassembled into domain libs).
 
 ## Entries
 
 - [Charon overview](charon.md) — what charon is, the proxy + provider-auth surface
 - [Security audit](security-audit.md) — threat model + audit log conventions
 
-## Future location
+## Where the code lives now (post-M2)
 
-`nous#14` plans to disassemble `internal/charon/` into domain-organized libs in M2 (`lib/provider`, `lib/agent`, `lib/tui`, etc.). After M2, this index gets refreshed to point at the new homes; entries here will likely be archived as historical references.
+`internal/charon/` no longer exists. Disassembled into `lib/` per the lib-first design principle (`nous#14 M2`, commit `07f4b6f`):
+
+- `lib/provider/{oauth, providers, proxy, runtime, vault}/` — credential proxy + provider auth + per-provider impls
+- `lib/security/` — host-security audit machinery (powers `cmd/nous-security/`)
+- `lib/tui/` — bubbletea + lipgloss components
+- `lib/service/` — launchd plist generation + service control
+- `cmd/charon/` and `cmd/nous-security/` — the binaries (still distinct cmds; `cmd/charon/`'s subcommands fold under the unified `cmd/nous/` in M3)
+
+Full layout map: [`atlas/nous/lib-layout.md`](../nous/lib-layout.md).
 
 ## Cross-refs
 
