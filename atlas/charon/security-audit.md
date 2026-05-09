@@ -2,22 +2,22 @@
 
 ## What
 
-`charon-security` is a two-purpose helper bundled into a single
+`nous-security` is a two-purpose helper bundled into a single
 `Charon Security.app`:
 
-1. **Hygiene auditor** (`charon-security check` / `make security`)
+1. **Hygiene auditor** (`nous-security check` / `make security`)
    — verifies that the environment charon's threat model assumes
    actually holds: SIP enabled, no TCC grants on terminals/IDEs,
    charon's keychain ACL boundary intact, no suspicious launchd
    persistence. Prints actionable remediation when it doesn't.
-2. **Runtime-consent oracle** (`charon-security menubar`, the
+2. **Runtime-consent oracle** (`nous-security menubar`, the
    no-args default since #16) — macOS menubar agent that arms/
    disarms the proxy's `Session` gate. Distinct bundle ID
    (`com.charon.security`) means the bundle is its own trust
    anchor for the proxy's DR check on the consent socket.
 
 Distinct from charon proper: charon is the credential proxy; charon-
-security is a separate binary in `cmd/charon-security/` that audits
+security is a separate binary in `cmd/nous-security/` that audits
 the surrounding environment and acts as its consent oracle. Lives in
 this repo because charon is the privacy-sensitive piece of the stack
 and reuses charon's keychain ACL inspection helpers.
@@ -25,7 +25,7 @@ and reuses charon's keychain ACL inspection helpers.
 ## Architecture
 
 ```
-make security-install       → builds bin/charon-security, packages as
+make security-install       → builds bin/nous-security, packages as
                               ~/Applications/Charon Security.app, signs
                               with Charon Self-Signed (hardened runtime).
 
@@ -33,10 +33,10 @@ make security               → runs the bundled binary. Pure run, never
                               re-signs (re-signing changes cdhash, which
                               invalidates TCC grants).
 
-charon-security check       → audit subcommand (hygiene scan)
-charon-security remedy <id> → look up remediation for one finding class
-charon-security remedy      → print full playbook (10 entries)
-charon-security menubar     → runtime-consent oracle (#16); no-args default
+nous-security check       → audit subcommand (hygiene scan)
+nous-security remedy <id> → look up remediation for one finding class
+nous-security remedy      → print full playbook (10 entries)
+nous-security menubar     → runtime-consent oracle (#16); no-args default
                               when launched via Finder/`open` (LSUIElement=true
                               keeps the bundle dock-less in this mode)
 ```
@@ -120,7 +120,7 @@ bundle and not a new one:
   check closes the loop on humans-only clicks.
 - **Same `.app` bundle as the audit tool** so users have one
   thing to install/sign/grant TCC to. The audit and oracle share
-  no code paths beyond `cmd/charon-security/main.go` dispatch.
+  no code paths beyond `cmd/nous-security/main.go` dispatch.
 
 Trust edge: unix-domain socket at `~/Library/Caches/charon/runtime.sock`
 (0600). Proxy reads `LOCAL_PEEREPID`, evaluates the peer's codesign
@@ -128,7 +128,7 @@ DR against `com.charon.security`. Unsigned dev binaries auto-bypass
 so `make dev` keeps working; signed prod requires the real bundle
 on the other end.
 
-UI surface (`cmd/charon-security/menubar.go`):
+UI surface (`cmd/nous-security/menubar.go`):
 - ●/○ glyph + remaining TTL in the menubar title (e.g. `● 27m` /
   `○ off`). Adaptive poll cadence — 10 s baseline, 1 s in the
   final minute so the countdown ticks live.
@@ -139,7 +139,7 @@ UI surface (`cmd/charon-security/menubar.go`):
   Alert style scoped to charon. Bare-binary dev runs fall back to
   `osascript`.
 
-Layered on the same `cmd/charon-security/` machinery so the audit
+Layered on the same `cmd/nous-security/` machinery so the audit
 and menubar share `notify_darwin.go` + bundle introspection.
 
 ## See also

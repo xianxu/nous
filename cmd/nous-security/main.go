@@ -1,4 +1,4 @@
-// Command charon-security audits a personal Mac for the hygiene
+// Command nous-security audits a personal Mac for the hygiene
 // baseline charon's threat model assumes (see docs/threat-model.md):
 // SIP enabled, no TCC grants on terminals/IDEs, no suspicious launchd
 // agents, charon's keychain ACLs intact.
@@ -31,7 +31,7 @@ var (
 
 func main() {
 	root := &cobra.Command{
-		Use:   "charon-security",
+		Use:   "nous-security",
 		Short: "Audit macOS hygiene + run the runtime-consent menubar",
 		Long: "Charon Security has two modes:\n\n" +
 			"  check  — audit macOS hygiene assumptions charon's threat\n" +
@@ -238,7 +238,7 @@ func offerFDAGrantIfNeeded(findings []security.Finding, self security.SelfInfo) 
 		return
 	}
 	if self.BundleID == "" {
-		fmt.Fprintln(os.Stderr, "\nNote: running outside a .app bundle. Granting FDA now would attach to your terminal, not to charon-security. Run via `make security` for proper TCC attribution.")
+		fmt.Fprintln(os.Stderr, "\nNote: running outside a .app bundle. Granting FDA now would attach to your terminal, not to nous-security. Run via `make security` for proper TCC attribution.")
 		return
 	}
 	fmt.Fprintf(os.Stderr, "\nFull Disk Access not granted to %s.\n", self.BundleID)

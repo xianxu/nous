@@ -83,7 +83,7 @@ import "C"
 import "unsafe"
 
 // hasBundle reports whether this process is running inside an .app
-// bundle. False when invoked as `./bin/charon-security menubar`
+// bundle. False when invoked as `./bin/nous-security menubar`
 // directly during dev iteration.
 func hasBundle() bool {
 	return C.charon_has_bundle() != 0

@@ -10,7 +10,7 @@ import (
 	"runtime/debug"
 )
 
-// SelfInfo describes the running charon-security binary — used for the
+// SelfInfo describes the running nous-security binary — used for the
 // pre-flight transparency block and for deciding whether the auto-revoke
 // flow is safe to offer.
 type SelfInfo struct {

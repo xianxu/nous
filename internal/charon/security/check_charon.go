@@ -16,7 +16,7 @@ import (
 // vault integration tests use to assert ACLs on writes.
 //
 // Inspects BOTH the prod (`charon`) and dev (`charon-dev`) namespaces
-// because the audit tool runs from charon-security.app with a
+// because the audit tool runs from nous-security.app with a
 // different code-signing identity than the charon CLI, so it can't
 // rely on ResolveServiceName picking the right one.
 //

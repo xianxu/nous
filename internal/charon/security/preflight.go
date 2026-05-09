@@ -27,7 +27,7 @@ func PrintPreflight(w io.Writer, self SelfInfo, opts PreflightOptions) {
 	} else {
 		fmt.Fprintf(w, "  bundle: (none — running outside .app; auto-revoke disabled)\n")
 	}
-	fmt.Fprintf(w, "  source: cmd/charon-security/, internal/security/\n\n")
+	fmt.Fprintf(w, "  source: cmd/nous-security/, internal/charon/security/\n\n")
 
 	fmt.Fprintf(w, "This tool will:\n")
 	fmt.Fprintf(w, "  - Run `csrutil status` and `sudo -nv` (read-only)\n")

@@ -405,7 +405,7 @@ func (r Report) printText(w io.Writer, opts PrintOptions) {
 			fmt.Fprintf(w, "      %s\n", a)
 		}
 		if f.RemedyRef != "" {
-			fmt.Fprintf(w, "      %s\n", hint("→ details: charon-security remedy "+f.RemedyRef))
+			fmt.Fprintf(w, "      %s\n", hint("→ details: nous-security remedy "+f.RemedyRef))
 		}
 	}
 

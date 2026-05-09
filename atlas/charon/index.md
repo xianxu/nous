@@ -1,6 +1,6 @@
 # Charon — credential proxy + provider auth
 
-The charon-origin code lives here as part of nous's substrate. Original charon GitHub repo (`xianxu/charon`) is being archived (per `nous#14`); the substantive code moved to `nous/cmd/charon/`, `nous/cmd/charon-security/`, and `nous/internal/charon/` in commit landing M1 of `nous#14`.
+The charon-origin code lives here as part of nous's substrate. Original charon GitHub repo (`xianxu/charon`) is being archived (per `nous#14`); the substantive code moved to `nous/cmd/charon/`, `nous/cmd/nous-security/`, and `nous/internal/charon/` in commit landing M1 of `nous#14`.
 
 ## Entries
 

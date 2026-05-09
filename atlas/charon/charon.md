@@ -269,7 +269,7 @@ auto-bypass (so `make dev` still works); signed prod requires the
 real `Charon Security.app` on the other end.
 
 The consent oracle ships in the same `Charon Security.app` bundle
-as the audit tool — `charon-security menubar` (the no-args default
+as the audit tool — `nous-security menubar` (the no-args default
 when launched via Finder) shows a status icon (●/○ + remaining
 TTL) with arm/disarm options. Native notifications via
 UserNotifications.framework, attributed to `com.charon.security` so
