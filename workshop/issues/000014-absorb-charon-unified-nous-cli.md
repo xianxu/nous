@@ -330,6 +330,8 @@ Two TUIs only. Bare `nous` stays as cobra-default help (no TUI). Identity ops us
 
 
 
+
+- 2026-05-09: closed M3 — 4 sub-commits (a-d) all green; refactor cmd/charon→lib/charoncli; cmd/nous binary mounts cluster subcommands; nous service unifies brain-sync+charon launchd plists; lib/agent foundation live-tested against actual keyring
 - 2026-05-09: closed M2 — git mv 8 packages from internal/charon/ to lib/{tui, service, security, provider/*}; sed-rewrite 71 imports; go build + go test ./... green across all relocated packages; cross-import rule verified clean (lib/provider ⊥ lib/brainsync); atlas/nous/lib-layout.md created
 - 2026-05-09: closed M1 — go build ./... + go test ./... green; charon binary smoke-tested (charon --help, manifest, instructions, scopes all functional against real vault state); 70 import paths rewritten, 0 charon-prefix imports remain; nous-security binary builds clean post-rename
 ### 2026-05-08 — created (supersedes nous#13)
