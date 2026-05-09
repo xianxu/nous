@@ -1,53 +1,84 @@
 # nous/lib/ — domain-organized libraries
 
-Post-`nous#14 M2`, the substantive library code lives in `lib/`, organized by domain rather than by source-of-origin. Per the lib-first design principle (see `nous#14`'s captured-decisions list, item #9): `cmd/*` are thin wrappers over `lib/*` operations, so future repackaging (e.g. a charon-only side-binary if the credential proxy ever ships outside the nous ecosystem) doesn't require disentangling commands from library logic.
+Post-`nous#14` (M1–M3), the substantive library code lives in `lib/`, organized by domain rather than by source-of-origin. Per the lib-first design principle (see `nous#14`'s captured-decisions list, item #9): `cmd/*` are thin wrappers over `lib/*` operations, so future repackaging (e.g. a charon-only side-binary if the credential proxy ever ships outside the nous ecosystem) doesn't require disentangling commands from library logic.
 
 ## Layout
 
 ```
 lib/
-  brainsync/   — brain-sync runtime: file-level conflict resolution, ref-watcher,
-                 git ops layer. Used by cmd/brain-sync (will collapse into the
-                 unified nous binary's service runtime in M3).
+  agent/       — gpg-agent lifecycle: keygrip discovery (M3d). M4 adds
+                 prewarm (PRESET_PASSPHRASE from Keychain), flush
+                 (reloadagent), status (KEYINFO query).
+                 Leaf module — lib/brain* and lib/identity will import
+                 it; doesn't import them.
+  brainsync/   — brain-sync runtime: file-level conflict resolution,
+                 ref-watcher, git ops layer. Today's cmd/brain-sync
+                 consumer; future M5 may collapse into the unified
+                 nous binary's service runtime.
+  charoncli/   — cobra subcommand constructors for the legacy `charon`
+                 binary surface (serve, run, auth, manifest, status,
+                 service, vault, scopes, gcp, instructions, arm, disarm,
+                 who, stats). Both cmd/charon (legacy entry) and
+                 cmd/nous (unified entry) import these — single source
+                 of truth for the provider-facing CLI behavior.
   gmail/       — Gmail tool primitives (cmd/gmail consumer).
-  provider/    — AI provider domain. Single roof for everything credential-and-
-                 proxy:
+  provider/    — AI provider domain. Single roof for everything
+                 credential-and-proxy:
                    provider/oauth/     OAuth flows
-                   provider/providers/ per-provider impls (anthropic, gcp, openai)
-                                       + provider/providers/catalog (scope catalog)
+                   provider/providers/ per-provider impls (anthropic,
+                                       gcp, openai) + catalog (scopes)
                    provider/proxy/     the credential proxy daemon
                    provider/runtime/   provider runtime (TTL, state)
-                   provider/vault/     credential storage (keychain + memory)
-  security/    — host-security audit machinery. Sibling to provider/, not nested,
-                 since security audits are orthogonal to credential routing.
-                 Consumer: cmd/nous-security/.
-  service/    — launchd plist generation + service control. Will absorb
-                 cmd/brain-sync's service_darwin.go in M3.
-  tui/         — bubbletea + lipgloss components. Used by cmd/charon today;
-                 will be used by all future TUIs (`nous brain`, `nous provider`).
+                   provider/vault/     credential storage (keychain +
+                                       memory)
+  security/    — host-security audit machinery. Sibling to provider/,
+                 not nested, since security audits are orthogonal to
+                 credential routing. Consumer: cmd/nous-security/.
+  service/     — launchd plist generation + service control. Today
+                 the charon-side service manager; brain-sync has its
+                 own at lib/brainsync/service_darwin.go (kept separate
+                 for now since merging would cascade through legacy
+                 cmd/brain-sync). cmd/nous's `nous service` cluster
+                 dispatches to both.
+  tui/         — bubbletea + lipgloss components. Used by cmd/charon
+                 today via charoncli; future TUIs (`nous brain`,
+                 `nous provider`) will use it directly.
 ```
+
+## Cmd consumers
+
+- `cmd/nous/` — unified binary (M3b+). Cobra root with cluster subcommands. Mounts `charoncli.{InstructionsCmd, ManifestCmd, AuthCmd}` at top-level / `nous provider` paths. `cmd/nous/service.go` (M3c) implements `nous service install/start/stop/status` dispatching to both `lib/service` and `lib/brainsync`. Identity + brain clusters are placeholders pending M4.
+- `cmd/charon/` — legacy entry, ~15-line `main.go` shim that calls `charoncli.BuildRoot().Execute()`. Stays for backwards-compat; eventual cleanup after operator migration.
+- `cmd/brain-sync/` — legacy entry for the brain-sync watcher. Same posture: kept for backwards-compat.
+- `cmd/nous-security/` — macOS menubar app. Separate cmd (different Info.plist + signing). Imports `lib/security`.
+- `cmd/gmail/`, `cmd/oneshot/` — Gmail tool entry points. Import `lib/gmail`.
 
 ## Cross-import rule
 
-`lib/provider` does not import `lib/brainsync` (or future `lib/brain`). `lib/brainsync` does not import `lib/provider`. They are independent domains. Common ground is:
+`lib/provider` does not import `lib/brainsync` (or future `lib/brain`). `lib/brainsync` does not import `lib/provider`. They are independent domains. Common ground modules are:
 
-- `lib/tui/` — both will use it for bubbletea components
-- `lib/service/` — both ship as launchd services
-- `lib/agent/` (planned, not yet extracted) — gpg-agent ops, used by both
+- `lib/agent/` — gpg-agent ops (M3d shipped foundation; M4 adds verbs)
+- `lib/tui/` — bubbletea + lipgloss components
+- `lib/service/` — launchd plist + service control
+- `lib/charoncli/` — cobra constructors for the provider-cluster surface
 
-This separation is what allows future repackaging: a charon-only binary imports `lib/provider` + `lib/tui` + `lib/service` (+ eventually `lib/agent`), not `lib/brainsync`.
+This separation is what allows future repackaging: a charon-only binary imports `lib/provider` + `lib/agent` + `lib/charoncli` + `lib/tui` + `lib/service`, not `lib/brainsync`.
 
 ## What's planned but not yet here
 
-- `lib/agent/` — gpg-agent ops (prewarm, flush, status). Net-new code; charon used gpg-agent indirectly via system tools, no charon-origin code to relocate. Lands as `nous#14 M3-M4` (charon#21 absorption).
-- `lib/identity/` — keypair gen/export/import, keyring inspection. Net-new code; lands in `nous#14 M4`.
-- `lib/brain/` — provisioning/recipient/resolve. Net-new code (M4); also will absorb `lib/brainsync/` as `lib/brain/sync/` if the rename feels right at that point.
+- `lib/identity/` — keypair gen/export/import, keyring inspection. Net-new code; lands in `nous#14 M4` alongside the `nous identity` cluster's cobra subcommands.
+- `lib/brain/` — provisioning/recipient/resolve. Net-new code (M4); also may absorb `lib/brainsync/` as `lib/brain/sync/` if the rename feels right at that point.
+- `lib/agent/` verbs (prewarm, flush, status) — M4 builds on M3d's foundation.
 
 ## History
 
-The current layout was assembled in two milestones of `nous#14`:
+`nous#14`'s milestones, each with its commit anchor:
 
 - M1 (commit `ff7e1f2`) — flat-copied charon's substantive code into `internal/charon/{oauth, providers, proxy, runtime, security, service, tui, vault}/` and `cmd/charon/`. 70 imports rewritten.
 - M2 (commit `07f4b6f`) — disassembled `internal/charon/` into the domain-organized `lib/` tree. 71 imports rewritten. `internal/` directory removed entirely.
+- M3a (`05211d1`) — refactored `cmd/charon` cobra constructors into `lib/charoncli/` (importable). `cmd/charon/main.go` slim shim.
+- M3b (`fb47554`) — `cmd/nous/main.go` cobra root + cluster subcommands. Two TUIs (provider, brain placeholder); identity + service clusters scaffolded.
+- M3c (`18fdd1e`) — real `nous service install/start/stop/status` unifying brain-sync + charon launchd plists.
+- M3d (`5242e51`) — `lib/agent/` foundation (Identity, Keygrip, DiscoverIdentity).
 
 charon's pre-merge git history is preserved in the `xianxu/charon` GitHub repo (planned to be archived after `nous#14` ships).
