@@ -44,6 +44,16 @@ build:
 #
 # See nous#16 for the eventual single-binary `nous serve` workflow
 # where nous-dev runs the unified foreground daemon directly.
+#
+# Why `rm -f bin/<name>` before each `go build -o`: macOS code-signing
+# state can stick to a binary's prior inode in cached form (Gatekeeper
+# / Security framework / sometimes launchd's open-fd). Switching
+# between signed (production) and unsigned (dev) versions of the same
+# binary at the same path doesn't always invalidate that cache. Result:
+# the new unsigned binary inherits the old signed binary's namespace
+# resolution, or vice versa, until you explicitly remove + rebuild.
+# Cheap insurance: rm first, build second. Verified bug from prior
+# iteration; keep the rm.
 nous-dev:
 	@echo "==> Stopping launchd-installed services (best-effort)..."
 	@launchctl bootout gui/$$(id -u) com.charon.proxy 2>/dev/null || true
@@ -54,6 +64,7 @@ nous-dev:
 		[ -f "$$dir/main.go" ] || continue; \
 		name=$$(basename "$$dir"); \
 		echo "  building bin/$$name"; \
+		rm -f "bin/$$name"; \
 		go build -o "bin/$$name" "./$$dir"; \
 	done
 	@echo "==> Done. bin/ contents:"; ls -la bin/
