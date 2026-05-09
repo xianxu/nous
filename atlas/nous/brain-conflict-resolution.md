@@ -17,9 +17,12 @@ How shared-brain conflicts get resolved. Companion to [`brain/atlas/sync-substra
 A Claude Code slash command that resolves conflict pairs via AI-prose merge with prototype-aware structural reasoning.
 
 - **Location**: `nous/nous/skills/nous-resolve/` (vendored to `.claude/skills/nous-resolve` via `nous/nous/nous.manifest`)
-- **Invocation**: `/nous-resolve <brain-root>` — one brain at a time
-- **Procedure**: 7 steps (see SKILL.md). Validate brain-root → discover conflicts → load context (both versions + prototype + recent commits + references) → reason structurally → show diff + confirm → preserve to `.brain/merges/` → write merged → delete conflict → commit explicitly with structural-choices in body. brain-sync's ref-watcher pushes the commit.
-- **Safety floor**: `preserve.py` snapshots both pre-merge versions plus a `meta.json` to `<brain-root>/.brain/merges/<utc-iso>-<canonical-slug>/` *before* canonical is overwritten. Non-conditional. Sets up M2's undo path (restore from snapshot).
+- **Invocation**:
+  - `/nous-resolve <brain-root>` — resolve mode (one brain at a time)
+  - `/nous-resolve <brain-root> undo` — revert the most recent `/nous-resolve` merge commit
+- **Resolve procedure** (7 steps, see SKILL.md): Validate brain-root → discover conflicts → load context (both versions + prototype + recent commits + references) → reason structurally → show diff + confirm → preserve to `.brain/merges/` → write merged → delete conflict → commit explicitly with structural-choices in body. brain-sync's ref-watcher pushes the commit.
+- **Undo procedure**: `git revert <merge-sha> --no-edit` against the most recent commit matching `^merge: .* via /nous-resolve$`. One operation restores canonical, restores the conflict file, and removes the snapshot files. Targeted older reverts (not the most recent) are manual `git revert <sha>` against the relevant commit.
+- **Safety floor**: `preserve.py` snapshots both pre-merge versions plus a `meta.json` to `<brain-root>/.brain/merges/<utc-iso>-<canonical-slug>/` *before* canonical is overwritten. Non-conditional. Combined with explicit-commit + git-revert undo, every merge is one command away from rollback.
 
 ## Structural awareness
 

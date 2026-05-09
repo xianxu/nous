@@ -10,12 +10,15 @@ Resolve conflict files left by `brain-sync` (format: `<stem>.conflict-<peer>-<YY
 ## Usage
 
 ```
-/nous-resolve <brain-root>
+/nous-resolve <brain-root>           # resolve conflict files
+/nous-resolve <brain-root> undo      # revert the most recent merge
 ```
 
 `<brain-root>` is the absolute path to the brain repo (must contain `.brain/config.md`). One brain at a time.
 
-When invoked, the skill walks the 7-step procedure below. Heavy lifting — context loading, structural reasoning, the actual merge — is done by the agent; helper scripts (`preserve.py`, `find-conflicts.sh`) handle deterministic mechanical steps only.
+When invoked without `undo`, the skill walks the 7-step **resolve procedure** below. Heavy lifting — context loading, structural reasoning, the actual merge — is done by the agent; helper scripts (`preserve.py`, `find-conflicts.sh`) handle deterministic mechanical steps only.
+
+When invoked with `undo`, the skill walks the **undo procedure** at the bottom — `git revert` on the most recent merge commit, restoring canonical + conflict file + removing the snapshot in one operation.
 
 ## Procedure
 
@@ -132,6 +135,78 @@ structural choices:
 
 If multiple pairs were chosen for resolution in step 2, repeat steps 3–7 per pair, in `utc-ts` order.
 
+## Undo procedure
+
+When invoked as `/nous-resolve <brain-root> undo`, revert the most recent merge committed by this skill. The safety floor: any `/nous-resolve` merge can be undone with one command, restoring canonical + conflict file + removing the snapshot directory.
+
+### 1. Validate `<brain-root>`
+
+Same as resolve step 1: `<brain-root>/.brain/config.md` must exist.
+
+### 2. Find the most recent merge commit
+
+```sh
+git -C <brain-root> log --grep '^merge: .* via /nous-resolve$' -1 --format='%H %ai %s'
+```
+
+If empty: report "no `/nous-resolve` merge commits in this brain — nothing to undo." Stop.
+
+If found: print the commit summary so the user sees what's about to be reverted:
+- Subject line
+- Date
+- Body (peer, conflict-ts, structural choices) via `git -C <brain-root> log -1 --format=%B <sha>`
+
+### 3. Confirm with user
+
+```
+Revert this merge?
+  [y]es — restores canonical, restores conflict file, removes .brain/merges snapshot
+  [n]o — abort
+
+Note: if commits landed AFTER the merge that depend on the merged content,
+git revert may produce conflicts. In that case the revert is aborted and
+the brain is left untouched; resolve manually.
+```
+
+### 4. On confirm
+
+```sh
+git -C <brain-root> revert <sha> --no-edit
+```
+
+`git revert` produces a new commit whose diff is the inverse of the merge commit. Result:
+- canonical → pre-merge content (restored)
+- conflict file → restored at its original path
+- `.brain/merges/<ts>-<slug>/canonical.<ext>`, `peer.<ext>`, `meta.json` → removed (git tracks files, may leave empty parent dir; harmless, optionally `rmdir` it)
+
+If `git revert` reports conflicts (subsequent commits modified the same lines), it leaves the working tree mid-revert. Abort with `git -C <brain-root> revert --abort`, tell the user to resolve manually, and stop. Don't try to auto-fix.
+
+### 5. brain-sync handles the push
+
+The new revert commit triggers brain-sync's ref-watcher; it pushes to origin on the next cycle. No explicit push needed.
+
+## Trail — finding old merges
+
+Snapshots persist under `.brain/merges/<utc-iso>-<slug>/` until manually pruned. Useful queries:
+
+```sh
+# All /nous-resolve merge commits in this brain
+git log --grep '^merge: .* via /nous-resolve$' --format='%h %ai %s'
+
+# Merges in the last week
+git log --grep '^merge: .* via /nous-resolve$' --since '1 week ago'
+
+# Merges of a specific path
+git log --grep '^merge: data/life/travel/.* via /nous-resolve$'
+
+# Snapshots on disk (newest first)
+ls -1 <brain-root>/.brain/merges/ | sort -r | head
+```
+
+To revert a specific *older* merge (not the most recent), pass the SHA explicitly: `git -C <brain-root> revert <older-sha> --no-edit`. The skill's `undo` subcommand only handles the most-recent case; older targeted reverts are a manual `git` operation.
+
+To prune old snapshots: `rm -rf <brain-root>/.brain/merges/<utc-iso>-<slug>/`. No automated prune yet; revisit if `.brain/merges/` becomes large.
+
 ## Failure modes
 
 - **User declines at step 5**: leave canonical and conflict-file untouched. No commits. No preservation snapshot (preserve.py runs only on confirm).
@@ -143,9 +218,10 @@ If multiple pairs were chosen for resolution in step 2, repeat steps 3–7 per p
 
 ## What this skill doesn't do
 
-- **Undo** (`/nous-resolve undo`) — coming in nous#5 M2.
 - **Section-aware declarative `merge:` rules** in prototype frontmatter — conditional M4, ships only if the M3 dogfood reveals real structural failures the prompt-guided merger can't be coaxed out of.
 - **Auto-invocation from brain-sync** — brain-sync writes conflict files; you invoke this skill explicitly when you see one.
+- **Targeted undo of older merges** — the `undo` subcommand reverts only the most recent `/nous-resolve` commit. Older targeted reverts are manual `git revert <sha>` operations.
+- **Automated snapshot pruning** — `.brain/merges/<ts>-<slug>/` directories persist until manually removed. Add a `prune` subcommand if it becomes a real problem.
 
 ## Notes
 

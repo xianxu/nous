@@ -80,6 +80,16 @@ EOF
 
 echo "==> fixture brain built at $brain"
 
+# Initialize git first, with the fixture (canonical + conflict file) as the
+# initial commit. This mirrors real use: the brain has history; preserve.py
+# creates the snapshot dir later, as part of the merge transaction; the merge
+# commit then includes the snapshot files as new additions.
+git -C "$brain" init -q -b main
+git -C "$brain" config user.name "test-runner"
+git -C "$brain" config user.email "test@example.com"
+git -C "$brain" add .
+git -C "$brain" commit -q -m "initial fixture"
+
 # (1) find-conflicts.sh
 echo "==> find-conflicts.sh"
 output=$("$skill_dir/find-conflicts.sh" "$brain")
@@ -121,11 +131,9 @@ echo "  [ok] meta.json fields correct"
 
 # (4) git ops path: simulate the on-confirm write + cleanup + commit
 echo "==> git ops path"
-git -C "$brain" init -q -b main
-git -C "$brain" config user.name "test-runner"
-git -C "$brain" config user.email "test@example.com"
-git -C "$brain" add .
-git -C "$brain" commit -q -m "initial fixture"
+# (git already initialized at top of file with the fixture as initial commit;
+# preserve.py just ran, so the snapshot dir exists in the working tree but
+# isn't yet committed — the merge commit will add it.)
 
 # Hand-crafted "merged" content (in real use, this is what the agent produces)
 cat >"$canonical" <<'EOF'
@@ -182,5 +190,44 @@ echo "  [ok] commit landed: $last_subject"
 [[ -f "$snapshot/canonical.md" ]] || { echo "FAIL: snapshot lost across commit"; exit 1; }
 echo "  [ok] canonical updated, conflict file gone, snapshot intact"
 
+
+# (5) undo path: revert the most recent merge commit, assert restoration
+echo "==> undo path"
+
+canonical_pre_undo=$(cat "$canonical")  # post-merge content (for comparison)
+
+# Find the most recent /nous-resolve merge commit
+merge_sha=$(git -C "$brain" log --grep '^merge: .* via /nous-resolve$' -1 --format='%H')
+[[ -n "$merge_sha" ]] || { echo "FAIL: no /nous-resolve merge commit found"; exit 1; }
+echo "  merge sha: ${merge_sha:0:8}"
+
+# Revert
+git -C "$brain" revert "$merge_sha" --no-edit >/dev/null
+
+# Assert: canonical reverted to pre-merge content
+canonical_now=$(cat "$canonical")
+[[ "$canonical_now" != "$canonical_pre_undo" ]] || { echo "FAIL: canonical didn't change"; exit 1; }
+grep -q '^travelers: \[self, alice\]$' "$canonical" || { echo "FAIL: canonical's travelers field not restored"; exit 1; }
+echo "  [ok] canonical restored to pre-merge content"
+
+# Assert: conflict file restored
+[[ -f "$conflict_file" ]] || { echo "FAIL: conflict file not restored"; exit 1; }
+grep -q 'travelers: \[self, alice, bob\]' "$conflict_file" || { echo "FAIL: conflict file content wrong"; exit 1; }
+echo "  [ok] conflict file restored at original path"
+
+# Assert: snapshot files gone (git revert removes tracked files; empty dir may remain)
+# Note: `find ... | wc -l` would interact poorly with pipefail if the dir doesn't
+# exist; just check the three known files.
+for f in canonical.md peer.md meta.json; do
+    [[ ! -f "$snapshot/$f" ]] || { echo "FAIL: $snapshot/$f still present after revert"; exit 1; }
+done
+echo "  [ok] .brain/merges snapshot files removed by revert"
+
+# Assert: revert commit landed
+revert_subject=$(git -C "$brain" log -1 --format=%s)
+[[ "$revert_subject" == 'Revert "merge: data/life/travel/2026-08-01-paris.md via /nous-resolve"' ]] \
+    || { echo "FAIL: revert commit subject $revert_subject"; exit 1; }
+echo "  [ok] revert commit landed: $revert_subject"
+
 echo ""
-echo "PASS — synthetic mechanical test green (find-conflicts + preserve + git ops)"
+echo "PASS — synthetic mechanical test green (find-conflicts + preserve + git ops + undo)"

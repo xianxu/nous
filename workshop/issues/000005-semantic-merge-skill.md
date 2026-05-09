@@ -78,9 +78,9 @@ M4's range is conditional (won't ship unless dogfood reveals real failures); app
 
 ### M2 — undo path
 
-- [ ] One-command `/brain-resolve undo` that restores the most recent merge from `.brain/merges/`.
-- [ ] Document the trail: how to find merges from a week ago, how to expire old ones.
-- [ ] Pulled in early (rather than last) because undo is the safety net that makes non-deterministic AI merges acceptable in the first place.
+- [x] One-command `/nous-resolve <brain-root> undo` that reverts the most recent merge. Implementation: SKILL.md procedure invokes `git revert <merge-sha> --no-edit`, which restores canonical + conflict file + removes snapshot in one operation. No new helper script needed — git revert IS the undo.
+- [x] Document the trail: SKILL.md `## Trail` section covers `git log --grep '^merge: .* via /nous-resolve$'` for finding past merges; manual `rm -rf .brain/merges/<old>/` for pruning; targeted older-revert via explicit SHA passed to `git revert`. No automated prune yet (revisit if `.brain/merges/` becomes large).
+- [x] Pulled in early (rather than last) because undo is the safety net that makes non-deterministic AI merges acceptable in the first place. Confirmed: now in hand before `nous#12` dogfood starts.
 
 ### M3 — dogfood with travel-plan as guinea pig
 
@@ -103,6 +103,18 @@ Only ship if M3 dogfood shows real failures the LLM can't be coaxed out of with 
 
 
 - 2026-05-08: closed M1 — ran nous/skills/nous-resolve/test-synthetic.sh end-to-end, all assertions green: find-conflicts emits expected tuple, preserve.py creates .brain/merges snapshot with correct meta.json, git ops path commits with descriptive message, canonical updated + conflict file removed
+### 2026-05-08 — M2 shipped (undo path)
+
+`/nous-resolve <brain-root> undo` lands. Implementation is `git revert <merge-sha> --no-edit` against the most recent commit matching `^merge: .* via /nous-resolve$`. One operation restores canonical, restores conflict file, removes snapshot files. No new helper script needed.
+
+**Why git-revert-as-undo**: the merge commit captures the entire transition (canonical-pre→canonical-merged, conflict-file→deleted, snapshot→added). Its inverse is exactly what undo wants. Bonus: produces a revert commit whose message records the undo for audit trail; brain-sync pushes it via ref-watcher.
+
+**Trail documentation in SKILL.md**: `git log --grep '^merge: .* via /nous-resolve$'` finds past merges; manual `rm -rf .brain/merges/<old>/` for pruning; targeted older-revert is `git revert <sha>` with explicit SHA. No automated prune yet (revisit if `.brain/merges/` becomes large).
+
+**Test coverage**: `test-synthetic.sh` extended with an undo step. Asserts canonical restored to pre-merge content, conflict file restored, snapshot files removed. Test fixture order had to be reshuffled so `git init` happens before `preserve.py` (otherwise the snapshot was in the initial fixture commit and revert wouldn't touch it).
+
+**Atlas updated**: `nous/atlas/nous/brain-conflict-resolution.md` now describes both modes.
+
 ### 2026-05-08 — M1 shipped
 
 `/nous-resolve <brain-root>` skill landed at `nous/nous/skills/nous-resolve/`. Plan in `workshop/plans/000005-semantic-merge-skill-plan.md`.
