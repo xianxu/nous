@@ -101,6 +101,8 @@ Only ship if M3 dogfood shows real failures the LLM can't be coaxed out of with 
 
 ## Log
 
+
+- 2026-05-08: closed M1 — ran nous/skills/nous-resolve/test-synthetic.sh end-to-end, all assertions green: find-conflicts emits expected tuple, preserve.py creates .brain/merges snapshot with correct meta.json, git ops path commits with descriptive message, canonical updated + conflict file removed
 ### 2026-05-08 — M1 shipped
 
 `/nous-resolve <brain-root>` skill landed at `nous/nous/skills/nous-resolve/`. Plan in `workshop/plans/000005-semantic-merge-skill-plan.md`.
