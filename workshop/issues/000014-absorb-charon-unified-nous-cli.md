@@ -1,9 +1,9 @@
 ---
 id: 000014
-status: open
+status: working
 deps: [000004]
 created: 2026-05-08
-updated: 2026-05-08
+updated: 2026-05-09
 estimate_hours: 16
 ---
 
@@ -245,15 +245,22 @@ Familiarity ×1: cobra + bubbletea + gpg/git pipelines all known from charon; th
 
 ## Plan
 
-### M1 — subtree-merge charon → nous
+### M1 — flat-copy charon → nous, rewrite imports, both binaries build
 
-- [ ] `git subtree add --prefix=cmd/charon https://github.com/xianxu/charon main --squash` (or filter-repo dance for unsquashed history). Decide squash vs preserve based on whether full charon log is worth the noise.
-- [ ] Move `charon-security/` → `nous/cmd/charon-security/`.
-- [ ] Move charon's `internal/` → `nous/internal/charon/` (so chamber lib doesn't pollute global `internal/`).
-- [ ] Reconcile `go.mod`: nous and charon get merged; module path stays `github.com/xianxu/nous`.
-- [ ] Both binaries build via `make build`; existing tests pass for both. `make nous-test-brain-sync` still green; charon's tests still green.
-- [ ] AGENTS.md / CLAUDE.md: charon's AGENTS.md content folded into nous's where unique; nous's stays canonical.
-- [ ] Atlas: charon's atlas content moves to `nous/atlas/charon/` with reorg notes.
+Initially planned as `git subtree add --squash`, but subtree lands the whole charon tree under one prefix and we'd want to mass-move pieces (`cmd/charon` → `cmd/charon`, `internal/` → `internal/charon`, etc.) anyway. The archived charon GitHub repo preserves charon's git history independently; we don't need it threaded into nous's log. Flat copy is simpler.
+
+- [ ] Copy `charon/cmd/charon/` → `nous/cmd/charon/` (the proxy + auth + instructions + manifest binary).
+- [ ] Copy `charon/cmd/charon-security/` → `nous/cmd/charon-security/` (renamed `cmd/nous-menubar/` later, or kept under charon-security for now and renamed in a follow-on commit).
+- [ ] Copy `charon/internal/` → `nous/internal/charon/` (oauth, providers, proxy, runtime, security, service, tui, vault as subpackages).
+- [ ] Copy `charon/atlas/*` (charon-specific docs) → `nous/atlas/charon/`. Skip charon's vendored ariadne-base atlas content (workflow/, etc.) — nous already has its own.
+- [ ] Skip: charon's `AGENTS.md`, `CLAUDE.md`, `Makefile.workflow`, `workshop/`, `.openshell/`, `construct/` — all vendored from ariadne-base which nous already has, or charon-internal that stays in the archived repo.
+- [ ] Merge `charon/go.mod`'s `require` block into `nous/go.mod`. Run `go mod tidy` to dedup + verify.
+- [ ] Rewrite imports across copied files: `github.com/xianxu/charon/internal/...` → `github.com/xianxu/nous/internal/charon/...`. Same for any `github.com/xianxu/charon/cmd/...` references.
+- [ ] Both binaries build via `make build` (which builds `bin/brain-sync`, `bin/charon`, `bin/charon-security`).
+- [ ] Existing tests pass for both. `make nous-test-brain-sync` green; charon's tests green from the new location.
+- [ ] AGENTS.md / CLAUDE.md: nous's stays canonical; nothing imported from charon's (those were vendored ariadne anyway).
+- [ ] Atlas index links the new `atlas/charon/` entries; reorg notes reference this commit.
+- [ ] M1 commit closes by referencing the source charon SHA so anyone curious about provenance can `cd ../charon && git log <sha>`.
 
 ### M2 — extract domain-organized lib
 
