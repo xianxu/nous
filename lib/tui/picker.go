@@ -126,33 +126,32 @@ func (m pickerModel) Update(msg tea.Msg) (pickerModel, tea.Cmd) {
 			return m, func() tea.Msg { return newAccountMsg{} }
 		}
 		return m, func() tea.Msg { return accountSelectedMsg{email: item.email} }
-	case "r":
-		// Reauth: trigger fresh OAuth for the cursored account. Browser
-		// flow opens; on success the credential is replaced with new
-		// tokens (preserving granted scope set). For accounts marked
-		// `needs reauth` this is the recovery path; for healthy accounts
-		// it's a manual rotation. Sends a reauthRequestedMsg that the
-		// top-level model fans out to auth.Auth + vault.Set.
-		// nous#15 M3.
-		if m.cursor < 0 || m.cursor >= len(m.items) {
-			return m, nil
-		}
-		if m.items[m.cursor].isNew {
-			return m, nil
-		}
-		email := m.items[m.cursor].email
-		m.statusMsg = fmt.Sprintf("opening browser for %s …", email)
-		return m, func() tea.Msg { return reauthRequestedMsg{email: email} }
 	case "R":
-		// Revoke (formerly `r`, moved to capital so `r` can be reauth —
-		// the more common operation). Drops the credential from the
-		// vault and revokes upstream. Confirm modal first, since this
-		// is destructive.
+		// `R` is context-dependent based on the cursored account's
+		// refresh-token health — the two actions (reauth vs revoke)
+		// are mutually exclusive at any given moment, so we share
+		// the keystroke and dispatch on state. nous#15 polish.
+		//
+		//   needs-reauth account → reauth (recovery action; opens
+		//                          browser for fresh OAuth, preserves
+		//                          granted scope set)
+		//   healthy account      → revoke confirm modal (destructive;
+		//                          drops credential from vault +
+		//                          revokes upstream)
+		//
+		// Cheatsheet at the bottom of the View renders the matching
+		// label, so the operator sees "R reauth" or "R revoke"
+		// depending on cursor.
 		if m.cursor < 0 || m.cursor >= len(m.items) {
 			return m, nil
 		}
 		if m.items[m.cursor].isNew {
 			return m, nil
+		}
+		if m.items[m.cursor].health == AccountHealthNeedsReauth {
+			email := m.items[m.cursor].email
+			m.statusMsg = fmt.Sprintf("opening browser for %s …", email)
+			return m, func() tea.Msg { return reauthRequestedMsg{email: email} }
 		}
 		m.state = pickerStateRevokeConfirm
 		m.statusMsg = ""
@@ -242,7 +241,7 @@ func (m pickerModel) View() string {
 	if m.cursor >= 0 && m.cursor < len(m.items) && !m.items[m.cursor].isNew {
 		switch m.items[m.cursor].health {
 		case AccountHealthNeedsReauth:
-			hint += "   r reauth"
+			hint += "   R reauth"
 		default:
 			hint += "   R revoke"
 		}
