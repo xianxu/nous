@@ -7,7 +7,7 @@
 # Makefile currently being processed.
 NOUS_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 
-.PHONY: build test clean trim identity moveto cloneto new-brain nous-bootstrap nous-test-bootstrap nous-test-snapshot nous-test-roundtrip nous-test-brain-sync
+.PHONY: build nous-all test clean trim identity moveto cloneto new-brain nous-bootstrap nous-test-bootstrap nous-test-snapshot nous-test-roundtrip nous-test-brain-sync
 
 build:
 	@for dir in cmd/*/; do \
@@ -17,6 +17,31 @@ build:
 		echo "building cmd/$$name/bin/$$name"; \
 		go build -o "$$dir/bin/$$name" "./$$dir"; \
 	done
+
+# Build every cmd/<name>/ binary to a single top-level bin/ directory.
+# Layout (post nous#14):
+#   bin/nous              unified CLI/TUI (cluster subcommands)
+#   bin/charon            legacy entry — same surface, slim shim over lib/charoncli
+#   bin/brain-sync        sync watcher daemon
+#   bin/nous-security     macOS menubar app (security audit)
+#   bin/gmail, bin/oneshot, ...
+#
+# Sibling-binary layout matches what `nous service install` expects:
+# nous looks for charon and brain-sync next to itself in bin/, so
+# `make nous-all && bin/nous service install` works without further
+# path config.
+#
+# Skips main_*.go-only build constraints; mirrors `build`'s discovery
+# (cmd/*/main.go presence). Adds dirs that match nothing? skip.
+nous-all:
+	@mkdir -p bin
+	@for dir in cmd/*/; do \
+		[ -f "$$dir/main.go" ] || continue; \
+		name=$$(basename "$$dir"); \
+		echo "building bin/$$name"; \
+		go build -o "bin/$$name" "./$$dir"; \
+	done
+	@echo "all binaries → bin/"; ls -la bin/
 
 test:
 	go test ./...
