@@ -119,31 +119,42 @@ Familiarity ×1: charon's TUI is bubbletea + lipgloss; pattern is known. The OAu
 
 ### M1 — Health-check primitive in lib/provider/oauth
 
-- [ ] Add `(*GoogleProvider).CheckHealth(account string) HealthState` (returns `Healthy | NeedsReauth | Unknown`). Implementation: do a refresh call; map outcomes.
-- [ ] Cache health state in vault metadata (or TUI session state) so we don't re-check every keystroke.
-- [ ] Apply same shape to other providers as they're added.
+- [x] Added `(*GoogleProvider).CheckHealth(*vault.Credential) HealthState` returning `Healthy | NeedsReauth | Unknown`. Implementation calls `g.Refresh` and pattern-matches OAuth2 RFC 6749 §5.2 error codes (invalid_grant / invalid_token / unauthorized_client) to NeedsReauth; transient failures (network, 5xx) map to Unknown so transient infrastructure doesn't penalize the operator.
+- [x] Probe-only — does NOT persist successful refreshes back to vault. Callers wanting to keep the new token call `g.Refresh` directly. Avoids unexpected vault writes on TUI event loops.
+- [x] `FriendlyError(err)` helper translates raw OAuth errors to user-facing prose, preserving the raw string as the second return value for debug surfaces.
+- [x] Live-tested against operator's actual vault: both Google accounts returned `healthy` (operator reauthed earlier). Unit tests cover the classifier + FriendlyError per error class.
 
 ### M2 — TUI health surfacing
 
-- [ ] Provider list view: render per-provider "(N needs reauth)" tag derived from per-account health.
-- [ ] Account list view: render per-account "(needs reauth)" badge.
-- [ ] On TUI startup, kick off health check goroutine; updates render asynchronously.
+- [x] Provider list (`providerPickerModel.AnnotateHealth`): appends `(N needs reauth)` to Google summary when any accounts fail, no-op when all healthy. `Google OAuth 2 accounts (1 needs reauth)`.
+- [x] Account list (`pickerModel.AnnotateHealth`): per-account `(needs reauth)` badge inline; needs-reauth rows visually muted so healthy ones stand out as default targets.
+- [x] Synchronous (1 refresh-token network roundtrip per Google account) at TUI entry. Personal-proxy scale (~3 accounts max) → ~600ms worst case at startup. Async goroutine + tea.Msg deferred until this is a real bottleneck.
+- [x] Cross-import discipline preserved: `tui.AccountHealth` is string-typed (not aliased to `oauth.HealthState`); adapter lives in `lib/charoncli`'s AuthCmd. (Note: lib/tui already imports lib/provider/oauth for scopes catalog work, so the strict "tui as domain-neutral leaf" framing was already broken — the string-typed enum is still cleaner than aliasing.)
 
 ### M3 — Direct reauth path
 
-- [ ] `r` keystroke from any account view triggers fresh OAuth (browser-based authorization). Routes through whatever charon already uses for auto-fallback.
-- [ ] Selecting a `needs reauth` account from the list lands on a "press R to reauthenticate" view, not the scope-toggle screen.
-- [ ] After successful reauth, refresh the TUI's view of that account.
+- [x] `r` keystroke in account picker triggers fresh OAuth via `auth.Auth(email, scopes, scopes, forceFresh=true)` — preserves the existing scope grant set, just gets new tokens.
+- [x] Existing `r revoke` moved to `R revoke` (capital). The more-common operation gets the lowercase letter; revoke is a destructive action and should require deliberate keystroke.
+- [x] Cheatsheet: `↑↓ nav   enter open   r reauth   R revoke   esc back   q quit`.
+- [x] After successful reauth: vault.Set writes new credential, `notifyProxyCacheClear` fires so the proxy uses the new tokens immediately, picker re-renders with refreshed health badge.
+- [x] Errors translate via `oauth.FriendlyError` into the picker's `statusMsg`.
+- [ ] **Deferred**: selecting a `needs-reauth` account via Enter to land on a "press R to reauthenticate" view. Today selecting drills into the scope view, where the friendly error then surfaces if any apply hits the bad token. Operator's reauth path: press `r` from the account list directly. Worth a follow-up if the scope-screen detour proves friction.
 
 ### M4 — Error rendering + Enter no-op
 
-- [ ] Translate common OAuth errors (`invalid_grant`, `invalid_token`, network failures) to user-facing prose. Raw message accessible via debug toggle (e.g. `?`).
-- [ ] Permissions-screen Enter: if no diff, no-op + brief "no changes" flash. If diff, apply (current behavior).
+- [x] `viewApplyError` now renders `oauth.FriendlyError(applyErr)`'s user-facing message; raw error appears on a debug line below only when it differs (avoids double-printing for cases the translator didn't change).
+- [x] Permissions-screen Enter with no scope diff is a no-op now: sets `applyStatus = "no changes — press q or esc to exit"` and stays on screen. Was: emitted `scopesQuitMsg` (exited to parent picker — counter-intuitive since Enter is the apply action everywhere else).
+- [x] Test renamed and updated: `TestEnterNoChangeQuits` → `TestEnterNoChangeIsNoOp`. Asserts nil cmd, non-empty applyStatus, unchanged state.
 
 ### M5 — Verification
 
-- [ ] Manually test: revoke a token via Google's account-page UI, then `nous provider` → confirm "needs reauth" surfaces at provider list + account list. Press `r`, confirm browser-flow lands new tokens, confirm TUI updates.
-- [ ] Synthetic test: stub the refresh-call layer with a known-failing response, confirm UI renders the badge correctly without hitting Google.
+- [x] Synthetic tests in `lib/tui/health_test.go` (5 tests):
+  - `TestPicker_AnnotateHealth_StampsBadgeOnUnhealthyAccount` — stubs the checker, asserts each item gets the right health.
+  - `TestPicker_View_RendersNeedsReauthBadge` — asserts rendered string contains `(needs reauth)`.
+  - `TestPicker_AnnotateHealth_NilCheckerIsNoOp` — passing nil keeps items in `Unchecked` state.
+  - `TestProviderPicker_AnnotateHealth_AppendsCountToGoogleSummary` — asserts `(1 needs reauth)` lands in the Google row's summary string.
+  - `TestProviderPicker_AnnotateHealth_NoBadgeWhenAllHealthy` — no false positives.
+- [ ] **Manual e2e test (operator)**: revoke a token via `myaccount.google.com → Security → Third-party apps`, then `~/workspace/nous/bin/nous provider`. Expected: `Google OAuth N accounts (1 needs reauth)` at top, per-account `(needs reauth)` badge muted, press `r` on the bad account, browser opens, complete OAuth, verify badge clears + status reads "reauthenticated <email>". Punted to post-merge dogfood; the synthetic suite proves the wiring.
 
 ## Notes
 
