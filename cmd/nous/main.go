@@ -44,8 +44,8 @@ specific docs.`,
 	root.AddCommand(brainCmd())
 	root.AddCommand(providerCmd())
 	root.AddCommand(serviceCmdImpl())
-	root.AddCommand(charoncli.InstructionsCmd())
-	root.AddCommand(charoncli.ManifestCmd())
+	root.AddCommand(instructionsCmd())
+	root.AddCommand(manifestCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -95,25 +95,24 @@ Coming in nous#14 M4. For now, use the legacy entry points:
 
 // providerCmd mounts charon's auth TUI as `nous provider` (the bare cluster
 // command IS the TUI entry, not `nous provider auth`). Adds `nous provider
-// list` as an alias for charon manifest's machine-readable view.
+// manifest` as an alias for charon manifest's machine-readable view.
 func providerCmd() *cobra.Command {
 	auth := charoncli.AuthCmd()
 	auth.Use = "provider"
-	auth.Short = "AI provider config + auth (TUI à la 'charon auth')"
+	auth.Short = "AI provider config + auth (interactive TUI)"
 	auth.Long = `Interactive TUI for managing AI provider credentials. List configured
 providers, drill into auth flows (OAuth dance for gcp / anthropic /
 openai / etc., or paste an API key). Add and remove operations also
 happen in the TUI — no separate CLI subcommand for those.
 
-Agent-facing read: ` + "`nous provider list`" + ` (machine-readable JSON of
-configured providers + their granted scopes). Equivalent of today's
-` + "`charon manifest`" + ` filtered to the provider view.`
+Agent-facing read: ` + "`nous provider manifest`" + ` (machine-readable
+JSON of configured providers + granted scopes).`
 
-	list := charoncli.ManifestCmd()
-	list.Use = "list"
-	list.Short = "Machine-readable list of configured providers + state (JSON)"
+	manifest := charoncli.ManifestCmd()
+	manifest.Use = "manifest"
+	manifest.Short = "Machine-readable: configured providers + granted scopes (JSON)"
 
-	auth.AddCommand(list)
+	auth.AddCommand(manifest)
 	return auth
 }
 

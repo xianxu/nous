@@ -73,9 +73,12 @@ func resolveSiblingBinary(name string) (string, error) {
 func serviceInstallCmdImpl() *cobra.Command {
 	return &cobra.Command{
 		Use:   "install",
-		Short: "Install brain-sync + charon proxy as launchd services",
-		Long: `Writes both launchd plists and bootstraps the services. After install
-both daemons run on login. Re-running is safe (idempotent).
+		Short: "Install (or reinstall) brain-sync + charon proxy as launchd services",
+		Long: `Writes both launchd plists and bootstraps the services. Idempotent:
+re-running after a binary rebuild updates the plists with the new
+paths. If a service is already loaded, install stops + uninstalls
+it first (so launchd picks up the new plist) before installing the
+fresh one.
 
 Binaries resolved by sibling-binary lookup: nous expects bin/brain-sync
 and bin/charon next to itself, falling back to PATH.`,
@@ -95,6 +98,13 @@ and bin/charon next to itself, falling back to PATH.`,
 			if err != nil {
 				return fmt.Errorf("charon service manager: %w", err)
 			}
+			// Reinstall hygiene: if charon is currently loaded with an
+			// old plist, launchctl load would silently no-op and the
+			// running service keeps the stale config. Stop+uninstall
+			// first ensures the new plist is what launchctl picks up.
+			// Errors here are non-fatal (service may not be loaded yet).
+			_ = charonMgr.Stop()
+			_ = charonMgr.Uninstall()
 			if err := charonMgr.Install(charonBin, []string{"serve"}); err != nil {
 				return fmt.Errorf("install charon: %w", err)
 			}
@@ -104,6 +114,9 @@ and bin/charon next to itself, falling back to PATH.`,
 			if err != nil {
 				return fmt.Errorf("brain-sync service manager: %w", err)
 			}
+			// Same reinstall hygiene for brain-sync.
+			_ = brainSyncMgr.Stop()
+			_ = brainSyncMgr.Uninstall()
 			if err := brainSyncMgr.Install(brainSyncBin, nil); err != nil {
 				return fmt.Errorf("install brain-sync: %w", err)
 			}
