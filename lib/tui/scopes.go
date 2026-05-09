@@ -547,7 +547,13 @@ func (m scopesModel) updateList(msg tea.KeyMsg) (scopesModel, tea.Cmd) {
 		}
 
 		if !m.pendingChanges() {
-			return m, func() tea.Msg { return scopesQuitMsg{} }
+			// Operator pressed Enter with no scope diff. Previously this
+			// exited to the parent (account picker) — counter-intuitive,
+			// since Enter is the apply action everywhere else. Now it's
+			// a no-op with a brief "no changes" hint. Use q / esc to
+			// exit. nous#15 M4.
+			m.applyStatus = "no changes — press q or esc to exit"
+			return m, nil
 		}
 		_, removed := m.diff()
 		if len(removed) > 0 {
@@ -977,9 +983,19 @@ func (m scopesModel) viewApplyError() string {
 	b.WriteString(titleStyle.Render("Apply failed"))
 	b.WriteString("\n\n")
 	if m.applyErr != nil {
+		// Translate raw OAuth errors into user-facing prose; raw is
+		// preserved on a follow-up line for debug. nous#15 M4.
+		userMsg, raw := oauth.FriendlyError(m.applyErr)
 		b.WriteString("  ")
-		b.WriteString(m.applyErr.Error())
+		b.WriteString(userMsg)
 		b.WriteString("\n")
+		// Show raw only when it differs from userMsg so we don't
+		// double-print for cases FriendlyError didn't translate.
+		if raw != "" && raw != userMsg && !strings.HasSuffix(userMsg, raw) {
+			b.WriteString("\n  ")
+			b.WriteString(helpStyle.Render("debug: " + raw))
+			b.WriteString("\n")
+		}
 	}
 	b.WriteString("\n")
 	b.WriteString(helpStyle.Render("press any key to dismiss"))

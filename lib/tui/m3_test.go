@@ -103,7 +103,10 @@ func TestSpaceTogglesTarget(t *testing.T) {
 	}
 }
 
-func TestEnterNoChangeQuits(t *testing.T) {
+func TestEnterNoChangeIsNoOp(t *testing.T) {
+	// nous#15 M4: Enter with no scope diff is a no-op (was: quit to
+	// parent — counter-intuitive since Enter is the apply action
+	// everywhere else). Operator must use q / esc to exit.
 	v := vaultWithBase("a@gmail.com")
 	m := newScopesForTest(t, v, "a@gmail.com", nil)
 	m, _ = moveToFirstListRow(t, m)
@@ -111,12 +114,15 @@ func TestEnterNoChangeQuits(t *testing.T) {
 	if m.pendingChanges() {
 		t.Fatalf("setup: vault with required scopes should produce no pending changes")
 	}
-	_, cmd := m.Update(keyPress("enter"))
-	if cmd == nil {
-		t.Fatal("enter with no pending changes: expected quit cmd")
+	updated, cmd := m.Update(keyPress("enter"))
+	if cmd != nil {
+		t.Fatalf("enter with no pending changes: expected nil cmd, got %T", cmd())
 	}
-	if _, ok := cmd().(scopesQuitMsg); !ok {
-		t.Fatalf("expected scopesQuitMsg, got %T", cmd())
+	if updated.applyStatus == "" {
+		t.Errorf("expected applyStatus to surface 'no changes' hint, got empty")
+	}
+	if updated.state != m.state {
+		t.Errorf("state should be unchanged, got %v want %v", updated.state, m.state)
 	}
 }
 
