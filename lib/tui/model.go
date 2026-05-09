@@ -482,6 +482,18 @@ func (m model) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		m.scopes = newScopesModel(msg.email, rows, m.auth)
+		// Stamp current health onto the scope view so the title can
+		// surface "NEEDS REAUTH" / "✓ checked". Re-probe rather than
+		// reading from the picker's stamp — the picker's value may
+		// be stale if the user toggled scopes elsewhere first. Probe
+		// is one network call, fine on a deliberate drill-in.
+		if m.healthCheck != nil {
+			if cred, err := m.vault.Get("google", msg.email); err == nil {
+				m.scopes.health = m.healthCheck(cred)
+			} else {
+				m.scopes.health = AccountHealthUnknown
+			}
+		}
 		m.current = screenScopes
 		return m, nil
 

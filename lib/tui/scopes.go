@@ -226,6 +226,7 @@ type scopesModel struct {
 	applyErr       error
 	applyStatus    string // transient message shown after success
 	auth           Authenticator
+	health         AccountHealth // refresh-token state stamped at view-entry; "" = unchecked
 }
 
 // reservedLines is the fixed chrome around the row list:
@@ -859,6 +860,23 @@ func (m scopesModel) viewNormal() string {
 		header += fmt.Sprintf("   [%d pending: +%d -%d]", len(added)+len(removed), len(added), len(removed))
 	}
 	b.WriteString(titleStyle.Render(header))
+	// Health badge in the title — needs-reauth rendered in the
+	// destructive/red style so it stands out. Healthy accounts get a
+	// subtle "✓ checked" marker in the muted style so the operator can
+	// see that the probe ran (not "no probe happened, looks healthy").
+	// Unknown (transient probe failure) gets "(?)" in muted style.
+	// nous#15 follow-up: Level 3 surfacing the issue spec called for.
+	switch m.health {
+	case AccountHealthNeedsReauth:
+		b.WriteString(titleStyle.Render(" - "))
+		b.WriteString(rowDelStyle.Render("NEEDS REAUTH (press R from picker)"))
+	case AccountHealthHealthy:
+		b.WriteString(titleStyle.Render("   "))
+		b.WriteString(mutedStyle.Render("✓ checked"))
+	case AccountHealthUnknown:
+		b.WriteString(titleStyle.Render("   "))
+		b.WriteString(mutedStyle.Render("(probe inconclusive)"))
+	}
 	// Color legend: when an agent has asked for a scope the user hasn't
 	// granted, those rows are tinted muted yellow. Surface that in the
 	// header in the same color so users learn what the tint means.
