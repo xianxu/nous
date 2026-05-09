@@ -87,6 +87,14 @@ type model struct {
 	// hint instead of launching the flow.
 	gcpClientFactory func(account string) (GCPSetupClient, error)
 
+	// healthCheck probes per-account refresh-token validity for badge
+	// surfacing. nil → no checks (older callers, tests). Production
+	// wires an adapter over oauth.GoogleProvider.CheckHealth in
+	// lib/charoncli's AuthCmd. See nous#15 for the design rationale
+	// (active health check at session boundary; can't prevent token
+	// death, only detect it early).
+	healthCheck AccountHealthChecker
+
 	// activeAdminProvider is the provider whose entity list is on
 	// screen when current==screenAdminKeyList. Used for re-rendering
 	// the list after a vault/store mutation lands.
@@ -141,6 +149,18 @@ func WithProxyAddr(addr string) Option {
 // from the scope view are inert — set it from cmd/charon's authCmd.
 func WithGCPClientFactory(f func(account string) (GCPSetupClient, error)) Option {
 	return func(m *model) { m.gcpClientFactory = f }
+}
+
+// WithAccountHealthChecker wires a per-account refresh-token health
+// probe. The TUI calls it during picker construction to surface
+// "needs reauth" badges in the provider list and account list.
+// Without this option, no badges render — same UX as before nous#15.
+//
+// Adapter typically lives in cmd/nous or lib/charoncli where
+// oauth.GoogleProvider is in scope; the adapter maps oauth's
+// HealthState enum to tui.AccountHealth strings.
+func WithAccountHealthChecker(f AccountHealthChecker) Option {
+	return func(m *model) { m.healthCheck = f }
 }
 
 // WithAdminKeyProvider registers an admin-key provider (OpenAI,
@@ -212,6 +232,7 @@ func newModel(v vault.Store, initialAccount string, opts ...Option) (model, erro
 	if err != nil {
 		return model{}, err
 	}
+	pp.AnnotateHealth(v, m.healthCheck)
 	m.providerPicker = pp
 
 	m.current = screenProvider
@@ -654,6 +675,7 @@ func (m model) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = err
 			return m, tea.Quit
 		}
+		newPicker.AnnotateHealth(m.vault, m.healthCheck)
 		if prevCursor >= len(newPicker.items) {
 			prevCursor = len(newPicker.items) - 1
 		}
@@ -834,6 +856,7 @@ func (m model) handleProviderSelected(msg providerSelectedMsg) (tea.Model, tea.C
 			m.err = err
 			return m, tea.Quit
 		}
+		p.AnnotateHealth(m.vault, m.healthCheck)
 		p.cursor = clampCursor(m.oauthCursor, len(p.items))
 		m.picker = p
 		m.current = screenPicker
@@ -952,6 +975,7 @@ func (m model) refreshProviderPickerWithStatus(status string) (tea.Model, tea.Cm
 		m.err = err
 		return m, tea.Quit
 	}
+	pp.AnnotateHealth(m.vault, m.healthCheck)
 	if prevCursor >= len(pp.items) {
 		prevCursor = len(pp.items) - 1
 	}

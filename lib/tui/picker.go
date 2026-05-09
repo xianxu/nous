@@ -10,8 +10,9 @@ import (
 )
 
 type pickerItem struct {
-	email string
-	isNew bool
+	email  string
+	isNew  bool
+	health AccountHealth // empty when checks aren't wired (default UX)
 }
 
 // pickerState captures the OAuth picker's modal state. Normal is the
@@ -47,6 +48,30 @@ func newPickerModel(v vault.Store) (pickerModel, error) {
 	sort.Slice(items, func(i, j int) bool { return items[i].email < items[j].email })
 	items = append(items, pickerItem{isNew: true})
 	return pickerModel{items: items}, nil
+}
+
+// AnnotateHealth runs the health checker against each Google account
+// in the picker and stamps results onto items. No-op when check is nil.
+//
+// Synchronous — does len(items) refresh-token network roundtrips.
+// Cheap for personal-proxy use (typically 1-3 accounts, ~600ms total
+// worst case). If this becomes a TUI-startup bottleneck, future work
+// can move it to a background goroutine that updates via tea.Msg.
+func (m *pickerModel) AnnotateHealth(v vault.Store, check AccountHealthChecker) {
+	if check == nil {
+		return
+	}
+	for i := range m.items {
+		if m.items[i].isNew {
+			continue
+		}
+		cred, err := v.Get("google", m.items[i].email)
+		if err != nil {
+			m.items[i].health = AccountHealthUnknown
+			continue
+		}
+		m.items[i].health = check(cred)
+	}
 }
 
 // Messages emitted by the picker.
@@ -143,10 +168,24 @@ func (m pickerModel) View() string {
 			line = "+ new account"
 		} else {
 			line = item.email
+			// Append health badge inline so the operator can see at
+			// a glance which accounts need attention. Empty health
+			// (unchecked) renders without a badge — same as before.
+			switch item.health {
+			case AccountHealthNeedsReauth:
+				line += "  (needs reauth)"
+			case AccountHealthUnknown:
+				line += "  (?)"
+			}
 		}
 		if i == m.cursor {
 			line = selectedStyle.Render(line)
 		} else if item.isNew {
+			line = mutedStyle.Render(line)
+		} else if item.health == AccountHealthNeedsReauth {
+			// Visually de-emphasize accounts that need reauth so the
+			// healthy ones stand out as the default-action targets.
+			// Cursor styling overrides this when hovered.
 			line = mutedStyle.Render(line)
 		}
 		b.WriteString(cursor)

@@ -42,6 +42,36 @@ type providerPickerModel struct {
 	statusMsg string // transient hint shown on hover/action; clears on next nav
 }
 
+// AnnotateHealth runs the health checker against each Google account
+// and appends "(N needs reauth)" to Google's summary if any accounts
+// fail. No-op when check is nil. Synchronous; see pickerModel's
+// AnnotateHealth for the cost analysis.
+func (m *providerPickerModel) AnnotateHealth(v vault.Store, check AccountHealthChecker) {
+	if check == nil {
+		return
+	}
+	creds, err := v.List()
+	if err != nil {
+		return
+	}
+	needsReauth := 0
+	for _, c := range creds {
+		if c.Provider == "google" && c.CredType() == vault.TypeOAuth {
+			if check(c) == AccountHealthNeedsReauth {
+				needsReauth++
+			}
+		}
+	}
+	if needsReauth == 0 {
+		return
+	}
+	for i := range m.items {
+		if m.items[i].name == "google" {
+			m.items[i].summary += fmt.Sprintf(" (%d needs reauth)", needsReauth)
+		}
+	}
+}
+
 // providerSelectedMsg is emitted when the user picks a provider.
 // Forwarded to the top-level model which sets up the per-type entity
 // list and routes screens.

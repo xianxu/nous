@@ -22,7 +22,7 @@ import (
 // gcpFactory is optional: when non-nil, the TUI offers Google Cloud
 // project setup from a realized cloud-platform row in the scope
 // view. When nil, that path falls back to a status hint.
-func Run(v vault.Store, account, addr string, auth Authenticator, gcpFactory func(account string) (GCPSetupClient, error), adminProviders ...providers.Provider) error {
+func Run(v vault.Store, account, addr string, auth Authenticator, healthCheck AccountHealthChecker, gcpFactory func(account string) (GCPSetupClient, error), adminProviders ...providers.Provider) error {
 	var opts []Option
 	if addr != "" {
 		opts = append(opts, WithDenialFetcher(httpDenialFetcher(addr)))
@@ -30,6 +30,9 @@ func Run(v vault.Store, account, addr string, auth Authenticator, gcpFactory fun
 	}
 	if auth != nil {
 		opts = append(opts, WithAuthenticator(auth))
+	}
+	if healthCheck != nil {
+		opts = append(opts, WithAccountHealthChecker(healthCheck))
 	}
 	if gcpFactory != nil {
 		opts = append(opts, WithGCPClientFactory(gcpFactory))

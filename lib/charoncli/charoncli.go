@@ -420,7 +420,20 @@ Headless removal: 'charon vault delete --provider X --account Y'.`,
 				supplier := tokenSupplierFromVault(v, gp, "google", account)
 				return gcp.New(supplier), nil
 			}
-			return tui.Run(v, "", resolveAddr(cmd), gp, gcpFactory, openaiProv)
+			// Adapter from oauth.HealthState to tui.AccountHealth.
+			// Keeps lib/tui domain-neutral (no oauth import) per the
+			// lib-first cross-import rule. nous#15 M2.
+			healthCheck := func(c *vault.Credential) tui.AccountHealth {
+				switch gp.CheckHealth(c) {
+				case oauth.HealthHealthy:
+					return tui.AccountHealthHealthy
+				case oauth.HealthNeedsReauth:
+					return tui.AccountHealthNeedsReauth
+				default:
+					return tui.AccountHealthUnknown
+				}
+			}
+			return tui.Run(v, "", resolveAddr(cmd), gp, healthCheck, gcpFactory, openaiProv)
 		},
 	}
 }
