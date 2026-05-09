@@ -524,6 +524,12 @@ func (m model) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			user, _ := oauth.FriendlyError(msg.err)
 			m.picker.statusMsg = fmt.Sprintf("reauth %s: %s", msg.email, user)
+			// If the operator is on the scope view (^r path), surface
+			// the error there too — picker statusMsg won't be visible.
+			if m.current == screenScopes && m.scopes.account == msg.email {
+				m.scopes.applyErr = msg.err
+				m.scopes.state = stateApplyError
+			}
 			return m, nil
 		}
 		if msg.cred != nil {
@@ -549,6 +555,12 @@ func (m model) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		newPicker.statusMsg = fmt.Sprintf("reauthenticated %s", msg.email)
 		m.picker = newPicker
+		// If the reauth came from the scope view (^r), update its
+		// health stamp so the title's "NEEDS REAUTH" badge clears.
+		if m.current == screenScopes && m.scopes.account == msg.email {
+			m.scopes.health = AccountHealthHealthy
+			m.scopes.applyStatus = fmt.Sprintf("reauthenticated %s", msg.email)
+		}
 		return m, nil
 
 	case newAccountMsg:

@@ -232,7 +232,23 @@ func (m pickerModel) View() string {
 		b.WriteString(helpStyle.Render(m.statusMsg))
 		b.WriteString("\n")
 	}
-	b.WriteString(helpStyle.Render("↑↓ nav   enter open   r reauth   R revoke   esc back   q quit"))
+	// Cheatsheet is context-aware: show the action that fits the
+	// hovered account's state, not both. Healthy → revoke is the
+	// less-common but still valid action. Unhealthy → reauth is the
+	// recovery path. Power users can press the other keystroke
+	// regardless; the cheatsheet just doesn't advertise both at once.
+	// nous#15 polish.
+	hint := "↑↓ nav   enter open"
+	if m.cursor >= 0 && m.cursor < len(m.items) && !m.items[m.cursor].isNew {
+		switch m.items[m.cursor].health {
+		case AccountHealthNeedsReauth:
+			hint += "   r reauth"
+		default:
+			hint += "   R revoke"
+		}
+	}
+	hint += "   esc back   q quit"
+	b.WriteString(helpStyle.Render(hint))
 	b.WriteString("\n")
 	return b.String()
 }

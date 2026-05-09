@@ -137,33 +137,46 @@ func TestAdditiveApplyUsesForceFreshFalse(t *testing.T) {
 	}
 }
 
-func TestRevokeChordOpensConfirmModalFromList(t *testing.T) {
+// nous#15 polish: ^r in scope view is now reauth (was: revoke).
+// Revoke moved out of the scope view entirely — operator uses the
+// picker's `R` keystroke. These tests now assert ^r emits a
+// reauthRequestedMsg with the current account, not stateRevokeConfirm.
+
+func TestReauthChordEmitsReauthRequestedFromList(t *testing.T) {
 	v := vaultWithBase("a@gmail.com")
 	auth := &stubAuth{}
 	m := newScopesForTest(t, v, "a@gmail.com", auth)
 	m, _ = moveToFirstListRow(t, m)
 
-	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
-	if m.state != stateRevokeConfirm {
-		t.Errorf("after ctrl+r in list: state=%v want stateRevokeConfirm", m.state)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	if cmd == nil {
+		t.Fatal("ctrl+r in list: expected reauthRequestedMsg cmd, got nil")
 	}
-	if cmd != nil {
-		t.Errorf("ctrl+r alone should not dispatch a command, got %T", cmd())
+	msg, ok := cmd().(reauthRequestedMsg)
+	if !ok {
+		t.Fatalf("ctrl+r in list: expected reauthRequestedMsg, got %T", cmd())
+	}
+	if msg.email != "a@gmail.com" {
+		t.Errorf("reauthRequestedMsg.email = %q, want a@gmail.com", msg.email)
 	}
 }
 
-func TestRevokeChordOpensConfirmModalFromSearch(t *testing.T) {
+func TestReauthChordEmitsReauthRequestedFromSearch(t *testing.T) {
 	v := vaultWithBase("a@gmail.com")
 	auth := &stubAuth{}
 	m := newScopesForTest(t, v, "a@gmail.com", auth)
 	// Default focus is search.
 
-	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
-	if m.state != stateRevokeConfirm {
-		t.Errorf("after ctrl+r in search: state=%v want stateRevokeConfirm", m.state)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	if cmd == nil {
+		t.Fatal("ctrl+r in search: expected reauthRequestedMsg cmd, got nil")
 	}
-	if cmd != nil {
-		t.Errorf("ctrl+r alone should not dispatch a command, got %T", cmd())
+	msg, ok := cmd().(reauthRequestedMsg)
+	if !ok {
+		t.Fatalf("ctrl+r in search: expected reauthRequestedMsg, got %T", cmd())
+	}
+	if msg.email != "a@gmail.com" {
+		t.Errorf("reauthRequestedMsg.email = %q, want a@gmail.com", msg.email)
 	}
 }
 

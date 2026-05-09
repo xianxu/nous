@@ -487,8 +487,10 @@ func (m scopesModel) updateSearch(msg tea.KeyMsg) (scopesModel, tea.Cmd) {
 		}
 		return m, func() tea.Msg { return scopesQuitMsg{} }
 	case "ctrl+r":
-		m.state = stateRevokeConfirm
-		return m, nil
+		// ^r → reauth (was: revoke); see nous#15 polish. Same handler
+		// as the row-focused branch — keep both reachable.
+		account := m.account
+		return m, func() tea.Msg { return reauthRequestedMsg{email: account} }
 	case "ctrl+c":
 		return m, tea.Quit
 	}
@@ -567,8 +569,15 @@ func (m scopesModel) updateList(msg tea.KeyMsg) (scopesModel, tea.Cmd) {
 		m.applyErr = nil
 		return m, m.applyCmd()
 	case "ctrl+r":
-		m.state = stateRevokeConfirm
-		return m, nil
+		// ^r → reauth (was: revoke). Emits reauthRequestedMsg which
+		// the top-level model dispatches to auth.Auth with
+		// forceFresh=true. After success the new credential is
+		// persisted and m.scopes.health is updated to Healthy.
+		//
+		// Revoke moved out of the scope view entirely — operator
+		// uses the picker's `R` keystroke for that. nous#15 polish.
+		account := m.account
+		return m, func() tea.Msg { return reauthRequestedMsg{email: account} }
 	case "a":
 		m.state = stateAddCustom
 		m.custom.Reset()
@@ -869,7 +878,7 @@ func (m scopesModel) viewNormal() string {
 	switch m.health {
 	case AccountHealthNeedsReauth:
 		b.WriteString(titleStyle.Render(" - "))
-		b.WriteString(rowDelStyle.Render("NEEDS REAUTH (press R from picker)"))
+		b.WriteString(rowDelStyle.Render("NEEDS REAUTH (^r)"))
 	case AccountHealthHealthy:
 		b.WriteString(titleStyle.Render("   "))
 		b.WriteString(mutedStyle.Render("✓ checked"))
