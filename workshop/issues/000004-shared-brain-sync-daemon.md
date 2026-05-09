@@ -1,10 +1,11 @@
 ---
 id: 000004
-status: working
+status: done
 deps: [nous#3]
 created: 2026-05-05
-updated: 2026-05-07
+updated: 2026-05-08
 estimate_hours: 8
+actual_hours: 3
 ---
 
 # shared-brain sync daemon
@@ -75,18 +76,28 @@ Rounded down to **5–12 hr** because the upper-bound stack assumes substrate de
 ### M3 — conflict-file convention + manual resolve flow
 
 - [x] Decide on the conflict-file naming convention. **Decided:** `<file>.conflict-<peer-id>-<YYYYMMDDTHHMMSSZ>.<ext>` (our own, not Syncthing's default — slightly cleaner timestamp format and embedded peer-id is human-readable rather than the Syncthing-style ID prefix). Documented in atlas decision doc.
-- [ ] Synthetic conflict test: two peers edit the same file with one offline, reconverge, verify both versions are visible and resolvable. Run inside the tart VM as the second peer (same setup as M1).
+- [x] ~~Synthetic conflict test: two peers edit the same file with one offline, reconverge, verify both versions are visible and resolvable. Run inside the tart VM as the second peer (same setup as M1).~~ — Subsumed by M2's `scripts/test-brain-sync.sh` (local two-process integration test): exercises propagation + conflict resolution end-to-end against a local bare repo, no VM needed. Tart VM was the M1 substrate-spike rig; M2's integration test replaced it for the daemon path.
 - [x] Document the manual resolve-by-hand flow as the v1 fallback (read both, decide, replace canonical, delete conflict file, sync re-converges). This is the workflow until issue #5 lands. Documented in atlas decision doc.
 - [x] Atlas entry: how shared-brain sync works, where conflict files appear, how to resolve. **Done** in `brain/atlas/sync-substrate-decision.md`.
 
-### M4 — wife/me forcing-function dogfood
+### M4 — ~~wife/me forcing-function dogfood~~ → split out as `nous#12`
 
-- [ ] Create a `brain-shared-family` repo (gcrypt'd to me + wife) and place the Paris trip plan in it.
-- [ ] Both peers sync it; co-author the plan over ≥1 week of real use.
-- [ ] Log every conflict that occurs and how it was resolved (informs whether issue #5 / #7 are needed and in what shape).
+Tracked in [`workshop/issues/000012-shared-brain-dogfood.md`](000012-shared-brain-dogfood.md). See `## Revisions` below.
+
+## Revisions
+
+### 2026-05-08 — M4 split into `nous#12`
+
+The dogfood is a portfolio-shaped milestone (provisioning + cross-machine onboarding + multi-week wall-clock window) that fits its own issue cleaner than as a sub-milestone of #4. Split out as `nous#12 shared-brain-dogfood`. With M1–M3 all done, #4 is now complete on shipping the daemon + conflict-file convention; the validation gate for the project's `done_when` lives on in #12.
+
+`nous#5 M3` (real-conflict dogfood for `/brain-resolve`) consumes #12's conflict stream rather than #4 M4's directly — the dep is unchanged in substance, just renamed.
 
 ## Log
 
+
+
+- 2026-05-08: closed — smoke-test re-close to see new explainer
+- 2026-05-08: closed — brain-sync daemon live on this machine via launchd; scripts/test-brain-sync.sh two-process integration green; M4 dogfood split to nous#12
 ### 2026-05-05
 
 - Issue spec'd from `brain/data/life/42shots/ideas/2026-04-28-01-pensive-collaborative-brain.md`. M2 of the shared-brain project.

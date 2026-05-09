@@ -1,9 +1,9 @@
 ---
 id: 000005
 status: open
-deps: [nous#4]
+deps: [nous#4 M3]
 created: 2026-05-05
-updated: 2026-05-05
+updated: 2026-05-08
 estimate_hours: 7
 ---
 
@@ -20,6 +20,8 @@ estimate_hours: 7
 ## Spec
 
 Source: `brain/data/life/42shots/ideas/2026-04-28-01-pensive-collaborative-brain.md` §Semantic merge.
+
+**Dependency note (2026-05-08):** Frontmatter dep was tightened from `nous#4` to `nous#4 M3` (conflict-file convention). M1 and M2 of this issue need only the convention to build against; M3 (dogfood the merge on real conflicts) gates on `nous#12` (shared-brain dogfood, carved out of #4 M4). Practical implication: M1+M2 should ship *before* `nous#12` starts so the dogfood exercises `/brain-resolve` from day one rather than accumulating manually-resolved conflicts.
 
 This issue is **iterative** — we ship a load-bearing v1 and let dogfood with the family-trip forcing function tell us what's actually needed beyond it. Travel-plan (`nous/construct/datatype/travel-plan.md`) is the guinea-pig datatype: it's the artifact wife and I will both edit, it has a representative mix of structured fields (frontmatter, day-keyed itinerary, bookings list, travelers list) and free-form prose (Tentative plans, Logistics, Open questions), and it's the thing the trip-planning use case actually uses.
 
