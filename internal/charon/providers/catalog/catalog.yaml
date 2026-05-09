@@ -1,0 +1,36 @@
+# charon Tier-3 provider catalog — generic API-key paste-and-revoke
+# registry. Each entry below ships a hostname pattern → auth shape
+# → optional revoke-endpoint configuration so the proxy can route
+# pasted keys without per-provider Go code.
+#
+# Adding a new provider: open a PR with one entry below. See
+# docs/providers.md for the schema and validation rules. The
+# catalog is loaded and validated at startup; malformed entries
+# fail charon's boot, not request handling.
+- id: anthropic
+  name: Anthropic
+  signup_url: https://console.anthropic.com
+  key_url: https://console.anthropic.com/settings/keys
+  hostname_patterns:
+    - api.anthropic.com
+  auth:
+    style: header
+    header: x-api-key
+    extra_headers:
+      anthropic-version: "2023-06-01"
+  revoke:
+    list_endpoint:
+      url: https://api.anthropic.com/v1/organizations/api_keys
+      key_match: partial_key_hint
+      result_path: data[].id
+    method: POST
+    url: https://api.anthropic.com/v1/organizations/api_keys/{key_id}
+    body: '{"status":"inactive"}'
+  console_url: https://console.anthropic.com/settings/keys
+  verify_url: https://api.anthropic.com/v1/models
+  notes: |
+    Demoted from charon#13 to the catalog because Anthropic's Admin
+    API can list and deactivate keys but cannot programmatically
+    create them. Pasted keys route via x-api-key + anthropic-version
+    headers; deactivation is best-effort via the org-level keys API
+    (list by partial-key hint, POST {status: inactive}).
