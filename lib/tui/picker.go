@@ -78,6 +78,22 @@ func (m *pickerModel) AnnotateHealth(v vault.Store, check AccountHealthChecker) 
 type accountSelectedMsg struct{ email string }
 type newAccountMsg struct{}
 
+// reauthRequestedMsg is emitted when the user presses `r` on an
+// account row. Top-level model dispatches to auth.Auth(forceFresh=true)
+// to open a fresh browser flow, persists the resulting credential,
+// and refreshes the picker with the new health state.
+type reauthRequestedMsg struct{ email string }
+
+// reauthResultMsg carries the outcome of a reauth attempt back to the
+// model. On success cred is the freshly-issued credential (saved to
+// vault by the model); on failure err is non-nil (surfaced via
+// oauth.FriendlyError translation).
+type reauthResultMsg struct {
+	email string
+	cred  *vault.Credential
+	err   error
+}
+
 // pickerBackMsg signals "navigate back to the provider picker" — the
 // new top-level. Distinct from tea.Quit which terminates the program.
 type pickerBackMsg struct{}
@@ -111,8 +127,27 @@ func (m pickerModel) Update(msg tea.Msg) (pickerModel, tea.Cmd) {
 		}
 		return m, func() tea.Msg { return accountSelectedMsg{email: item.email} }
 	case "r":
-		// Revoke from list level — parity with admin-key entity list.
-		// Only meaningful for actual account rows (not "+ new account").
+		// Reauth: trigger fresh OAuth for the cursored account. Browser
+		// flow opens; on success the credential is replaced with new
+		// tokens (preserving granted scope set). For accounts marked
+		// `needs reauth` this is the recovery path; for healthy accounts
+		// it's a manual rotation. Sends a reauthRequestedMsg that the
+		// top-level model fans out to auth.Auth + vault.Set.
+		// nous#15 M3.
+		if m.cursor < 0 || m.cursor >= len(m.items) {
+			return m, nil
+		}
+		if m.items[m.cursor].isNew {
+			return m, nil
+		}
+		email := m.items[m.cursor].email
+		m.statusMsg = fmt.Sprintf("opening browser for %s …", email)
+		return m, func() tea.Msg { return reauthRequestedMsg{email: email} }
+	case "R":
+		// Revoke (formerly `r`, moved to capital so `r` can be reauth —
+		// the more common operation). Drops the credential from the
+		// vault and revokes upstream. Confirm modal first, since this
+		// is destructive.
 		if m.cursor < 0 || m.cursor >= len(m.items) {
 			return m, nil
 		}
@@ -197,7 +232,7 @@ func (m pickerModel) View() string {
 		b.WriteString(helpStyle.Render(m.statusMsg))
 		b.WriteString("\n")
 	}
-	b.WriteString(helpStyle.Render("↑↓ nav   enter open   r revoke   esc back   q quit"))
+	b.WriteString(helpStyle.Render("↑↓ nav   enter open   r reauth   R revoke   esc back   q quit"))
 	b.WriteString("\n")
 	return b.String()
 }

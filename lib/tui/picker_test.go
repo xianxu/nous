@@ -49,7 +49,7 @@ func TestPicker_RevokeKeyOpensConfirm(t *testing.T) {
 	}
 
 	// Cursor at 0 = alice; r opens confirm.
-	updated, _ := m.Update(tea.KeyMsg{Runes: []rune{'r'}, Type: tea.KeyRunes})
+	updated, _ := m.Update(tea.KeyMsg{Runes: []rune{'R'}, Type: tea.KeyRunes})
 	if updated.state != pickerStateRevokeConfirm {
 		t.Errorf("after r: state = %d, want pickerStateRevokeConfirm", updated.state)
 	}
@@ -86,7 +86,7 @@ func TestPicker_RevokeCancel(t *testing.T) {
 	m, _ := newPickerModel(v)
 
 	// Open confirm.
-	updated, _ := m.Update(tea.KeyMsg{Runes: []rune{'r'}, Type: tea.KeyRunes})
+	updated, _ := m.Update(tea.KeyMsg{Runes: []rune{'R'}, Type: tea.KeyRunes})
 	if updated.state != pickerStateRevokeConfirm {
 		t.Fatalf("expected confirm state")
 	}
@@ -112,7 +112,7 @@ func TestPicker_RevokeOnNewAccountRow_NoOp(t *testing.T) {
 	if !m.items[m.cursor].isNew {
 		t.Fatalf("cursor not on '+ new account' row")
 	}
-	updated, _ := m.Update(tea.KeyMsg{Runes: []rune{'r'}, Type: tea.KeyRunes})
+	updated, _ := m.Update(tea.KeyMsg{Runes: []rune{'R'}, Type: tea.KeyRunes})
 	if updated.state != pickerStateNormal {
 		t.Errorf("r on '+ new account' should be no-op, got state %d", updated.state)
 	}

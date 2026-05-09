@@ -485,6 +485,60 @@ func (m model) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.current = screenScopes
 		return m, nil
 
+	case reauthRequestedMsg:
+		// Picker fired a reauth for an account. Dispatch auth.Auth with
+		// forceFresh=true (preserves granted scope set, gets new tokens).
+		// On success the result lands as reauthResultMsg → vault save
+		// + picker refresh. On failure: friendly error in statusMsg.
+		// nous#15 M3.
+		if m.auth == nil {
+			m.picker.statusMsg = "no authenticator configured"
+			return m, nil
+		}
+		existingCred, err := m.vault.Get("google", msg.email)
+		if err != nil {
+			m.picker.statusMsg = fmt.Sprintf("vault lookup failed: %v", err)
+			return m, nil
+		}
+		auth := m.auth
+		email := msg.email
+		scopes := existingCred.Scopes
+		return m, func() tea.Msg {
+			fresh, err := auth.Auth(email, scopes, scopes, true)
+			return reauthResultMsg{email: email, cred: fresh, err: err}
+		}
+
+	case reauthResultMsg:
+		if msg.err != nil {
+			user, _ := oauth.FriendlyError(msg.err)
+			m.picker.statusMsg = fmt.Sprintf("reauth %s: %s", msg.email, user)
+			return m, nil
+		}
+		if msg.cred != nil {
+			if err := m.vault.Set(msg.cred); err != nil {
+				m.picker.statusMsg = fmt.Sprintf("vault.Set %s: %v", msg.email, err)
+				return m, nil
+			}
+			m.notifyProxyCacheClear()
+		}
+		// Refresh the picker so the health badge updates.
+		newPicker, err := newPickerModel(m.vault)
+		if err != nil {
+			m.picker.statusMsg = fmt.Sprintf("reauth ok but picker refresh failed: %v", err)
+			return m, nil
+		}
+		newPicker.AnnotateHealth(m.vault, m.healthCheck)
+		newPicker.cursor = m.picker.cursor
+		if newPicker.cursor >= len(newPicker.items) {
+			newPicker.cursor = len(newPicker.items) - 1
+		}
+		if newPicker.cursor < 0 {
+			newPicker.cursor = 0
+		}
+		newPicker.statusMsg = fmt.Sprintf("reauthenticated %s", msg.email)
+		m.picker = newPicker
+		return m, nil
+
 	case newAccountMsg:
 		// First-time auth: empty scopes (just openid+email via
 		// requiredGoogleScopes), no login_hint. The browser opens, user
