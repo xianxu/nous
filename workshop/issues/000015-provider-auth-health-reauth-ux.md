@@ -1,10 +1,11 @@
 ---
 id: 000015
-status: working
+status: done
 deps: [000014]
 created: 2026-05-09
 updated: 2026-05-09
 estimate_hours: 4
+actual_hours: 0.5
 ---
 
 # `nous provider` auth health + reauth UX
@@ -174,5 +175,7 @@ Implication: the design has to assume tokens can die externally between sessions
 
 ## Log
 
+
+- 2026-05-09: closed — 5 sub-commits all green; oauth health unit tests + 5 TUI synthetic tests pass; binaries build clean; live CheckHealth verified against operator vault. 2 plan items deliberately deferred: enter-on-needs-reauth scope-view bypass (operator can press r directly from picker) + manual e2e operator-driven token revocation test (synthetic suite proves wiring; e2e is a dogfood verification step)
 ### 2026-05-09 — created
 Surfaced during nous#14 M3 smoke-testing. Operator opened `nous provider` after Google API returned 401 in an unrelated session; the TUI's local-state checkmarks suggested healthy auth, but action triggered `invalid_grant`. Recovery worked (charon's existing auto-fallback to browser reauth) but the path was confusing. Operator outlined the four UX improvements + asked whether direct reauth-flow trigger is achievable (yes — charon already has the code, just needs surfacing). Filed for follow-up.
