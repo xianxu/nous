@@ -1,6 +1,6 @@
 ---
 id: 000005
-status: open
+status: working
 deps: [nous#4 M3]
 created: 2026-05-05
 updated: 2026-05-08
