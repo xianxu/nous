@@ -322,6 +322,8 @@ Two TUIs only. Bare `nous` stays as cobra-default help (no TUI). Identity ops us
 
 ## Log
 
+
+- 2026-05-09: closed M1 — go build ./... + go test ./... green; charon binary smoke-tested (charon --help, manifest, instructions, scopes all functional against real vault state); 70 import paths rewritten, 0 charon-prefix imports remain; nous-security binary builds clean post-rename
 ### 2026-05-08 — created (supersedes nous#13)
 
 Surfaced from `nous#12 M1` (provision brain-shared-family) ergonomics review. Initial scope was just brain CLI (nous#13); evolved through design conversation into "absorb charon, single nous CLI, unified observability." Path B chosen: build the tooling first, then provision brain-family.
