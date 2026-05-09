@@ -102,6 +102,8 @@ Only ship if M3 dogfood shows real failures the LLM can't be coaxed out of with 
 ## Log
 
 
+
+- 2026-05-08: closed M2 — ran nous/skills/nous-resolve/test-synthetic.sh end-to-end (resolve + undo paths), all assertions green: revert restores canonical + conflict file, snapshot files removed, revert commit subject correct
 - 2026-05-08: closed M1 — ran nous/skills/nous-resolve/test-synthetic.sh end-to-end, all assertions green: find-conflicts emits expected tuple, preserve.py creates .brain/merges snapshot with correct meta.json, git ops path commits with descriptive message, canonical updated + conflict file removed
 ### 2026-05-08 — M2 shipped (undo path)
 
