@@ -68,13 +68,13 @@ M4's range is conditional (won't ship unless dogfood reveals real failures); app
 
 ## Plan
 
-### M1 — `/brain-resolve` v1: whole-file AI-prose merge (load-bearing)
+### M1 — `/nous-resolve` v1: whole-file AI-prose merge (load-bearing)
 
-- [ ] Skill scaffold under `nous/.claude/skills/` (or wherever skills live in this repo).
-- [ ] Detect conflict files (Syncthing-style or git-conflict-style, per #4 M3).
-- [ ] Whole-file AI-prose merge: read both versions, the prototype, and ambient context (related artifacts, parley chats); produce a merged version; show diff to the human; confirm; write.
-- [ ] Pre-merge preservation: copy both pre-merge versions to `.brain/merges/<ISO-timestamp>-<path-slug>/` before the commit. Non-conditional — safety floor.
-- [ ] Verify on a synthetic travel-plan conflict.
+- [x] Skill scaffold at `nous/nous/skills/nous-resolve/` (vendored to `.claude/skills/nous-resolve` via `nous/nous/nous.manifest`). Slash command: `/nous-resolve <brain-root>`.
+- [x] Detect conflict files via `find-conflicts.sh` — emits `(canonical, conflict-file, peer, utc-ts)` tuples. Format per `nous/lib/brainsync/resolve.go`: `<stem>.conflict-<peer>-<YYYYMMDDTHHMMSSZ>.<ext>`.
+- [x] Whole-file AI-prose merge: SKILL.md procedure (7 steps) — load both versions + prototype + recent commits + references; reason structurally with prototype-as-contract + heuristic fallbacks; surface ambiguity rather than guessing; show diff + summary; confirm; write; commit.
+- [x] Pre-merge preservation: `preserve.py` writes both pre-merge versions + `meta.json` to `<brain-root>/.brain/merges/<utc-iso>-<canonical-slug>/`. Runs only on user confirm; non-conditional safety floor.
+- [x] Verify on a synthetic travel-plan conflict: `test-synthetic.sh` exercises find-conflicts + preserve.py + the git-ops path (canonical written, conflict file removed, commit landed with descriptive message). Test green. Note: agent-driven *semantic* merge correctness is M3 dogfood territory; this verifies the mechanical layer.
 
 ### M2 — undo path
 
@@ -100,6 +100,23 @@ Only ship if M3 dogfood shows real failures the LLM can't be coaxed out of with 
 - [ ] Verify against the specific failures M3 surfaced.
 
 ## Log
+
+### 2026-05-08 — M1 shipped
+
+`/nous-resolve <brain-root>` skill landed at `nous/nous/skills/nous-resolve/`. Plan in `workshop/plans/000005-semantic-merge-skill-plan.md`.
+
+**Naming change from issue spec**: command is `/nous-resolve` (not `/brain-resolve`). Reasoning: nous owns brain-building tooling; ariadne is the AI coding substrate. The brain-resolution skill belongs in nous's skill namespace, where the convention is `nous-<tool>` (parallel to existing `nous-tools` and `charon` skills). User confirmed during design review.
+
+**Design highlights**:
+- **Concept-driven prose** in SKILL.md (~200 lines) handles the merge reasoning. Mechanical helpers (`preserve.py` ~80 lines, `find-conflicts.sh` ~30 lines) handle deterministic steps. Same shape as `xx-issues` (SKILL.md + `active-time-v3.py`).
+- **Structural awareness via prompt + prototype**: SKILL.md tells the agent to classify each frontmatter field and body section as `scalar | enum | list | key-anchored-list | table | prose`, applying default merge rules per type, with prototype semantics overriding heuristics. *No declarative merge engine in M1* — the prototype IS the implicit schema; the agent reasons from it. M4 would formalize this if dogfood reveals consistent failures.
+- **Surface, don't guess**: SKILL.md repeatedly tells the agent to surface ambiguous merges to the user with both options + a recommendation. The pensive's failure mode (LLM dissolves a list into prose) is what surfacing prevents.
+- **Pre-merge preservation as safety floor**: every confirmed merge writes both pre-versions + `meta.json` to `.brain/merges/<utc-iso>-<canonical-slug>/`. Non-conditional. Sets up M2's undo path.
+- **Explicit commit on resolution**: skill commits with a body listing structural choices made. brain-sync's ref-watcher picks it up and pushes.
+
+**Verified mechanical layer**: `bash nous/skills/nous-resolve/test-synthetic.sh` builds a synthetic brain with a travel-plan conflict pair, exercises the full mechanical chain (find → preserve → write → cleanup → commit), asserts each artifact. Green.
+
+**Not verified by this milestone**: agent-driven semantic merge correctness. That's M3 territory (real conflicts from the wife/me dogfood, `nous#12 M3`). M1's claim is "the skill is ready to be exercised on real conflicts." M3 calibrates whether the prompt-guided merger is good enough or M4's declarative tags are needed.
 
 ### 2026-05-05
 
