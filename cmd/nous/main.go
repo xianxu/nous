@@ -43,7 +43,7 @@ specific docs.`,
 	root.AddCommand(identityCmd())
 	root.AddCommand(brainCmd())
 	root.AddCommand(providerCmd())
-	root.AddCommand(serviceCmd())
+	root.AddCommand(serviceCmdImpl())
 	root.AddCommand(charoncli.InstructionsCmd())
 	root.AddCommand(charoncli.ManifestCmd())
 
@@ -117,22 +117,5 @@ configured providers + their granted scopes). Equivalent of today's
 	return auth
 }
 
-// serviceCmd is the service cluster placeholder. M3c ships install/start/
-// stop/status that unify brain-sync + proxy plists; M4 adds doctor + audit.
-func serviceCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "service",
-		Short: "Service control: install/start/stop brain-sync + proxy together (placeholder; M3c)",
-		Long: `Service cluster — install, start, stop, status across all nous services
-(brain-sync + provider proxy as one unit, no per-subsystem control).
-
-Coming in nous#14 M3c. For now, use the legacy entry points:
-  - make brain-sync        run the brain-sync watcher
-  - charon serve           run the credential proxy
-  - charon service ...     existing per-subsystem service control`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("nous service is not yet implemented (nous#14 M3c); see legacy 'charon service' / 'brain-sync service' for now")
-		},
-	}
-	return cmd
-}
+// service cluster impl lives in service.go (serviceCmdImpl). Doctor +
+// audit subcommands come in M4.
