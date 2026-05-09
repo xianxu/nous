@@ -499,10 +499,20 @@ func (m model) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case reauthRequestedMsg:
 		// Picker fired a reauth for an account. Dispatch auth.Auth with
-		// forceFresh=true (preserves granted scope set, gets new tokens).
+		// forceFresh=false (additive — include_granted_scopes=true so
+		// Google's consent screen shows the full requested set unioned
+		// with what's already on Google's side). The operator's intent
+		// is "give me back what I had"; reductive mode (forceFresh=true)
+		// is for the scope-reduction flow.
+		//
+		// nous#15 M3 + 2026-05-09 fix: was forceFresh=true, which made
+		// Google's consent UI behave like a granular checkbox screen
+		// after revocation — operator could miss scopes by click-
+		// through. Additive mode reads the previous grants as the
+		// baseline, less footgun.
+		//
 		// On success the result lands as reauthResultMsg → vault save
 		// + picker refresh. On failure: friendly error in statusMsg.
-		// nous#15 M3.
 		if m.auth == nil {
 			m.picker.statusMsg = "no authenticator configured"
 			return m, nil
@@ -515,9 +525,10 @@ func (m model) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 		auth := m.auth
 		email := msg.email
 		scopes := existingCred.Scopes
+		previousCount := len(scopes)
 		return m, func() tea.Msg {
-			fresh, err := auth.Auth(email, scopes, scopes, true)
-			return reauthResultMsg{email: email, cred: fresh, err: err}
+			fresh, err := auth.Auth(email, scopes, scopes, false)
+			return reauthResultMsg{email: email, cred: fresh, err: err, previousScopeCount: previousCount}
 		}
 
 	case reauthResultMsg:
@@ -553,13 +564,24 @@ func (m model) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if newPicker.cursor < 0 {
 			newPicker.cursor = 0
 		}
-		newPicker.statusMsg = fmt.Sprintf("reauthenticated %s", msg.email)
+		// Surface scope-reduction warning. Google's granular-consent
+		// flow (post-revocation) presents each requested scope as a
+		// separate opt-in checkbox; if the operator click-throughs
+		// quickly, fewer scopes land than were requested. Detect by
+		// comparing fresh.Scopes count to what was stored before.
+		// Operator can press r again to re-request.
+		statusMsg := fmt.Sprintf("reauthenticated %s", msg.email)
+		if msg.cred != nil && msg.previousScopeCount > 0 && len(msg.cred.Scopes) < msg.previousScopeCount {
+			statusMsg = fmt.Sprintf("reauthenticated %s — only %d of %d scopes granted; press r again to retry",
+				msg.email, len(msg.cred.Scopes), msg.previousScopeCount)
+		}
+		newPicker.statusMsg = statusMsg
 		m.picker = newPicker
 		// If the reauth came from the scope view (^r), update its
 		// health stamp so the title's "NEEDS REAUTH" badge clears.
 		if m.current == screenScopes && m.scopes.account == msg.email {
 			m.scopes.health = AccountHealthHealthy
-			m.scopes.applyStatus = fmt.Sprintf("reauthenticated %s", msg.email)
+			m.scopes.applyStatus = statusMsg
 		}
 		return m, nil
 

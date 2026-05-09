@@ -88,10 +88,17 @@ type reauthRequestedMsg struct{ email string }
 // model. On success cred is the freshly-issued credential (saved to
 // vault by the model); on failure err is non-nil (surfaced via
 // oauth.FriendlyError translation).
+//
+// previousScopeCount carries the granted-scope count from before the
+// reauth so the result handler can detect Google's granular-consent
+// footgun (operator click-through approves only a subset of requested
+// scopes). When fresh.Scopes is shorter than previousScopeCount the
+// status message warns "N of M scopes; press r again to re-grant."
 type reauthResultMsg struct {
-	email string
-	cred  *vault.Credential
-	err   error
+	email              string
+	cred               *vault.Credential
+	err                error
+	previousScopeCount int
 }
 
 // pickerBackMsg signals "navigate back to the provider picker" — the
