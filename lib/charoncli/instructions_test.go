@@ -1,4 +1,4 @@
-package main
+package charoncli
 
 import (
 	"strings"
@@ -34,7 +34,7 @@ func TestInstructionsContainsLoadBearingSections(t *testing.T) {
 
 func TestInstructionsCmd_PrintsToStdout(t *testing.T) {
 	root := &cobra.Command{Use: "charon"}
-	root.AddCommand(instructionsCmd())
+	root.AddCommand(InstructionsCmd())
 	stdout, _, err := executeCmd(root, "instructions")
 	if err != nil {
 		t.Fatal(err)

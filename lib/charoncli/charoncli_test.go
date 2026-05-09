@@ -1,4 +1,4 @@
-package main
+package charoncli
 
 import (
 	"bytes"
@@ -31,11 +31,11 @@ func buildRoot() *cobra.Command {
 		Short: "Credential proxy for AI agents",
 	}
 	root.PersistentFlags().StringVar(&listenAddr, "addr", "127.0.0.1:8230", "proxy listen address")
-	root.AddCommand(serveCmd())
-	root.AddCommand(runCmd())
-	root.AddCommand(manifestCmd())
-	root.AddCommand(statusCmd())
-	root.AddCommand(vaultCmd())
+	root.AddCommand(ServeCmd())
+	root.AddCommand(RunCmd())
+	root.AddCommand(ManifestCmd())
+	root.AddCommand(StatusCmd())
+	root.AddCommand(VaultCmd())
 	return root
 }
 

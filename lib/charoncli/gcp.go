@@ -1,4 +1,4 @@
-package main
+package charoncli
 
 import (
 	"bufio"
@@ -16,10 +16,10 @@ import (
 	"github.com/xianxu/nous/lib/provider/vault"
 )
 
-// gcpCmd groups Google Cloud project management subcommands. The
+// GcpCmd groups Google Cloud project management subcommands. The
 // flow is OAuth-token-driven: every subcommand needs an existing
 // google:<account> credential with cloud-platform granted.
-func gcpCmd() *cobra.Command {
+func GcpCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "gcp",
 		Short: "Manage Google Cloud projects for Gemini access",

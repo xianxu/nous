@@ -1,4 +1,4 @@
-package main
+package charoncli
 
 import (
 	"encoding/json"
@@ -61,8 +61,8 @@ func TestManifestPayload_RunningTrue_FullConnectionInfo(t *testing.T) {
 	if proxy["addr"] != addr {
 		t.Errorf("addr = %v, want %v", proxy["addr"], addr)
 	}
-	if proxy["default"] != defaultListenAddr {
-		t.Errorf("default = %v, want %s", proxy["default"], defaultListenAddr)
+	if proxy["default"] != DefaultListenAddr {
+		t.Errorf("default = %v, want %s", proxy["default"], DefaultListenAddr)
 	}
 }
 
@@ -81,7 +81,7 @@ func TestManifestPayload_RunningFalse_OmitsConnectionInfo(t *testing.T) {
 	if proxy["running"] != false {
 		t.Fatalf("running = %v, want false", proxy["running"])
 	}
-	if proxy["default"] != defaultListenAddr {
+	if proxy["default"] != DefaultListenAddr {
 		t.Errorf("default should still be present when down, got %v", proxy["default"])
 	}
 	for _, field := range []string{"addr", "url", "ca_pem_url"} {

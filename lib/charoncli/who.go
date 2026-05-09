@@ -1,4 +1,4 @@
-package main
+package charoncli
 
 import (
 	"encoding/json"
@@ -14,7 +14,7 @@ import (
 	"github.com/xianxu/nous/lib/provider/proxy"
 )
 
-// whoCmd: list recent connections, grouped by caller exe.
+// WhoCmd: list recent connections, grouped by caller exe.
 //
 // `charon who` (no flag): defaults to last 5 minutes, focused on
 // "what's on right now."
@@ -23,7 +23,7 @@ import (
 // Source of truth: the proxy's in-memory ring (#16 F) — wiped on
 // `charon serve` restart. Persistent forensics is the file-backed
 // audit log (--audit-log on serve), not this command.
-func whoCmd() *cobra.Command {
+func WhoCmd() *cobra.Command {
 	var since time.Duration
 	var jsonOut bool
 	cmd := &cobra.Command{
@@ -59,9 +59,9 @@ Examples:
 	return cmd
 }
 
-// statsCmd: aggregate (caller exe, host) tuples to call counts +
+// StatsCmd: aggregate (caller exe, host) tuples to call counts +
 // items + bytes. Useful for "what's been talking to my Gmail today."
-func statsCmd() *cobra.Command {
+func StatsCmd() *cobra.Command {
 	var since time.Duration
 	var jsonOut bool
 	cmd := &cobra.Command{

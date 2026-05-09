@@ -1,4 +1,4 @@
-package main
+package charoncli
 
 import (
 	_ "embed"
@@ -10,12 +10,12 @@ import (
 //go:embed agent_instructions.md
 var agentInstructions string
 
-// instructionsCmd prints the embedded agent-facing instructions. The
+// InstructionsCmd prints the embedded agent-facing instructions. The
 // content lives in agent_instructions.md alongside this file so it
 // ships with every binary — agents calling `charon instructions`
 // always get prose that matches the version of charon installed,
 // no skill-doc-vs-binary drift.
-func instructionsCmd() *cobra.Command {
+func InstructionsCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "instructions",
 		Short: "Print the agent-facing instructions for this charon version (Markdown)",

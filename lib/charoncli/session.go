@@ -1,4 +1,4 @@
-package main
+package charoncli
 
 import (
 	"bytes"
@@ -12,10 +12,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// armCmd: POST /session/arm with an optional --ttl. Today the path is
+// ArmCmd: POST /session/arm with an optional --ttl. Today the path is
 // CLI-only (#16 A); #16 D will route the same shape through Charon
 // Security.app's menubar over the unix socket added by #16 C.
-func armCmd() *cobra.Command {
+func ArmCmd() *cobra.Command {
 	var ttl time.Duration
 	cmd := &cobra.Command{
 		Use:   "arm",
@@ -48,7 +48,7 @@ Examples:
 	return cmd
 }
 
-func disarmCmd() *cobra.Command {
+func DisarmCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "disarm",
 		Short: "Disarm the proxy: refuse new CONNECTs immediately",
@@ -154,7 +154,7 @@ func renderSessionStatus(addr string) string {
 		rem, st.ExpiresReason, st.ExpiresAt.Format(time.RFC3339))
 }
 
-// extendStatusOutput is exported so statusCmd can append session info
+// extendStatusOutput is exported so StatusCmd can append session info
 // to its existing output without growing main.go further.
 func extendStatusOutput(addr string) string {
 	return strings.TrimRight(renderSessionStatus(addr), "\n")
