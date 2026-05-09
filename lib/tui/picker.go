@@ -126,8 +126,8 @@ func (m pickerModel) Update(msg tea.Msg) (pickerModel, tea.Cmd) {
 			return m, func() tea.Msg { return newAccountMsg{} }
 		}
 		return m, func() tea.Msg { return accountSelectedMsg{email: item.email} }
-	case "R":
-		// `R` is context-dependent based on the cursored account's
+	case "r":
+		// `r` is context-dependent based on the cursored account's
 		// refresh-token health — the two actions (reauth vs revoke)
 		// are mutually exclusive at any given moment, so we share
 		// the keystroke and dispatch on state. nous#15 polish.
@@ -140,7 +140,7 @@ func (m pickerModel) Update(msg tea.Msg) (pickerModel, tea.Cmd) {
 		//                          revokes upstream)
 		//
 		// Cheatsheet at the bottom of the View renders the matching
-		// label, so the operator sees "R reauth" or "R revoke"
+		// label, so the operator sees "r reauth" or "r revoke"
 		// depending on cursor.
 		if m.cursor < 0 || m.cursor >= len(m.items) {
 			return m, nil
@@ -241,9 +241,9 @@ func (m pickerModel) View() string {
 	if m.cursor >= 0 && m.cursor < len(m.items) && !m.items[m.cursor].isNew {
 		switch m.items[m.cursor].health {
 		case AccountHealthNeedsReauth:
-			hint += "   R reauth"
+			hint += "   r reauth"
 		default:
-			hint += "   R revoke"
+			hint += "   r revoke"
 		}
 	}
 	hint += "   esc back   q quit"

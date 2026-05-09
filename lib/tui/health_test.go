@@ -82,7 +82,7 @@ func TestPicker_RKey_DispatchesByHealth(t *testing.T) {
 			m.cursor = i
 		}
 	}
-	updated, cmd := m.Update(tea.KeyMsg{Runes: []rune{'R'}, Type: tea.KeyRunes})
+	updated, cmd := m.Update(tea.KeyMsg{Runes: []rune{'r'}, Type: tea.KeyRunes})
 	if updated.state != pickerStateRevokeConfirm {
 		t.Errorf("R on healthy: state=%v want pickerStateRevokeConfirm", updated.state)
 	}
@@ -98,7 +98,7 @@ func TestPicker_RKey_DispatchesByHealth(t *testing.T) {
 			m2.cursor = i
 		}
 	}
-	_, cmd2 := m2.Update(tea.KeyMsg{Runes: []rune{'R'}, Type: tea.KeyRunes})
+	_, cmd2 := m2.Update(tea.KeyMsg{Runes: []rune{'r'}, Type: tea.KeyRunes})
 	if cmd2 == nil {
 		t.Fatal("R on needs-reauth: expected reauthRequestedMsg cmd, got nil")
 	}
