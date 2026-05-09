@@ -12,7 +12,7 @@ import (
 
 	"fyne.io/systray"
 	"github.com/spf13/cobra"
-	"github.com/xianxu/nous/internal/charon/proxy"
+	"github.com/xianxu/nous/lib/provider/proxy"
 )
 
 // menubarCmd runs Charon Security as a macOS menubar agent. The

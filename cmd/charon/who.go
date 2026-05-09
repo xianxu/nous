@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/xianxu/nous/internal/charon/proxy"
+	"github.com/xianxu/nous/lib/provider/proxy"
 )
 
 // whoCmd: list recent connections, grouped by caller exe.

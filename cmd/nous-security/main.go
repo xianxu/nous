@@ -17,7 +17,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
-	"github.com/xianxu/nous/internal/charon/security"
+	"github.com/xianxu/nous/lib/security"
 )
 
 var (

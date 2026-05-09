@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xianxu/nous/internal/charon/vault"
-	"github.com/xianxu/nous/internal/charon/vault/memory"
+	"github.com/xianxu/nous/lib/provider/vault"
+	"github.com/xianxu/nous/lib/provider/vault/memory"
 )
 
 // fixtureVault returns a memory vault with two google accounts and one

@@ -14,16 +14,16 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/xianxu/nous/internal/charon/oauth"
-	"github.com/xianxu/nous/internal/charon/providers/catalog"
-	"github.com/xianxu/nous/internal/charon/providers/gcp"
-	"github.com/xianxu/nous/internal/charon/providers/openai"
-	"github.com/xianxu/nous/internal/charon/proxy"
-	charonruntime "github.com/xianxu/nous/internal/charon/runtime"
-	"github.com/xianxu/nous/internal/charon/service"
-	"github.com/xianxu/nous/internal/charon/tui"
-	"github.com/xianxu/nous/internal/charon/vault"
-	"github.com/xianxu/nous/internal/charon/vault/keychain"
+	"github.com/xianxu/nous/lib/provider/oauth"
+	"github.com/xianxu/nous/lib/provider/providers/catalog"
+	"github.com/xianxu/nous/lib/provider/providers/gcp"
+	"github.com/xianxu/nous/lib/provider/providers/openai"
+	"github.com/xianxu/nous/lib/provider/proxy"
+	charonruntime "github.com/xianxu/nous/lib/provider/runtime"
+	"github.com/xianxu/nous/lib/service"
+	"github.com/xianxu/nous/lib/tui"
+	"github.com/xianxu/nous/lib/provider/vault"
+	"github.com/xianxu/nous/lib/provider/vault/keychain"
 )
 
 // defaultListenAddr is the compile-time default proxy listen address —

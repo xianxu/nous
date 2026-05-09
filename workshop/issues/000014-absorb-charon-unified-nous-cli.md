@@ -265,14 +265,16 @@ Initially planned as `git subtree add --squash`, but subtree lands the whole cha
 
 Per the lib-first principle, organize `lib/` by domain so future repackaging (e.g. a charon-only binary) needs to grab a clean subset, not untangle commands.
 
-- [ ] `lib/tui/`: pull lipgloss styles + bubbletea form components from charon's `internal/tui/`. Both `nous brain` and `nous provider` TUIs use it.
-- [ ] `lib/agent/`: gpg-agent ops (prewarm, flush, status, passphrase fetch). charon#21's primary work lands here. Leaf module; used by `lib/brain` and `lib/identity`.
-- [ ] `lib/service/`: launchd plist generation + service control (install/start/stop). brain-sync's `service_darwin.go` and charon's equivalent merged.
-- [ ] `lib/brain/`: brain provisioning, recipient management, conflict resolution mechanics, sync runtime. Imports `lib/agent` for gpg-agent ops.
-- [ ] `lib/provider/`: provider config + OAuth + proxy runtime. Imports `lib/agent` for credential vault unlock.
-- [ ] `lib/identity/`: keypair gen, export, import (with verify-fingerprint), keyring inspection. Imports `lib/agent`.
-- [ ] **Cross-import rule**: `lib/provider` does not import `lib/brain`. `lib/brain` does not import `lib/provider`. Common ground is `lib/agent`, `lib/service`, `lib/tui`.
-- [ ] No CLI changes — refactor only. Existing `cmd/brain-sync/` and `cmd/charon/` still build by importing the relocated libs.
+- [x] `lib/tui/`: moved from `internal/charon/tui/`. Bubbletea + lipgloss components for the future `nous brain` and `nous provider` TUIs.
+- [ ] `lib/agent/`: gpg-agent ops (prewarm, flush, status, passphrase fetch). **Deferred to M3-M4** — there's no charon-origin gpg-agent code to relocate (charon used gpg-agent indirectly via system tools); this is net-new code, lands as part of charon#21 absorption.
+- [x] `lib/service/`: moved from `internal/charon/service/` (launchd plist gen + service control). M3 will merge brain-sync's `service_darwin.go` (currently in `lib/brainsync/`) into here.
+- [x] `lib/security/`: moved from `internal/charon/security/` (host-security audit machinery, used by `cmd/nous-security/`). Kept as its own lib (sibling to provider/brain/etc.) since security audits are orthogonal to the credential/brain clusters.
+- [ ] `lib/brain/`: not extracted in M2 — `lib/brainsync/` (existing) stays in place. M3 or follow-on can rename to `lib/brain/sync/`. Provisioning + recipient + resolve are net-new code (M4 scope).
+- [x] `lib/provider/`: moved from `internal/charon/{oauth, providers, proxy, runtime, vault}/` → `lib/provider/{oauth, providers, proxy, runtime, vault}/`. The whole credential-and-proxy domain landed under one roof.
+- [ ] `lib/identity/`: not extracted in M2 — net-new code (M4 scope). Charon doesn't have an identity-management surface to move.
+- [x] **Cross-import rule verified**: `grep -rln 'github.com/xianxu/nous/lib/brain' lib/provider/` → 0 matches. `grep -rln 'github.com/xianxu/nous/lib/provider' lib/brainsync/` → 0 matches. Clean separation.
+- [x] No CLI changes — refactor only. `go build ./...` green; `go test ./...` green across all packages including all relocated provider sub-packages, security, tui, service.
+- [x] `internal/` directory removed (was only holding charon-imports during M1).
 
 ### M3 — `nous` cobra root + subcommand restructuring
 

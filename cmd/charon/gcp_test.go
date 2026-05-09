@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xianxu/nous/internal/charon/providers/gcp"
-	"github.com/xianxu/nous/internal/charon/vault"
-	"github.com/xianxu/nous/internal/charon/vault/memory"
+	"github.com/xianxu/nous/lib/provider/providers/gcp"
+	"github.com/xianxu/nous/lib/provider/vault"
+	"github.com/xianxu/nous/lib/provider/vault/memory"
 )
 
 // freshGoogleCred returns a credential with cloud-platform granted

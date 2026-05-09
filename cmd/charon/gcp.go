@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/xianxu/nous/internal/charon/oauth"
-	"github.com/xianxu/nous/internal/charon/providers/gcp"
-	"github.com/xianxu/nous/internal/charon/vault"
+	"github.com/xianxu/nous/lib/provider/oauth"
+	"github.com/xianxu/nous/lib/provider/providers/gcp"
+	"github.com/xianxu/nous/lib/provider/vault"
 )
 
 // gcpCmd groups Google Cloud project management subcommands. The

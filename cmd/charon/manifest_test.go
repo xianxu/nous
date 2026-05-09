@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xianxu/nous/internal/charon/vault"
-	"github.com/xianxu/nous/internal/charon/vault/memory"
+	"github.com/xianxu/nous/lib/provider/vault"
+	"github.com/xianxu/nous/lib/provider/vault/memory"
 )
 
 // proxySection extracts the proxy block as map[string]any. Manifest

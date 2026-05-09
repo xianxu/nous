@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
-	"github.com/xianxu/nous/internal/charon/proxy"
+	"github.com/xianxu/nous/lib/provider/proxy"
 )
 
 // executeCmd runs a cobra command with args and returns stdout, stderr, and error.
