@@ -27,91 +27,86 @@ This supersedes `nous#13` (brain CLI unification, narrower-in-scope).
 ### One binary, four use-case clusters + cross-cutting top-level commands
 
 ```
-nous                          # cobra-default help: lists clusters + entry points (no TUI here)
+nous                          # cobra-default help: lists clusters + entry points
 
-nous identity ...             # GPG keys + agent + peers              (h: keys/agent;  a: list/status)
-nous brain ...                # brains: provision, sync, recipients   (h: new/admit;   a: sync/status/resolve)
-nous provider ...             # AI providers: config, auth, proxy     (h: auth/add;    a: proxy/list)
-nous service ...              # observability + service control       (h: doctor/audit; a: status/list)
+nous identity ...             # GPG keys + agent + peers (no TUI; interactive CLI for the (h) ops)
+nous brain ...                # brains: provision, sync, recipients (TUI at `nous brain`)
+nous provider ...             # AI providers: auth + config (TUI at `nous provider auth`)
+nous service ...              # service control + observability (CLI only; no TUI)
 
 nous instructions [topic]     # agent-only: canonical guide (progressive disclosure)
 nous manifest [topic[:filter]] # agent-only: machine-readable state introspection
 ```
 
-**Audience annotation**: each cluster line marks `h:` (commands primarily human-driven, TUI-rich) and `a:` (commands primarily agent-driven, CLI-scriptable). Per-command annotations live in the full tree below.
+**Service is unified**: `nous service install/start/stop` controls *all* nous services together (brain-sync + provider proxy). No per-subsystem service subcommands like `nous brain sync install` — there's no value in starting brain-sync without the proxy or vice versa. The proxy daemon doesn't even have its own subcommand path; it's just one of the things `nous service start` brings up.
 
-**Per-cluster TUIs, not a unified board**: the bare `nous` command does not launch a status board. Bubbletea TUIs are per-cluster (`nous brain` no-subcommand → brain TUI, `nous provider` no-subcommand → provider TUI à la `charon auth`, etc.). A given cluster's TUI is focused on that cluster's domain — no forced merge of unrelated state across clusters.
+**Two TUIs only** (`nous brain` and `nous provider auth`) — domain-focused, not a forced merge across clusters. Identity = interactive CLI prompts where needed. Service = pure CLI. Bare `nous` = cobra help.
 
-**Menubar is its own binary**: `cmd/charon-security/` (renamed `cmd/nous-menubar/` on the move) stays as a separate cmd. The earlier idea of `nous menubar` as a subcommand is dropped — macOS app mode runs into the menubar-vs-CLI build seam (different Info.plist, different lifetime, different signing requirements). Eventual one-binary-three-modes is phase-2 work, not this issue.
+**Menubar is its own binary**: `cmd/charon-security/` (renamed `cmd/nous-menubar/` on the move) stays as a separate cmd. macOS app mode runs into the menubar-vs-CLI build seam (different Info.plist, lifetime, signing). Eventual one-binary-three-modes is phase-2 work, not this issue.
 
 The clusters emerged from walking through actual use cases:
 
 | Use case | Cluster |
 |---|---|
 | Generate keypair, export pubkey, import & verify peer key, gpg-agent lifecycle | `nous identity` |
-| Provision brain (private/shared), recipient list/add/remove, sync daemon, resolve conflicts | `nous brain` |
-| Configure AI provider, OAuth, paste API key, run proxy daemon | `nous provider` |
-| Status board, health checks, install/start/stop services | `nous service` |
+| Provision brain (private/shared), recipient list/add/remove, resolve conflicts, brain status | `nous brain` |
+| Configure AI provider, OAuth, paste API key | `nous provider` |
+| Install/start/stop services (brain-sync + proxy together), status, doctor, audit | `nous service` |
 
-`nous service` is the cross-cutting cluster that absorbs both observability (was: scattered across `charon-security` + `brain-sync status` + ad-hoc) and service-management (install/start/stop launchd plists). Per-subsystem service control still lives in the cluster (`nous brain sync install`, `nous provider proxy install`) because it's natural there; `nous service` adds the *unified view* across all of them.
+`nous service` is the cross-cutting cluster that absorbs both observability (was: scattered across `charon-security` + `brain-sync status` + ad-hoc) and service-management (install/start/stop launchd plists). It controls all nous services together — there's no value in starting brain-sync without the proxy or vice versa. No per-subsystem service subcommands.
 
 ### Subcommand tree (full)
 
-Each command is tagged with intended audience: **(h)** human-primary (interactive TUI/prompts), **(a)** agent-primary (CLI, scriptable, machine-output), **(b)** both (CLI for scripts + TUI for humans, equal-weight).
+Each command is tagged with intended audience: **(h)** human-primary (interactive prompts or TUI), **(a)** agent-primary (machine-readable, scriptable). When `(h)` is a full bubbletea TUI, it's marked `(h, TUI)`; otherwise `(h)` means interactive CLI prompts (no full screen, just sequenced questions).
 
 ```
-nous identity init             (h)  generate keypair (was: make identity) — interactive prompts
-nous identity export [--my-fp] (b)  armor my pubkey for sneakernet
-nous identity import <file>    (h)  verify-fingerprint ceremony (type last 8 hex chars)
-nous identity list             (b)  keys in keyring with brain-context — CLI --json; TUI for browse
-nous identity agent prewarm    (a)  shell hook / launchd
-nous identity agent flush      (a)  shell hook
-nous identity agent status     (b)  scriptable CLI; visible TUI
+# Identity — keys + agent + peers. Mostly run-once or shell-hook ops; no TUI.
+nous identity init                     (h)  guided keypair generation (interactive prompts)
+nous identity export [--my-fp]         (a)  print armored pubkey for sneakernet
+nous identity import <file>            (h)  verify-fingerprint ceremony (type last 8 hex chars)
+nous identity list                     (a)  keys with brain-context (--json)
+nous identity agent prewarm            (a)  shell hook / session start
+nous identity agent flush              (a)  shell hook / session end
+nous identity agent status             (a)  cache + lifecycle state
 
-nous brain new <path>          (h)  guided multi-step: path / GH owner / recipients / mode
-nous brain list                (b)  CLI --json; TUI for browse-then-act
-nous brain recipient list      (b)
-nous brain recipient add       (h)  verify-fingerprint ceremony + safeguards
-nous brain recipient remove    (h)  confirmation dialogs + revocation warning
-nous brain sync                (a)  long-running daemon (foreground, was: brain-sync)
-nous brain sync install/start/stop/status [brain]   (b)  CLI works; TUI shows live state
-nous brain resolve <brain> [--undo]   (a)  mechanical conflict-find + preserve + commit;
-                                         called by /nous-resolve skill for the mechanical bits
-nous brain status [brain]      (b)  scriptable + visible health check
+# Brain — the most-touched cluster; bare `nous brain` opens TUI.
+nous brain                             (h, TUI)  brain TUI: list, drill-in, actions
+nous brain new <path>                  (h)  guided provision (interactive prompts)
+nous brain list                        (a)  machine-readable list (--json)
+nous brain recipient list <brain>      (a)
+nous brain recipient add <brain>       (h)  verify-fingerprint ceremony + safeguards
+nous brain recipient remove <brain>    (h)  confirmation + revocation warning
+nous brain resolve <brain> [--undo]    (a)  mechanical conflict-find + preserve + commit;
+                                            called by /nous-resolve skill for the mechanical bits
+nous brain status [brain]              (a)  machine-readable health
 
-nous provider list             (b)
-nous provider add <name>       (h)  guided: paste key, fill config
-nous provider remove <name>    (b)
-nous provider auth <name>      (h)  OAuth dance opens browser — not agent-runnable
-nous provider proxy            (a)  long-running proxy daemon (was: bare charon / charon serve)
-nous provider proxy install/start/stop/status   (b)
+# Provider — auth/config for AI providers. Bare `nous provider auth` opens TUI (à la `charon auth`).
+nous provider auth [<name>]            (h, TUI)  list providers + drill into auth flows; <name> targets one
+nous provider list                     (a)  machine-readable list (--json) — agent inspection
+nous provider add <name>               (h)  guided: paste key, fill config
+nous provider remove <name>            (h)  confirmation prompt
 
-nous service status            (a)  scriptable JSON-or-text dump (also `nous status` alias)
-nous service doctor            (b)  CLI verdicts; TUI cards with named fixes
-nous service list              (b)  installed launchd services across all subsystems
-nous service audit [--since]   (a)  query-based; logs to stdout/file
+# Service — pure CLI ops; no TUI. One install/start/stop covers ALL services
+# (brain-sync + provider proxy). No per-subsystem service control.
+nous service install                   (a)  install all services as launchd agents (--migrate for old plists)
+nous service uninstall                 (a)  remove all
+nous service start                     (a)  start (or restart) all
+nous service stop                      (a)  stop all
+nous service status                    (a)  what's installed, what's running, summary (also `nous status` alias)
+nous service doctor                    (a)  prescriptive checks across the whole stack with named fixes
+nous service audit [--since]           (a)  unified audit log (proxy requests + brain ops + recipient changes)
 
-nous instructions [topic]      (a)  primary consumer is coding agents.
-                                    Default = overall scope; topic narrows
-                                    (`nous instructions brain`, etc.).
-                                    Progressive disclosure.
-
-nous manifest [topic[:filter]] (a)  primary consumer is coding agents.
-                                    Default = summary; topic narrows
-                                    (`nous manifest provider:permission` for gmail scopes etc.);
-                                    `nous manifest all` for kitchen-sink.
+# Top-level — agent-facing entry points. Progressive disclosure.
+nous instructions [topic]              (a)  agent guide. Default = overall;
+                                            `nous instructions brain` etc. narrows.
+nous manifest [topic[:filter]]         (a)  machine-readable state. Default = summary;
+                                            `nous manifest provider:permission` etc. narrows;
+                                            `nous manifest all` for kitchen-sink.
 ```
 
-**Per-cluster TUI entry points** (no subcommand on a cluster name → cluster TUI):
+**Two TUIs only**: `nous brain` and `nous provider auth`. Both are domain-focused (no forced merge across clusters). Identity ops are interactive CLI prompts (no full-screen TUI — humans rarely "browse" their keys). Service ops are pure CLI (mechanical, scriptable, runs from launchd hooks).
 
-```
-nous brain                     (h)  brain TUI: list + drill-in (recipients, sync, resolve)
-nous provider                  (h)  provider TUI: like today's `charon auth` — list + auth flows
-nous identity                  (h)  identity TUI: keys, agent state, peer pubkeys
-nous service                   (h)  service TUI: live status + per-service install/start/stop
-```
-
-Bare `nous` (no subcommand) prints the standard cobra help — clusters listed, no TUI launched. Each cluster's no-subcommand form opens *that cluster's* TUI; nothing forces unrelated clusters into one screen.
+Bare `nous` prints the standard cobra help — clusters listed, no TUI launched.
 
 ### Design principle: agent-facing help vs. human-facing TUI
 
@@ -168,11 +163,11 @@ Concrete usage by an agent:
 | `gpg --armor --export <fp>` | `nous identity export` |
 | `make new-brain` | `nous brain new` |
 | `make cloneto`, `make moveto` | folded into `nous brain new --from-clone <path>` |
-| `brain-sync` (foreground) | `nous brain sync` |
-| `brain-sync service install` | `nous brain sync install` |
-| `charon` (foreground proxy) | `nous provider proxy` |
-| `charon serve` | `nous provider proxy serve` (or just `nous provider proxy`) |
-| `charon auth <provider>` | `nous provider auth <name>` |
+| `brain-sync` (foreground) | runs as part of `nous service start` (no separate foreground subcommand in v1) |
+| `brain-sync service install` | `nous service install` (installs brain-sync + proxy together) |
+| `charon` / `charon serve` (foreground proxy) | runs as part of `nous service start` |
+| `charon auth <provider>` | `nous provider auth <name>` (the human TUI; lists + drills in) |
+| `charon auth` (TUI listing providers) | `nous provider auth` (no name) |
 | `charon instructions` | `nous instructions` |
 | `charon manifest` | `nous manifest` |
 | `charon-security` (menubar app) | `cmd/nous-menubar/` (separate cmd; one-binary-three-modes is phase-2) |
@@ -187,7 +182,7 @@ Concrete usage by an agent:
   1. Run `nous brain` and see her brains' state in a domain-focused TUI.
   2. Run `nous brain new ../brain-private-ying` interactively and end up with a working private brain.
   3. Run `nous brain recipient add ../brain-shared-family` against a sneakernet'd pubkey, complete the verify-fingerprint dance, and have her husband admitted.
-  4. Run `nous service doctor` and see green/yellow/red verdicts across GPG, agent, brains, providers, services with named fixes.
+  4. Run `nous service install && nous service start` to bring up brain-sync + proxy together; then `nous service doctor` to see green/yellow/red verdicts across GPG, agent, brains, providers, services with named fixes.
 - All four recipient safeguards fire and have unit tests.
 - `mode:` removed from `.brain/config.md` schema; brain-sync auto-discovery replaced with explicit registration.
 - Atlas reorganized: `nous/atlas/nous/cli.md` (new) describes the unified surface; charon's existing atlas content moves under `nous/atlas/charon/` where still relevant; legacy entries marked archived.
@@ -231,12 +226,13 @@ Familiarity ×1: cobra + bubbletea + gpg/git pipelines all known from charon; th
 ### M3 — `nous` cobra root + subcommand restructuring
 
 - [ ] New `cmd/nous/main.go` with cobra root + cluster subcommands.
-- [ ] Move existing `cmd/brain-sync/` subcommands under `nous brain sync ...`.
-- [ ] Move `cmd/charon/` subcommands under `nous provider ...` and `nous instructions`/`nous manifest` at top level.
+- [ ] Move existing brain-sync runtime (the foreground watcher loop in `cmd/brain-sync/`) into `lib/brainsync/runner.go` (or similar); invoked by the launchd-installed service binary, not as its own subcommand.
+- [ ] Move `cmd/charon/` proxy runtime similarly into a lib; invoked by the launchd-installed service binary.
+- [ ] Move `cmd/charon/` user-facing subcommands under `nous provider auth`, `nous provider list`, etc.; `nous instructions` and `nous manifest` at top level.
+- [ ] `nous service install` writes both launchd plists (brain-sync + proxy); single command brings up the full nous-substrate. `--migrate` handles in-place upgrade from old `brain-sync` plist.
 - [ ] Backwards-compat: `cmd/brain-sync/` and `cmd/charon/` stop building (or alias-via-shim that prints deprecation + delegates to `nous`).
 - [ ] charon#21 M1 (config + keygrip discovery) lands as `nous identity agent` foundation.
 - [ ] `Makefile.nous`: build target produces `bin/nous`. Old aliases (`make brain-sync`, `make charon`) point to `bin/nous` or removed.
-- [ ] Update launchd plist templates to use new binary path. `nous brain sync install --migrate` handles in-place upgrade from `brain-sync` plist.
 - [ ] Update atlas + sync-substrate-decision atlas + charon docs to reference `nous ...`.
 
 ### M4 — net-new commands
@@ -246,23 +242,22 @@ Familiarity ×1: cobra + bubbletea + gpg/git pipelines all known from charon; th
 - [ ] `nous brain new <path>`: guided multi-recipient flow. Drops `mode:` from generated manifests. Replaces `make new-brain`. Deletes bash scripts.
 - [ ] `nous brain recipient list/add/remove`: full surface with all four safeguards (self-removal guard, last-recipient guard, verify-before-add, revocation warning).
 - [ ] `nous brain resolve`: mechanical conflict-find + preserve + commit (uses `lib/brainsync/`). The `/nous-resolve` Claude Code skill is updated to call this for mechanical bits while still doing the agent-driven semantic merge in-session.
-- [ ] `nous service status`: scriptable JSON-or-text dump. List of brains, providers, services with state.
+- [ ] `nous service install/uninstall`: writes/removes both launchd plists (brain-sync + proxy) as a unit. `--migrate` upgrades old `brain-sync` plist in place.
+- [ ] `nous service start/stop`: brings up or shuts down all nous services together via launchd.
+- [ ] `nous service status`: scriptable JSON-or-text dump (also `nous status` alias). What's installed, what's running, errors.
 - [ ] `nous service doctor`: prescriptive checks (gpg setup, agent reachable, remotes pingable, services running, recipient validity). Each red item names a fix.
-- [ ] `nous service services`: all installed launchd services across all subsystems + state.
 - [ ] `nous service audit`: unified audit log query (proxy requests + brain ops + recipient changes).
-- [ ] Drop `mode:` from `.brain/config.md` schema. Migration: scan existing brains, auto-register via `nous brain sync install`.
+- [ ] Drop `mode:` from `.brain/config.md` schema. Migration: scan existing brains, auto-register via `nous service install`.
 
-### M5 — Per-cluster TUIs
+### M5 — TUIs (brain + provider)
 
-Bare `nous` stays as cobra-default help (no TUI). Each cluster gets its own TUI invoked by `nous <cluster>` with no subcommand. Each TUI is focused on that cluster's domain — no forced merge across clusters.
+Two TUIs only. Bare `nous` stays as cobra-default help (no TUI). Identity ops use interactive CLI prompts (no full-screen TUI). Service ops are pure CLI. Domains where humans actually browse-and-act get TUIs; everything else stays as targeted CLI.
 
-- [ ] `nous brain` — brain TUI: list of brains → drill-in (recipients, sync state, last commit, conflicts) → actions (recipient add/remove, sync install/start/stop, resolve).
-- [ ] `nous provider` — provider TUI: similar shape to today's `charon auth` (list providers → auth flows). Drill-in: token expiry, routing, recent requests. Actions: auth, rotate, remove.
-- [ ] `nous identity` — identity TUI: keys in keyring with brain-context, agent state (cache hits, lifecycle), peer pubkeys with admit-where pointers. Actions: import (verify ceremony), export, agent prewarm/flush.
-- [ ] `nous service` — service TUI: per-service status (running, last error, restart count), unified doctor cards (with named fixes), audit log scroll.
+- [ ] `nous brain` — brain TUI: list of brains → drill-in (recipients, sync state, last commit, conflicts) → actions (recipient add/remove, resolve, status).
+- [ ] `nous provider auth [<name>]` — provider TUI à la today's `charon auth`: list providers → drill into auth flows (OAuth dance, token rotation). With `<name>`, jumps straight to that provider's flow.
 - [ ] Each TUI action wraps the cobra subcommand — same logic, different rendering. Underlying ops in `lib/`.
-- [ ] Manual test: run each interactively. No TUI automation tests in M5; that's its own rabbit hole.
-- [ ] Document the agent-facing-vs-TUI design principle and the per-cluster-TUI choice in `nous/atlas/nous/cli.md`.
+- [ ] Manual test: run each interactively against operator's actual brains and a real provider (Anthropic). No TUI automation tests in M5; that's its own rabbit hole.
+- [ ] Document the agent-vs-human help split + per-cluster-TUI choice + audience-tag scheme in `nous/atlas/nous/cli.md`.
 
 ## Notes
 
@@ -284,8 +279,10 @@ Key design decisions captured at creation:
 1. **Use cases drive subcommand structure**, not "translate existing tools." Resulting clusters: `identity`, `brain`, `provider`, `service`. Top-level: `instructions`, `manifest`, `menubar`.
 2. **Agent-vs-human help split**: subcommand `--help` is the agent's manual (skill-as-script applies); TUI is the human's UI. Both wrap shared lib operations. Separation prevents mutual pollution. **Every command in the subcommand tree is tagged with audience** `(h)` / `(a)` / `(b)` so design-time intent is preserved as the surface evolves.
 3. **Progressive disclosure on instructions and manifest**: default = overall summary; `<cluster>` topic narrows; `<cluster>:<filter>` narrows further; `manifest all` is the explicit kitchen-sink. Agents fetch what they need, not the universe. Cobra's per-subcommand `--help` already follows this; `instructions` and `manifest` extend the same shape.
-4. **`nous service` cluster** absorbs both observability (status, doctor, audit) and unified service-control views (list across all subsystems). Per-subsystem install/start/stop stays in the cluster (`nous brain sync install`, `nous provider proxy install`) — discoverable where the user already is. The cluster name `service` (not `obs`) reflects the user's framing: this is where you go to see what's running, fix what's broken, and inspect what happened.
+4. **`nous service` cluster** absorbs both observability (status, doctor, audit) and unified service control (install/start/stop applies to ALL services together — brain-sync + proxy as one unit). Pure CLI, no TUI. Cluster name `service` (not `obs`) reflects "where you go to see what's running, fix what's broken, and inspect what happened."
 5. **Subtree-merge over rewrite**: preserve charon's git history under `cmd/charon/` initially via subtree, then restructure piece by piece. Lower-risk than a full rewrite.
 6. **`nous` is the binary name**: matches repo, replaces `brain-sync` and `charon`, backward-compat via aliases during transition.
-7. **Per-cluster TUIs, not unified status board**: bare `nous` prints help (no TUI); each cluster's no-subcommand form opens *its own* TUI focused on that cluster's domain. Avoids forcing unrelated state (provider auth + brain recipients + service health) into one screen. `nous provider` looks like today's `charon auth`; `nous brain` is the same shape for brain ops.
+7. **Two TUIs only — `nous brain` and `nous provider auth`**: domain-focused, not a forced merge across clusters. Bare `nous` prints help. Identity ops use interactive CLI prompts where needed (no full TUI; humans rarely browse keys). Service ops are pure CLI (mechanical, scriptable). TUIs live where humans actually browse-and-act.
+
+   **Service controls all services together** — `nous service install/start/stop` brings up brain-sync AND the proxy as one unit. No per-subsystem service subcommands like `nous brain sync install` or `nous provider proxy install`. There's no value in starting one without the other.
 8. **Menubar stays a separate cmd**: `cmd/nous-menubar/` (was `cmd/charon-security/`). macOS menubar app's Info.plist + lifetime + signing differs from CLI; absorbing into one binary is phase-2.
