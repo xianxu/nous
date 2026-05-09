@@ -3,3 +3,4 @@
 .openshell/.bootstrap/
 .openshell/.base-image-digest
 cmd/*/bin/
+bin/
