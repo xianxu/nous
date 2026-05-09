@@ -107,6 +107,14 @@ happen in the TUI — no separate CLI subcommand for those.
 
 Agent-facing read: ` + "`nous provider manifest`" + ` (machine-readable
 JSON of configured providers + granted scopes).`
+	// Reject unknown positional args. Without this, cobra falls through
+	// to RunE (the TUI) when a non-existent subcommand is passed —
+	// `nous provider whatever` would silently launch the TUI as if the
+	// arg weren't there. NoArgs makes the error explicit:
+	// `unknown command "whatever" for "nous provider"`.
+	// Subcommands (`manifest`) are resolved before Args validation,
+	// so this doesn't block them.
+	auth.Args = cobra.NoArgs
 
 	manifest := charoncli.ManifestCmd()
 	manifest.Use = "manifest"
