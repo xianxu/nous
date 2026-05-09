@@ -83,8 +83,18 @@ nous service doctor                 prescriptive checks with verdicts + named fi
 nous service list                   all installed launchd services + state (across brain sync, provider proxy)
 nous service audit [--since ...]    unified audit log (proxy requests + brain ops + recipient changes)
 
-nous instructions               canonical agent guide (composed from the agent-facing --help)
-nous manifest                   machine-readable: version, config paths, capabilities
+nous instructions [topic]       agent guide. Default = overall scope (clusters + top-level commands).
+                                Topic narrows: `nous instructions brain`, `nous instructions provider`,
+                                `nous instructions identity`, `nous instructions service`.
+                                Progressive disclosure — agents fetch only the topic they need.
+
+nous manifest [topic[:filter]]  machine-readable state. Default = summary (version, paths, top-level state).
+                                Topic narrows: `nous manifest provider` (configured providers + state),
+                                `nous manifest provider:permission` (what each provider permits, e.g. gmail
+                                scopes), `nous manifest brain` (brains + recipients + sync state),
+                                `nous manifest all` (kitchen-sink dump).
+                                Same progressive-disclosure principle as instructions.
+
 nous menubar                    macOS app mode (defers to phase 2; today this is charon-security)
 ```
 
@@ -107,6 +117,23 @@ Side benefits:
 - The split keeps each surface focused and avoids "kitchen-sink help text" anti-pattern
 
 This applies to skill-as-script (per `brain/data/life/42shots/ideas/2026-05-07-01-pensive-skill-as-script.md`): `nous`'s subcommand `--help` IS the skill-as-script for nous-using agents. SKILL.md files for nous-related skills (`nous-resolve`, `xx-issues` via `make close-issue`) defer to it.
+
+### Design principle: progressive disclosure on instructions and manifest
+
+Agent-facing surface should not greedily dump everything. An agent that needs to drive the proxy to talk to gmail shouldn't receive identity + brain + service material in its context. Both `instructions` and `manifest` follow the topic-narrowing pattern:
+
+- **Default**: overall summary — what clusters exist, what entry points matter for orientation. Tells the agent *where to look next*.
+- **Topic-narrowed**: `nous instructions <cluster>` returns the cluster-specific guide; `nous manifest <cluster>[:filter]` returns the cluster-specific state. Filters narrow further (`nous manifest provider:permission` for "what each provider permits" — narrower than full provider state).
+- **`nous manifest all`**: the kitchen-sink dump for cases when an agent really does need everything (e.g., debugging, full audit). Explicit opt-in, not the default.
+
+Cobra's per-subcommand `--help` already follows this principle — `nous brain --help` shows brain-specific content, not the universe. `instructions` and `manifest` extend the same shape. The cluster names match the cluster subcommand tree, so an agent that knows `nous brain ...` exists also knows `nous instructions brain` and `nous manifest brain` exist.
+
+Concrete usage by an agent:
+- `nous instructions` to orient: "I see brain, provider, identity, service clusters. The user's task involves the proxy."
+- `nous instructions provider` for the proxy guide.
+- `nous manifest provider` to discover configured providers.
+- `nous manifest provider:permission` to discover what's allowed.
+- Drives the operation. Never had to load brain or identity content.
 
 ### Repo strategy
 
@@ -239,6 +266,7 @@ Key design decisions captured at creation:
 
 1. **Use cases drive subcommand structure**, not "translate existing tools." Resulting clusters: `identity`, `brain`, `provider`, `service`. Top-level: `instructions`, `manifest`, `menubar`.
 2. **Agent-vs-human help split**: subcommand `--help` is the agent's manual (skill-as-script applies); TUI is the human's UI. Both wrap shared lib operations. Separation prevents mutual pollution.
-3. **`nous service` cluster** absorbs both observability (status, doctor, audit) and unified service-control views (list across all subsystems). Per-subsystem install/start/stop stays in the cluster (`nous brain sync install`, `nous provider proxy install`) — discoverable where the user already is. The cluster name `service` (not `obs`) reflects the user's framing: this is where you go to see what's running, fix what's broken, and inspect what happened.
-4. **Subtree-merge over rewrite**: preserve charon's git history under `cmd/charon/` initially via subtree, then restructure piece by piece. Lower-risk than a full rewrite.
-5. **`nous` is the binary name**: matches repo, replaces `brain-sync` and `charon`, backward-compat via aliases during transition.
+3. **Progressive disclosure on instructions and manifest**: default = overall summary; `<cluster>` topic narrows; `<cluster>:<filter>` narrows further; `manifest all` is the explicit kitchen-sink. Agents fetch what they need, not the universe. Cobra's per-subcommand `--help` already follows this; `instructions` and `manifest` extend the same shape.
+4. **`nous service` cluster** absorbs both observability (status, doctor, audit) and unified service-control views (list across all subsystems). Per-subsystem install/start/stop stays in the cluster (`nous brain sync install`, `nous provider proxy install`) — discoverable where the user already is. The cluster name `service` (not `obs`) reflects the user's framing: this is where you go to see what's running, fix what's broken, and inspect what happened.
+5. **Subtree-merge over rewrite**: preserve charon's git history under `cmd/charon/` initially via subtree, then restructure piece by piece. Lower-risk than a full rewrite.
+6. **`nous` is the binary name**: matches repo, replaces `brain-sync` and `charon`, backward-compat via aliases during transition.
