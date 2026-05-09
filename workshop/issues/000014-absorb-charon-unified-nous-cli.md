@@ -278,15 +278,19 @@ Per the lib-first principle, organize `lib/` by domain so future repackaging (e.
 
 ### M3 — `nous` cobra root + subcommand restructuring
 
-- [ ] New `cmd/nous/main.go` with cobra root + cluster subcommands.
-- [ ] Move existing brain-sync runtime (the foreground watcher loop in `cmd/brain-sync/`) into `lib/brainsync/runner.go` (or similar); invoked by the launchd-installed service binary, not as its own subcommand.
-- [ ] Move `cmd/charon/` proxy runtime similarly into a lib; invoked by the launchd-installed service binary.
-- [ ] Move `cmd/charon/`'s `auth` subcommand into the `nous provider` TUI (no separate auth CLI subcommand). `nous provider list` is the single agent-facing CLI. `nous instructions` and `nous manifest` at top level.
-- [ ] `nous service install` writes both launchd plists (brain-sync + proxy); single command brings up the full nous-substrate. `--migrate` handles in-place upgrade from old `brain-sync` plist.
-- [ ] Backwards-compat: `cmd/brain-sync/` and `cmd/charon/` stop building (or alias-via-shim that prints deprecation + delegates to `nous`).
-- [ ] charon#21 M1 (config + keygrip discovery) lands as `nous identity agent` foundation.
-- [ ] `Makefile.nous`: build target produces `bin/nous`. Old aliases (`make brain-sync`, `make charon`) point to `bin/nous` or removed.
-- [ ] Update atlas + sync-substrate-decision atlas + charon docs to reference `nous ...`.
+Shipped across four sub-commits (M3a-M3d):
+
+- [x] **M3a** (`05211d1`): refactored `cmd/charon` cobra constructors into `lib/charoncli/` package. Both `cmd/charon` (legacy entry, slim shim) and (future) `cmd/nous` import the same constructors. 14 subcommand constructors capitalized; package-level state (listenAddr, defaultListenAddr, auditPath, verbose) renamed/exported as needed. `cmd/charon` binary still builds + functions identically.
+- [x] **M3b** (`fb47554`): `cmd/nous/main.go` (~140 lines) with cobra root + four cluster subcommands. `nous instructions` and `nous manifest` mount `charoncli.InstructionsCmd`/`ManifestCmd` directly. `nous provider` mounts `charoncli.AuthCmd` with overridden `Use="provider"` (bare cluster command IS the TUI entry). `nous provider list` mounts `charoncli.ManifestCmd` with `Use="list"`. `nous identity` and `nous brain` are M4 placeholders with helpful "see legacy X for now" errors.
+- [x] **M3c** (`18fdd1e`): real `nous service install/uninstall/start/stop/status` in `cmd/nous/service.go` (~230 lines). Each subcommand dispatches to BOTH `lib/service` (charon's launchd manager) and `lib/brainsync` (brain-sync's), aggregating output. Sibling-binary discovery resolves `bin/charon` and `bin/brain-sync` paths next to nous.
+- [x] **M3d** (`5242e51`): `lib/agent/` foundation — keygrip discovery via `gpg --with-keygrip --with-colons --list-keys` parsing. `Identity` type bundles fingerprint + UID + all keygrips (primary + subkeys). Live-tested against operator's actual keyring. Charon#21 M1 absorbed; M2-M3 (prewarm/flush/status verbs) land in M4.
+
+**Deferred / out of M3 scope:**
+- ~~Move brain-sync foreground watcher loop into a lib runner~~: today brain-sync stays in `cmd/brain-sync/` and runs as its own launchd service (controlled by `nous service`). Single-binary daemon mode (`nous serve` running both runtimes in goroutines) is phase-2 work.
+- ~~Move charon proxy runtime similarly into lib~~: same; charon stays in `cmd/charon/` for now.
+- ~~Backwards-compat shims that print deprecation~~: not done; both legacy binaries still build and work identically. Removing them is its own milestone (after M4-M5 land and operators have migrated).
+- ~~Makefile build target produces `bin/nous`~~: `go build -o bin/nous ./cmd/nous` works; explicit Makefile target update is cosmetic.
+- ~~Atlas updates (sync-substrate-decision, charon docs)~~: existing atlas at `atlas/charon/index.md` already covers the M2 lib reorg. Will refresh in M4 alongside the identity/brain cluster docs.
 
 ### M4 — net-new commands
 
