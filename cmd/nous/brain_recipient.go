@@ -110,33 +110,11 @@ func runBrainRecipientList(w io.Writer, brainPath string) error {
 	return nil
 }
 
-// buildKeyAnnotator returns a function that, given a fingerprint,
-// returns a human-readable annotation like "(self) Xian Xu <...>" or
-// "(peer) Wife <wife@...>" or "(unknown)" — for use in `recipient
-// list` output.
+// buildKeyAnnotator delegates to lib/brain.Annotator so the cmd-level
+// caller doesn't have to reach into lib/identity directly. Kept as a
+// shim for now; the brain TUI calls brain.Annotator() directly.
 func buildKeyAnnotator() (func(string) string, error) {
-	secret, err := identity.List()
-	if err != nil {
-		return nil, err
-	}
-	pub, err := identity.ListPublic()
-	if err != nil {
-		return nil, err
-	}
-	return func(fp string) string {
-		fpU := strings.ToUpper(fp)
-		for _, k := range secret {
-			if strings.EqualFold(k.Fingerprint, fpU) {
-				return fmt.Sprintf("(self) %s", k.UID)
-			}
-		}
-		for _, k := range pub {
-			if strings.EqualFold(k.Fingerprint, fpU) {
-				return fmt.Sprintf("(peer) %s", k.UID)
-			}
-		}
-		return "(unknown — not in keyring)"
-	}, nil
+	return brain.Annotator()
 }
 
 // ─── add ──────────────────────────────────────────────────────────────
