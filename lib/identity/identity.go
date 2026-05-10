@@ -104,7 +104,11 @@ func ListPublic() ([]Key, error) {
 // Suitable for piping into a peer's `nous identity import` over
 // sneakernet.
 func Export(fp string) (string, error) {
-	out, err := exec.Command("gpg", "--armor", "--export", fp).Output()
+	// `--` separator so a fingerprint that happens to begin with `-`
+	// can't be mistaken for a flag (defense-in-depth — gpg's parser
+	// is generally permissive about hex anchors, but the cost is one
+	// token).
+	out, err := exec.Command("gpg", "--armor", "--export", "--", fp).Output()
 	if err != nil {
 		return "", fmt.Errorf("gpg --armor --export %s: %w", fp, err)
 	}
@@ -117,6 +121,13 @@ func Export(fp string) (string, error) {
 // Inspect parses an armored public-key blob WITHOUT importing it.
 // Returns the Key describing what's inside — fingerprint, UID, email —
 // so the operator can verify before the import commits.
+//
+// Refuses multi-key armors. The verify-fingerprint ceremony presents
+// one fingerprint to the operator; if the blob carries two keys, the
+// second admits silently while the operator confirms only the first
+// — a delegation-boundary breach (see brain/atlas/threat-model-shared-
+// brain.md, ## Revisions, 2026-05-09 entry). Operators wanting to
+// admit multiple peers should run Inspect/Import once per pubkey file.
 //
 // Implements the verify-before-add half of the brain recipient
 // ceremony: see what you're about to admit, type the last-8 fingerprint
@@ -132,6 +143,13 @@ func Inspect(armor string) (Key, error) {
 	if len(keys) == 0 {
 		return Key{}, fmt.Errorf("no key found in armored input")
 	}
+	if len(keys) > 1 {
+		var fps []string
+		for _, k := range keys {
+			fps = append(fps, k.Fingerprint)
+		}
+		return Key{}, fmt.Errorf("armored input contains %d keys (%s); the verify-fingerprint ceremony only confirms one — split the file and run Inspect/Import per key", len(keys), strings.Join(fps, ", "))
+	}
 	return keys[0], nil
 }
 
@@ -140,15 +158,53 @@ func Inspect(armor string) (Key, error) {
 // the operator (the verify-fingerprint ceremony lives in cmd/nous, not
 // here — this function does the mechanical import only).
 //
+// Defense-in-depth against multi-key armors that bypass Inspect's gate
+// (e.g. a caller invoking Import directly): snapshots the keyring's
+// public-fingerprint set before/after gpg's import and refuses if more
+// than one new fingerprint appeared. Inspect's check happens first, so
+// this is the second line.
+//
 // Idempotent: importing an already-known key is a no-op at gpg's level
 // and Import surfaces the same Key either way.
 func Import(armor string) (Key, error) {
+	before, err := publicFingerprintSet()
+	if err != nil {
+		return Key{}, err
+	}
 	cmd := exec.Command("gpg", "--import")
 	cmd.Stdin = strings.NewReader(armor)
 	if err := cmd.Run(); err != nil {
 		return Key{}, fmt.Errorf("gpg --import: %w", err)
 	}
+	after, err := publicFingerprintSet()
+	if err != nil {
+		return Key{}, err
+	}
+	var added []string
+	for fp := range after {
+		if !before[fp] {
+			added = append(added, fp)
+		}
+	}
+	if len(added) > 1 {
+		return Key{}, fmt.Errorf("import added %d keys (%s); the verify-fingerprint ceremony only confirmed one — refusing the multi-key admit. Re-run Inspect/Import per pubkey file", len(added), strings.Join(added, ", "))
+	}
 	return Inspect(armor)
+}
+
+// publicFingerprintSet returns the set of fingerprints currently in
+// the public keyring (own secret keys + admitted peers). Used by
+// Import for before/after diffing.
+func publicFingerprintSet() (map[string]bool, error) {
+	out, err := exec.Command("gpg", "--with-colons", "--list-public-keys").Output()
+	if err != nil {
+		return nil, fmt.Errorf("gpg --list-public-keys: %w", err)
+	}
+	set := map[string]bool{}
+	for _, k := range parseList(string(out)) {
+		set[k.Fingerprint] = true
+	}
+	return set, nil
 }
 
 // parseList parses gpg's `--with-colons` listing output (DETAILS format).

@@ -148,6 +148,62 @@ func TestExport_RoundtripsThroughInspect(t *testing.T) {
 	}
 }
 
+func TestInspect_RefusesMultiKeyArmor(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping gpg keygen in short mode")
+	}
+	// Generate two keys in homedir A; export both into a single armor.
+	homedirA := shortTempHome(t)
+	t.Setenv("GNUPGHOME", homedirA)
+	if err := os.Chmod(homedirA, 0o700); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	for _, email := range []string{"k1@example.com", "k2@example.com"} {
+		batch := `%no-protection
+Key-Type: eddsa
+Key-Curve: ed25519
+Subkey-Type: ecdh
+Subkey-Curve: cv25519
+Name-Real: Multi Test
+Name-Email: ` + email + `
+Expire-Date: 0
+%commit
+`
+		cmd := exec.Command("gpg", "--batch", "--generate-key")
+		cmd.Stdin = strings.NewReader(batch)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("gpg keygen for %s: %v\n%s", email, err, out)
+		}
+	}
+	keys, err := List()
+	if err != nil || len(keys) != 2 {
+		t.Fatalf("expected 2 keys after dual keygen, got %d (err=%v)", len(keys), err)
+	}
+	// Export both into one armor blob. gpg accepts multiple
+	// recipients in one --export call.
+	out, err := exec.Command("gpg", "--armor", "--export",
+		keys[0].Fingerprint, keys[1].Fingerprint).Output()
+	if err != nil {
+		t.Fatalf("gpg --armor --export: %v", err)
+	}
+	multiArmor := string(out)
+
+	// Inspect against a fresh homedir — should refuse with a clear
+	// error rather than silently returning the first key.
+	otherHome := shortTempHome(t)
+	t.Setenv("GNUPGHOME", otherHome)
+	if err := os.Chmod(otherHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, err = Inspect(multiArmor)
+	if err == nil {
+		t.Fatal("Inspect should refuse multi-key armor; got nil error")
+	}
+	if !strings.Contains(err.Error(), "contains 2 keys") {
+		t.Errorf("Inspect error should mention multi-key admit; got: %v", err)
+	}
+}
+
 func TestImport_AddsKeyToKeyring(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping gpg keygen in short mode")

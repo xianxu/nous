@@ -10,9 +10,10 @@ import (
 )
 
 // WriteManifest writes a .brain/config.md at the given brain root with
-// the fields nous cares about. The file is replaced atomically (write
-// to .tmp + rename) so a crashed write doesn't leave a half-formed
-// manifest readers might choke on.
+// the fields nous cares about, generating a default boilerplate body.
+// The file is replaced atomically (write to .tmp + rename) so a
+// crashed write doesn't leave a half-formed manifest readers might
+// choke on.
 //
 // The mode: field is intentionally NOT written — shared-vs-private is
 // derived from len(Recipients) per the M4c schema cleanup. Existing
@@ -20,37 +21,76 @@ import (
 // so older brains aren't broken; they just stop having the field
 // rewritten when nous touches them.
 //
-// The file body (after frontmatter) is a fixed boilerplate paragraph
-// pointing to ariadne AGENTS.md §1 and the threat model. Operators
-// who want richer manifests can hand-edit; nous won't clobber that
-// because it only ever calls WriteManifest at provisioning time, not
-// on every recipient change.
+// **Use only at provisioning time.** WriteManifest emits a fresh
+// boilerplate body that overwrites whatever's there. For recipient
+// changes on an already-provisioned brain, use RewriteFrontmatter —
+// which preserves the operator-authored body verbatim.
 func WriteManifest(brainRoot string, m Manifest) error {
 	dir := filepath.Join(brainRoot, ".brain")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", dir, err)
 	}
-
-	body := renderManifest(m)
-	target := filepath.Join(dir, "config.md")
-	tmp := target + ".tmp"
-	if err := os.WriteFile(tmp, []byte(body), 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", tmp, err)
-	}
-	if err := os.Rename(tmp, target); err != nil {
-		return fmt.Errorf("rename %s -> %s: %w", tmp, target, err)
-	}
-	return nil
+	return atomicWrite(filepath.Join(dir, "config.md"), renderManifest(m))
 }
 
-// renderManifest returns the canonical .brain/config.md body for m.
-// Recipients are sorted to keep diffs minimal across recipient changes
-// (otherwise re-rendering after an Add could shuffle order even when
-// nothing meaningful changed).
-func renderManifest(m Manifest) string {
+// RewriteFrontmatter swaps the YAML frontmatter of an existing
+// .brain/config.md without touching the body below it. Used by
+// recipient-change ops (add/remove) so operator-authored notes,
+// procedures, and rationale survive every change.
+//
+// Read existing → split at the closing `---` → render new frontmatter
+// from m → splice → atomic write (same .tmp+rename as WriteManifest).
+// If the existing file has no frontmatter, errors out — bail rather
+// than overwrite something we don't recognize.
+func RewriteFrontmatter(brainRoot string, m Manifest) error {
+	cfgPath := filepath.Join(brainRoot, ".brain", "config.md")
+	existing, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", cfgPath, err)
+	}
+	body, ok := splitBody(string(existing))
+	if !ok {
+		return fmt.Errorf("%s has no YAML frontmatter — refusing to rewrite (would overwrite an unrecognized format)", cfgPath)
+	}
+
+	var b strings.Builder
+	b.WriteString(renderFrontmatter(m))
+	b.WriteString(body)
+	return atomicWrite(cfgPath, b.String())
+}
+
+// splitBody returns the part of the manifest after the closing `---\n`
+// of the YAML frontmatter, including a leading newline so callers can
+// concatenate the new frontmatter directly. Returns (false) when the
+// document doesn't start with frontmatter delimiters.
+func splitBody(content string) (string, bool) {
+	if !strings.HasPrefix(content, "---\n") && !strings.HasPrefix(content, "---\r\n") {
+		return "", false
+	}
+	rest := strings.TrimPrefix(content, "---\n")
+	rest = strings.TrimPrefix(rest, "---\r\n")
+	end := strings.Index(rest, "\n---")
+	if end < 0 {
+		return "", false
+	}
+	// Skip past the closing "---" line and its trailing newline so the
+	// body we return doesn't double up the delimiter.
+	after := rest[end:]
+	after = strings.TrimPrefix(after, "\n---")
+	after = strings.TrimPrefix(after, "\r\n---")
+	// Eat the newline that follows the closing delimiter.
+	after = strings.TrimPrefix(after, "\n")
+	after = strings.TrimPrefix(after, "\r\n")
+	return after, true
+}
+
+// renderFrontmatter returns the YAML frontmatter block for m,
+// including both `---` delimiters and a trailing blank line. Shared
+// between WriteManifest (full write) and RewriteFrontmatter
+// (frontmatter-only swap).
+func renderFrontmatter(m Manifest) string {
 	recipients := append([]string(nil), m.Recipients...)
 	sort.Strings(recipients)
-
 	var b strings.Builder
 	b.WriteString("---\n")
 	if m.Name != "" {
@@ -61,6 +101,33 @@ func renderManifest(m Manifest) string {
 		fmt.Fprintf(&b, "sync_substrate: %s\n", m.SyncSubstrate)
 	}
 	b.WriteString("---\n\n")
+	return b.String()
+}
+
+// atomicWrite writes content to path via .tmp + rename. Same posture
+// as WriteManifest's inline write; extracted so RewriteFrontmatter
+// can share it.
+func atomicWrite(path, content string) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("rename %s -> %s: %w", tmp, path, err)
+	}
+	return nil
+}
+
+// renderManifest returns the canonical .brain/config.md content for
+// m — frontmatter (via renderFrontmatter) + a default boilerplate
+// body. Used by WriteManifest at provisioning time;
+// RewriteFrontmatter (recipient-change path) skips the body entirely.
+func renderManifest(m Manifest) string {
+	recipients := append([]string(nil), m.Recipients...)
+	sort.Strings(recipients)
+
+	var b strings.Builder
+	b.WriteString(renderFrontmatter(m))
 
 	// Body. Plural ("recipients") for shared brains; singular for
 	// private brains. Cheap human-readable nuance; the schema is the

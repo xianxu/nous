@@ -159,7 +159,9 @@ func newBrainRecipientAddCmd() *cobra.Command {
 
 After admission: appends to manifest + gcrypt-participants, re-renders
 the manifest, and pushes (gcrypt re-encrypts on push). Push failure
-leaves the local config inconsistent — re-run after fixing the remote.
+leaves the local config staged + committed; re-running the same
+command detects the unpushed commit and retries the push (no double
+manifest mutation).
 
 TTY-only: identity admission is a delegation boundary. See
 brain/atlas/threat-model-shared-brain.md.`,
@@ -204,11 +206,24 @@ brain/atlas/threat-model-shared-brain.md.`,
 				return err
 			}
 			if containsFold(m.Recipients, key.Fingerprint) {
+				// Already a recipient locally. If we have unpushed
+				// commits (e.g., previous push failed and operator
+				// re-ran), retry the push so the remote catches up.
+				// Otherwise, true no-op.
+				unpushed, _ := brainsync.HasUnpushedCommits(brainPath)
+				if unpushed {
+					fmt.Fprintf(out, "Already a recipient locally: %s. Retrying push …\n", key.Last8())
+					if err := brainsync.Push(brainPath); err != nil {
+						return fmt.Errorf("push: %w", err)
+					}
+					fmt.Fprintln(out, "Pushed.")
+					return nil
+				}
 				fmt.Fprintf(out, "Already a recipient: %s\n", key.Last8())
 				return nil
 			}
 			m.Recipients = append(m.Recipients, key.Fingerprint)
-			if err := brain.WriteManifest(brainPath, m); err != nil {
+			if err := brain.RewriteFrontmatter(brainPath, m); err != nil {
 				return err
 			}
 			if err := brain.SetGcryptParticipants(brainPath, m.Recipients); err != nil {
@@ -218,7 +233,7 @@ brain/atlas/threat-model-shared-brain.md.`,
 			fmt.Fprintf(out, "Admitted %s to %s.\n", key.Last8(), brainPath)
 			fmt.Fprintln(out, "Pushing so gcrypt re-encrypts to the new recipient set …")
 			if err := brainsync.AddCommitPush(brainPath, fmt.Sprintf("recipient: admit %s", key.Last8())); err != nil {
-				return fmt.Errorf("push: %w (manifest + git config updated locally; re-run after fixing the remote)", err)
+				return fmt.Errorf("push: %w (manifest + git config committed locally; re-run to retry push)", err)
 			}
 			fmt.Fprintln(out, "Pushed.")
 			return nil
@@ -268,10 +283,19 @@ func importPubkeyFromFile(out io.Writer, path string) (identity.Key, error) {
 	return peer, nil
 }
 
-// lookupKey finds a key in the keyring by full fingerprint or last-8.
-// Errors when ambiguous (multiple last-8 matches; rare but possible)
-// or absent.
+// lookupKey finds a key in the keyring by full fingerprint (40 hex
+// chars) or short fingerprint (8+ trailing hex chars). Shorter-than-8
+// inputs error explicitly — typo-protection against accidentally
+// matching the wrong key with a 2-char suffix.
+//
+// Errors when the lookup is ambiguous (multiple last-8 collisions;
+// rare but possible) or absent.
 func lookupKey(fingerprint string) (identity.Key, error) {
+	want := strings.ToUpper(strings.TrimSpace(fingerprint))
+	if len(want) != 40 && len(want) < 8 {
+		return identity.Key{}, fmt.Errorf("fingerprint %q is too short — pass the last 8 hex chars (or full 40-char form) to avoid accidental matches", fingerprint)
+	}
+
 	all := []identity.Key{}
 	if secret, err := identity.List(); err == nil {
 		all = append(all, secret...)
@@ -279,11 +303,10 @@ func lookupKey(fingerprint string) (identity.Key, error) {
 	if pub, err := identity.ListPublic(); err == nil {
 		all = append(all, pub...)
 	}
-	want := strings.ToUpper(fingerprint)
 	var hits []identity.Key
 	for _, k := range all {
 		fp := strings.ToUpper(k.Fingerprint)
-		if fp == want || strings.HasSuffix(fp, want) {
+		if fp == want || (len(want) >= 8 && strings.HasSuffix(fp, want)) {
 			hits = append(hits, k)
 		}
 	}
@@ -348,17 +371,36 @@ TTY-only.`,
 			if err != nil {
 				return err
 			}
-			// Find the recipient to remove (case-insensitive, last-8 OK).
-			want := strings.ToUpper(fpArg)
+			// Find the recipient to remove. Accept full 40-char form
+			// or 8+ trailing hex chars (last-8). Shorter inputs error
+			// explicitly — typo-protection.
+			want := strings.ToUpper(strings.TrimSpace(fpArg))
+			if len(want) != 40 && len(want) < 8 {
+				return fmt.Errorf("fingerprint %q is too short — pass the last 8 hex chars (or full 40-char form) to avoid accidental matches", fpArg)
+			}
 			var match string
 			for _, fp := range m.Recipients {
 				up := strings.ToUpper(fp)
-				if up == want || strings.HasSuffix(up, want) {
+				if up == want || (len(want) >= 8 && strings.HasSuffix(up, want)) {
 					match = fp
 					break
 				}
 			}
 			if match == "" {
+				// Not in the manifest. Either the operator typo'd, or
+				// a previous remove succeeded locally but the push
+				// failed — in which case the local commit is sitting
+				// unpushed and a re-run should retry the push rather
+				// than confusingly error out.
+				unpushed, _ := brainsync.HasUnpushedCommits(brainPath)
+				if unpushed {
+					fmt.Fprintf(out, "Not a recipient locally (already removed?). Retrying push …\n")
+					if err := brainsync.Push(brainPath); err != nil {
+						return fmt.Errorf("push: %w", err)
+					}
+					fmt.Fprintln(out, "Pushed.")
+					return nil
+				}
 				return fmt.Errorf("not a recipient of %s: %s", filepath.Base(brainPath), fpArg)
 			}
 
@@ -404,7 +446,7 @@ TTY-only.`,
 				}
 			}
 			m.Recipients = next
-			if err := brain.WriteManifest(brainPath, m); err != nil {
+			if err := brain.RewriteFrontmatter(brainPath, m); err != nil {
 				return err
 			}
 			if err := brain.SetGcryptParticipants(brainPath, m.Recipients); err != nil {
@@ -417,7 +459,7 @@ TTY-only.`,
 				short = strings.ToLower(short[len(short)-8:])
 			}
 			if err := brainsync.AddCommitPush(brainPath, fmt.Sprintf("recipient: revoke %s", short)); err != nil {
-				return fmt.Errorf("push: %w (manifest + git config updated locally; re-run after fixing the remote)", err)
+				return fmt.Errorf("push: %w (manifest + git config committed locally; re-run to retry push)", err)
 			}
 			fmt.Fprintln(out, "Pushed.")
 			return nil

@@ -1,6 +1,7 @@
 package brain
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -80,6 +81,83 @@ func TestWriteManifest_AtomicReplace(t *testing.T) {
 	matches, _ := filepath.Glob(filepath.Join(root, ".brain", "*.tmp"))
 	if len(matches) != 0 {
 		t.Errorf("found %d stray .tmp files: %v", len(matches), matches)
+	}
+}
+
+func TestRewriteFrontmatter_PreservesBody(t *testing.T) {
+	// Operator-authored body must survive a recipient change.
+	root := t.TempDir()
+	customBody := `# family brain manifest
+
+This brain is co-authored by Alice and Bob. Sync substrate decision
+documented in workshop/issues/000099-sync-decision.md.
+
+## Operating procedure
+
+- Conflicts get resolved via /nous-resolve from inside Claude Code.
+- Recipient changes go through the four-eyes principle (both authors
+  approve before any add/remove).
+`
+	// Seed with WriteManifest then overwrite the body with the
+	// operator's authored content (simulating a hand-edit after
+	// provisioning).
+	if err := WriteManifest(root, Manifest{Name: "family", Recipients: []string{"FP_A", "FP_B"}}); err != nil {
+		t.Fatalf("WriteManifest seed: %v", err)
+	}
+	cfg := filepath.Join(root, ".brain", "config.md")
+	full := "---\nname: family\nrecipients: [FP_A, FP_B]\n---\n\n" + customBody
+	if err := os.WriteFile(cfg, []byte(full), 0o644); err != nil {
+		t.Fatalf("seed manifest: %v", err)
+	}
+
+	// Add a recipient via RewriteFrontmatter — body should survive.
+	m, err := Read(root)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	m.Recipients = append(m.Recipients, "FP_C")
+	if err := RewriteFrontmatter(root, m); err != nil {
+		t.Fatalf("RewriteFrontmatter: %v", err)
+	}
+
+	body, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatalf("read after rewrite: %v", err)
+	}
+	bodyStr := string(body)
+	if !strings.Contains(bodyStr, "# family brain manifest") {
+		t.Errorf("body header missing after rewrite:\n%s", bodyStr)
+	}
+	if !strings.Contains(bodyStr, "This brain is co-authored by Alice and Bob.") {
+		t.Errorf("operator-authored prose missing after rewrite — body got clobbered:\n%s", bodyStr)
+	}
+	if !strings.Contains(bodyStr, "## Operating procedure") {
+		t.Errorf("operator-authored sub-heading missing after rewrite:\n%s", bodyStr)
+	}
+	if !strings.Contains(bodyStr, "FP_C") {
+		t.Errorf("new recipient FP_C not in frontmatter after rewrite:\n%s", bodyStr)
+	}
+	// Frontmatter content gets sorted; the OLD frontmatter shouldn't
+	// be lurking somewhere in the body.
+	if strings.Count(bodyStr, "---\n") < 2 {
+		t.Errorf("expected at least two `---\\n` (open/close) after rewrite:\n%s", bodyStr)
+	}
+}
+
+func TestRewriteFrontmatter_RefusesMissingFrontmatter(t *testing.T) {
+	// If the existing manifest doesn't start with `---\n`, refuse to
+	// rewrite — better than silently overwriting an unrecognized
+	// format.
+	root := t.TempDir()
+	dir := filepath.Join(root, ".brain")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.md"), []byte("# hand-edited brain config\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := RewriteFrontmatter(root, Manifest{Name: "x", Recipients: []string{"FP1"}}); err == nil {
+		t.Errorf("RewriteFrontmatter should refuse a frontmatter-less manifest")
 	}
 }
 
