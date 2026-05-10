@@ -6,11 +6,18 @@ Post-`nous#14` (M1–M3), the substantive library code lives in `lib/`, organize
 
 ```
 lib/
-  agent/       — gpg-agent lifecycle: keygrip discovery (M3d). M4 adds
-                 prewarm (PRESET_PASSPHRASE from Keychain), flush
-                 (reloadagent), status (KEYINFO query).
-                 Leaf module — lib/brain* and lib/identity will import
-                 it; doesn't import them.
+  agent/       — gpg-agent lifecycle: keygrip discovery (M3d). M4a wires
+                 `flush` via gpg-connect-agent reloadagent. Prewarm
+                 (PRESET_PASSPHRASE from Keychain) + status (KEYINFO
+                 parse) remain stubbed pending the lib-side primitives.
+                 Leaf module — lib/brain* and lib/identity import it;
+                 doesn't import them.
+  brain/       — brain manifest reader (M4a): Manifest struct, Read,
+                 DiscoverAll, hand-rolled YAML-frontmatter parser. M4b
+                 will add the *write* surface: New, RecipientAdd/Remove,
+                 gcrypt push wiring. Distinct from lib/brainsync (the
+                 sync daemon) — that may eventually fold under
+                 lib/brain/sync if the layering settles.
   brainsync/   — brain-sync runtime: file-level conflict resolution,
                  ref-watcher, git ops layer. Today's cmd/brain-sync
                  consumer; future M5 may collapse into the unified
@@ -22,6 +29,12 @@ lib/
                  cmd/nous (unified entry) import these — single source
                  of truth for the provider-facing CLI behavior.
   gmail/       — Gmail tool primitives (cmd/gmail consumer).
+  identity/    — GPG keypair operations (M4a): List (own secret keys),
+                 ListPublic (peers), Export (armor), Inspect (dry-run
+                 import for verify ceremony), Import (commit), Last8
+                 (canonical short fingerprint form). Shells out to gpg;
+                 no OpenPGP library dependency. Sits above lib/agent —
+                 humans think in fingerprints, agent thinks in keygrips.
   provider/    — AI provider domain. Single roof for everything
                  credential-and-proxy:
                    provider/oauth/     OAuth flows
@@ -47,7 +60,7 @@ lib/
 
 ## Cmd consumers
 
-- `cmd/nous/` — unified binary (M3b+). Cobra root with cluster subcommands. Mounts `charoncli.{InstructionsCmd, ManifestCmd, AuthCmd}` at top-level / `nous provider` paths. `cmd/nous/service.go` (M3c) implements `nous service install/start/stop/status` dispatching to both `lib/service` and `lib/brainsync`. Identity + brain clusters are placeholders pending M4.
+- `cmd/nous/` — unified binary (M3b+). Cobra root with cluster subcommands. Mounts `charoncli.{InstructionsCmd, ManifestCmd, AuthCmd}` at top-level / `nous provider` paths. `cmd/nous/service.go` (M3c) dispatches `nous service install/start/stop/status` to both `lib/service` and `lib/brainsync`. `cmd/nous/identity.go` (M4a) wires the identity cluster over `lib/identity` + `lib/brain` (joined `list` view). Brain cluster remains a placeholder pending M4b.
 - `cmd/charon/` — legacy entry, ~15-line `main.go` shim that calls `charoncli.BuildRoot().Execute()`. Stays for backwards-compat; eventual cleanup after operator migration.
 - `cmd/brain-sync/` — legacy entry for the brain-sync watcher. Same posture: kept for backwards-compat.
 - `cmd/nous-security/` — macOS menubar app. Separate cmd (different Info.plist + signing). Imports `lib/security`.
@@ -66,9 +79,8 @@ This separation is what allows future repackaging: a charon-only binary imports 
 
 ## What's planned but not yet here
 
-- `lib/identity/` — keypair gen/export/import, keyring inspection. Net-new code; lands in `nous#14 M4` alongside the `nous identity` cluster's cobra subcommands.
-- `lib/brain/` — provisioning/recipient/resolve. Net-new code (M4); also may absorb `lib/brainsync/` as `lib/brain/sync/` if the rename feels right at that point.
-- `lib/agent/` verbs (prewarm, flush, status) — M4 builds on M3d's foundation.
+- `lib/brain/` provisioning + recipient writers — M4b. The reader path (`Read`, `DiscoverAll`, manifest parser) shipped in M4a; the *write* path (`New`, `RecipientAdd/Remove`, gcrypt push wiring) lands in M4b.
+- `lib/agent/` verbs (prewarm, status) — M4a wired `flush` (it's a one-line gpg-connect-agent shell-out); prewarm and status need the keychain-passphrase flow and KEYINFO parsing.
 
 ## History
 
@@ -80,5 +92,6 @@ This separation is what allows future repackaging: a charon-only binary imports 
 - M3b (`fb47554`) — `cmd/nous/main.go` cobra root + cluster subcommands. Two TUIs (provider, brain placeholder); identity + service clusters scaffolded.
 - M3c (`18fdd1e`) — real `nous service install/start/stop/status` unifying brain-sync + charon launchd plists.
 - M3d (`5242e51`) — `lib/agent/` foundation (Identity, Keygrip, DiscoverIdentity).
+- M4a — `lib/identity/` (List, ListPublic, Export, Inspect, Import, Last8) and `lib/brain/` (Manifest, Read, DiscoverAll, parseManifest). `nous identity {init,export,import,list,agent}` cluster wired in `cmd/nous/identity.go`. Init shells out to `scripts/identity.sh` (200 lines of gpg-agent + pinentry-mac config not worth re-porting yet); import is TTY-only with the verify-fingerprint ceremony (last-8 confirmation, 3 attempts, case-insensitive).
 
 charon's pre-merge git history is preserved in the `xianxu/charon` GitHub repo (planned to be archived after `nous#14` ships).

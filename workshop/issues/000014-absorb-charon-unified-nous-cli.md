@@ -294,8 +294,8 @@ Shipped across four sub-commits (M3a-M3d):
 
 ### M4 — net-new commands
 
-- [ ] `nous identity` cluster: init (port `make identity`, **TTY-only**), export, import (**TTY-only**, verify-fingerprint ceremony — type last 8 hex chars), list (joined view of keyring × brains).
-- [ ] `nous identity agent prewarm/flush/status`: charon#21 M2-M3 work lands here. Wraps `lib/agent/`.
+- [x] `nous identity` cluster: init (port `make identity`, **TTY-only** — currently shells out to `scripts/identity.sh`; full Go port deferred), export, import (**TTY-only**, verify-fingerprint ceremony — type last 8 hex chars), list (joined view of keyring × brains). **M4a, commit pending.**
+- [~] `nous identity agent prewarm/flush/status`: M4a wired `flush` (one-line gpg-connect-agent shell-out) and stubs `prewarm/status` returning "not yet implemented." Real prewarm/status need lib/agent's keychain-passphrase flow + KEYINFO parser; carry into M4b or a follow-up.
 - [ ] `nous brain new <path>`: guided multi-recipient flow (TTY-only when admitting non-self recipients during creation). Drops `mode:` from generated manifests. Replaces `make new-brain`. Deletes bash scripts.
 - [ ] `nous brain recipient list/add/remove`: list is `(a)`; add and remove are `(h)` and **TTY-only**. Full surface with all four safeguards (self-removal guard, last-recipient guard, verify-before-add, revocation warning) plus the TTY refusal.
 - [ ] `nous brain resolve`: mechanical conflict-find + preserve + commit (uses `lib/brainsync/`). The `/nous-resolve` Claude Code skill is updated to call this for mechanical bits while still doing the agent-driven semantic merge in-session.
@@ -331,6 +331,7 @@ Two TUIs only. Bare `nous` stays as cobra-default help (no TUI). Identity ops us
 
 
 
+- 2026-05-09: closed M4a (identity cluster) — `lib/identity/` (List, ListPublic, Export, Inspect, Import, Last8) and `lib/brain/` (Manifest, Read, DiscoverAll) land as net-new packages. `nous identity {init,export,import,list,agent}` all wired. Tests: keygen-against-tempdir for the lib (gated on macOS unix-socket path length — uses /tmp/ngpg-N rather than t.TempDir's /var/folders path); promptVerify table-tests for the verify-fingerprint ceremony; keyBrains formatting tests. Smoke-tested against operator's real keyring: `nous identity list` showed `3872c2f0  [personal, shared-test]  Xian Xu <xianxu@gmail.com>`. Init shells out to scripts/identity.sh — 200 lines of pinentry-mac/keychain config not worth re-porting until surface stabilizes. agent prewarm/status stubbed; flush works via gpg-connect-agent.
 - 2026-05-09: closed M3 — 4 sub-commits (a-d) all green; refactor cmd/charon→lib/charoncli; cmd/nous binary mounts cluster subcommands; nous service unifies brain-sync+charon launchd plists; lib/agent foundation live-tested against actual keyring
 - 2026-05-09: closed M2 — git mv 8 packages from internal/charon/ to lib/{tui, service, security, provider/*}; sed-rewrite 71 imports; go build + go test ./... green across all relocated packages; cross-import rule verified clean (lib/provider ⊥ lib/brainsync); atlas/nous/lib-layout.md created
 - 2026-05-09: closed M1 — go build ./... + go test ./... green; charon binary smoke-tested (charon --help, manifest, instructions, scopes all functional against real vault state); 70 import paths rewritten, 0 charon-prefix imports remain; nous-security binary builds clean post-rename

@@ -40,7 +40,7 @@ canonical agent guide, or ` + "`nous instructions <topic>`" + ` for cluster-
 specific docs.`,
 	}
 
-	root.AddCommand(identityCmd())
+	root.AddCommand(newIdentityCmd())
 	root.AddCommand(brainCmd())
 	root.AddCommand(providerCmd())
 	root.AddCommand(serviceCmdImpl())
@@ -50,26 +50,6 @@ specific docs.`,
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}
-}
-
-// identityCmd is the placeholder identity cluster. M4 ships init/export/
-// import/list/agent subcommands.
-func identityCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "identity",
-		Short: "GPG keys + agent + peer pubkeys (placeholder; M4)",
-		Long: `Identity cluster — keypair generation, sneakernet export/import with
-verify-fingerprint ceremony, gpg-agent lifecycle.
-
-Coming in nous#14 M4 (issue 000014-absorb-charon-unified-nous-cli.md).
-For now, use the legacy entry points:
-  - make identity              keypair generation
-  - gpg --armor --export <fp>  sneakernet export`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("nous identity is not yet implemented (nous#14 M4); see legacy 'make identity' for now")
-		},
-	}
-	return cmd
 }
 
 // brainCmd is the placeholder brain cluster. M4 ships new/list/recipient/
