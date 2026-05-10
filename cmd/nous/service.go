@@ -40,7 +40,9 @@ Subcommands:
   uninstall   Remove both
   start       Start (or restart) both
   stop        Stop both
-  status      Show what's installed + running across both`,
+  status      Show what's installed + running across both
+  doctor      Prescriptive health check (gpg, identity, brains, services)
+  audit       Tail/filter audit logs (charon proxy + brain-sync)`,
 	}
 
 	cmd.AddCommand(serviceInstallCmdImpl())
@@ -48,6 +50,8 @@ Subcommands:
 	cmd.AddCommand(serviceStartCmdImpl())
 	cmd.AddCommand(serviceStopCmdImpl())
 	cmd.AddCommand(serviceStatusCmdImpl())
+	cmd.AddCommand(newServiceDoctorCmd())
+	cmd.AddCommand(newServiceAuditCmd())
 
 	return cmd
 }

@@ -31,9 +31,23 @@ type Manifest struct {
 	Path string
 
 	Name          string   // human-friendly slug (`personal`, `family`, ...)
-	Mode          string   // "private" | "shared"; AGENTS.md §1 plans to drop this
 	Recipients    []string // GPG fingerprints (full 40-char uppercase hex)
 	SyncSubstrate string   // "syncthing" | "git-daemon" | "none"
+
+	// LegacyMode holds the value of the deprecated `mode:` field when an
+	// existing manifest carries it. Readers don't act on it (shared-vs-
+	// private is derived from len(Recipients)); kept here only so the
+	// reader can preserve it on rewrite without dropping operator-
+	// authored content. M4b's writer doesn't emit this field.
+	LegacyMode string
+}
+
+// Shared reports whether the brain has more than one recipient — the
+// derived signal that replaced the explicit `mode:` field. Private =
+// single recipient (the operator); Shared = multiple. See
+// AGENTS.md §1's brain-identification block for the rationale.
+func (m Manifest) Shared() bool {
+	return len(m.Recipients) > 1
 }
 
 // Read parses the manifest at <brainRoot>/.brain/config.md. Returns an
@@ -114,7 +128,9 @@ func parseManifest(content string) (Manifest, error) {
 		case "name":
 			m.Name = unquote(val)
 		case "mode":
-			m.Mode = unquote(val)
+			// Deprecated; preserved verbatim for round-trips through the
+			// writer in M4b. Not used as a discriminator anymore.
+			m.LegacyMode = unquote(val)
 		case "sync_substrate":
 			m.SyncSubstrate = unquote(val)
 		case "recipients":

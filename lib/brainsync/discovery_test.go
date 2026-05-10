@@ -6,7 +6,8 @@ import (
 	"testing"
 )
 
-// mustWriteBrain creates dir/.brain/config.md with the given body.
+// mustWriteBrain creates dir/.brain/config.md with the given body
+// wrapped in YAML frontmatter delimiters.
 func mustWriteBrain(t *testing.T, dir, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(dir, ".brain"), 0o755); err != nil {
@@ -19,8 +20,10 @@ func mustWriteBrain(t *testing.T, dir, body string) {
 
 func TestFindSharedBrains(t *testing.T) {
 	root := t.TempDir()
-	mustWriteBrain(t, filepath.Join(root, "shared-family"), "mode: shared\nname: family\nrecipients: [FP1, FP2]\n")
-	mustWriteBrain(t, filepath.Join(root, "private-brain"), "mode: private\nname: personal\nrecipients: [FP1]\n")
+	// Shared = 2+ recipients (derived signal, replaced the old `mode:` field).
+	mustWriteBrain(t, filepath.Join(root, "shared-family"), "name: family\nrecipients: [FP1, FP2]\n")
+	mustWriteBrain(t, filepath.Join(root, "private-brain"), "name: personal\nrecipients: [FP1]\n")
+	// Plain dir without .brain/ — must be skipped.
 	if err := os.MkdirAll(filepath.Join(root, "code-repo"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -34,6 +37,25 @@ func TestFindSharedBrains(t *testing.T) {
 	}
 	if filepath.Base(got[0]) != "shared-family" {
 		t.Errorf("want shared-family, got %s", got[0])
+	}
+}
+
+func TestFindSharedBrains_LegacyModeFieldIgnored(t *testing.T) {
+	// Existing manifests with the old `mode:` field still parse; the
+	// derived signal (recipients length) is what matters.
+	root := t.TempDir()
+	// Single recipient with `mode: shared` left over — NOT shared by
+	// the derived rule, so the daemon shouldn't watch it.
+	mustWriteBrain(t, filepath.Join(root, "stale-shared"), "mode: shared\nname: stale\nrecipients: [FP1]\n")
+	// Two recipients with no `mode:` field at all — IS shared.
+	mustWriteBrain(t, filepath.Join(root, "real-shared"), "name: real\nrecipients: [FP1, FP2]\n")
+
+	got, err := FindSharedBrains([]string{root})
+	if err != nil {
+		t.Fatalf("FindSharedBrains: %v", err)
+	}
+	if len(got) != 1 || filepath.Base(got[0]) != "real-shared" {
+		t.Errorf("got %v, want [real-shared] only", got)
 	}
 }
 
@@ -54,28 +76,9 @@ func TestFindSharedBrains_BadRoot(t *testing.T) {
 	}
 }
 
-func TestIsSharedBrain(t *testing.T) {
-	tests := []struct {
-		name, body string
-		want       bool
-	}{
-		{"shared", "---\nmode: shared\nname: family\n---\n", true},
-		{"private", "---\nmode: private\nname: personal\n---\n", false},
-		{"missing mode", "---\nname: thing\n---\n", false},
-		{"shared with extra space", "---\nmode:   shared   \n---\n", true},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := isSharedBrain(tc.body); got != tc.want {
-				t.Errorf("isSharedBrain(%q) = %v, want %v", tc.body, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestFindAllSharedBrainsInWorkspace(t *testing.T) {
 	root := t.TempDir()
-	mustWriteBrain(t, filepath.Join(root, "shared-x"), "mode: shared\nname: x\nrecipients: [FP1]\n")
+	mustWriteBrain(t, filepath.Join(root, "shared-x"), "name: x\nrecipients: [FP1, FP2]\n")
 	t.Setenv("WORKSPACE_ROOT", root)
 
 	got, err := FindAllSharedBrainsInWorkspace()

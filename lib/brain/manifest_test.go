@@ -32,8 +32,11 @@ sync_substrate: none
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	if m.Mode != "private" {
-		t.Errorf("Mode = %q, want private", m.Mode)
+	if m.LegacyMode != "private" {
+		t.Errorf("LegacyMode = %q, want private (preserved for round-trip)", m.LegacyMode)
+	}
+	if m.Shared() {
+		t.Errorf("Shared() = true for single-recipient manifest")
 	}
 	if m.Name != "personal" {
 		t.Errorf("Name = %q, want personal", m.Name)
@@ -65,6 +68,28 @@ sync_substrate: syncthing
 	for i, w := range want {
 		if m.Recipients[i] != w {
 			t.Errorf("Recipients[%d] = %q, want %q", i, m.Recipients[i], w)
+		}
+	}
+	if !m.Shared() {
+		t.Errorf("Shared() = false for 3-recipient manifest")
+	}
+}
+
+func TestShared_Boundary(t *testing.T) {
+	// Boundary: exactly 1 recipient = not shared; 2+ = shared.
+	cases := []struct {
+		recipients []string
+		want       bool
+	}{
+		{nil, false},
+		{[]string{"FP1"}, false},
+		{[]string{"FP1", "FP2"}, true},
+		{[]string{"FP1", "FP2", "FP3"}, true},
+	}
+	for _, c := range cases {
+		m := Manifest{Recipients: c.recipients}
+		if got := m.Shared(); got != c.want {
+			t.Errorf("Shared() with %d recipients = %v, want %v", len(c.recipients), got, c.want)
 		}
 	}
 }
