@@ -40,24 +40,262 @@ The dogfood is the load-bearing experiment. It tells us:
 
 ### M1 — provision `brain-shared-family` + place initial trip plan
 
-- [ ] Create `brain-shared-family` via `make new-brain` (or analog) with both my fingerprint and wife's fingerprint as gcrypt recipients.
+- [ ] Create `brain-shared-family` via `nous brain new --fingerprint $WIFE_FP` (after wife's pubkey is imported on operator's machine via the verify-fingerprint ceremony).
 - [ ] Round-trip clone-and-decrypt verified end-to-end on at least one machine.
 - [ ] Seed `data/life/travel/2026-08-01-paris.md` with whatever notes already exist (or an empty travel-plan instance if starting fresh).
-- [ ] `.brain/config.md` declares `mode: shared`, `recipients: [me, wife]`.
+- [ ] `.brain/config.md` declares `recipients: [me, wife]`. (No `mode:` field — the M4c schema cleanup derives shared-vs-private from `len(recipients)`.)
 
 ### M2 — onboard wife's machine
 
 - [ ] Wife's Mac runs `make nous-bootstrap` to completion.
-- [ ] Wife's GPG keypair set up (via `make identity` or import).
-- [ ] Wife's fingerprint added as a recipient to `brain-shared-family` (already in M1's recipient list — this milestone confirms the round-trip works on her machine).
+- [ ] Wife's GPG keypair set up via `nous identity init`.
+- [ ] Wife's fingerprint sneakernet'd to operator and admitted via `nous identity import` (verify-fingerprint ceremony) — already in M1's recipient list since M1 needs it before provisioning.
 - [ ] Wife's machine clones `brain-shared-family` via gcrypt; round-trip edit + commit + sync verified.
-- [ ] brain-sync daemon installed on her machine via `brain-sync service install`.
+- [ ] brain-sync daemon installed on her machine via `nous service install`.
 
 ### M3 — dogfood ≥2 weeks
 
 - [ ] Both peers edit the Paris plan over ≥2 weeks of natural use.
 - [ ] Every conflict logged: timestamp, files involved, root cause (e.g. simultaneous edit, stale read, etc.), resolution path (manual / `/brain-resolve`), verdict (clean / acceptable / wrong), preservation outcome (any data loss?).
 - [ ] After window closes, evaluate the log: did file-level convention hold? Does `/brain-resolve` cover the failure modes? Are locks (`nous#7`) needed?
+
+## Test plan
+
+The two-machine walkthrough that exercises the M4 surface end-to-end. This is the first time `nous brain new --recipient`, the verify-fingerprint ceremony, and gcrypt's multi-recipient re-key flow run against humans + a real GitHub remote rather than synthetic tests.
+
+Keep a session log as you go (timestamps + observations + anything surprising). Any step that doesn't go as expected is data — write it down and either fix-forward in the same session (small) or file an issue (real).
+
+### Phase 0 — prereqs
+
+**Operator (this machine):**
+- [ ] `nous` binary built + on PATH. Smoke: `nous identity list` shows my fingerprint annotated `(self)`.
+- [ ] `gh auth status` is logged in to GitHub with `xianxu` (or whichever account owns shared-brain repos).
+- [ ] `nous service doctor` returns 9/9 green. Anything red blocks the rest.
+
+**Wife's Mac (fresh-ish):**
+- [ ] Apple ID signed in, Xcode CLT installed (`xcode-select --install`), Homebrew installed.
+- [ ] git, gh installed (`brew install git gh`).
+- [ ] gh auth done — she signs in with her own GitHub account.
+- [ ] No prior nous setup. We're testing the cold-start path.
+
+**Out-of-band channel:** decide before starting which channel we'll use to communicate her fingerprint's last 8 hex chars (voice call, FaceTime, in-person — NOT the same channel as the pubkey transfer). The verify-fingerprint ceremony only works if the channel is independent.
+
+**Calendar:** ~45 min for Phases 1–6. Keep her in the loop on what we're doing — this is meaningful time, not a sneak-it-in moment.
+
+### Phase 1 — wife's machine: identity + export
+
+Run on her Mac. She drives; I narrate.
+
+```sh
+git clone https://github.com/xianxu/nous ~/workspace/nous
+cd ~/workspace/nous
+make nous-bootstrap          # installs deps, builds bin/nous, etc.
+./bin/nous identity init     # TTY-only; pinentry-mac will prompt for passphrase
+./bin/nous identity list     # confirm her fingerprint shows up, annotated (self)
+./bin/nous identity export > ~/Desktop/wife.pub
+```
+
+**Expected:**
+- `identity init` opens a pinentry-mac dialog; she sets a passphrase she'll remember (or stash in 1Password). The passphrase is hers — I don't see it.
+- `identity list` shows one secret key with her name + email + fingerprint.
+- `wife.pub` is ~3 KB of `-----BEGIN PGP PUBLIC KEY BLOCK-----`.
+
+**Watch for:**
+- pinentry-mac not launching (gpg-agent config issue). If so: `gpgconf --launch gpg-agent` then re-run.
+- `identity init` says "no $NOUS_DIR" or fails to find scripts/identity.sh. Worth filing if it happens.
+- Wall-clock time. If `identity init` takes >2 min, that's surprising.
+
+### Phase 2 — sneakernet
+
+AirDrop `wife.pub` from her Mac to mine. (USB stick or signed-message-via-iMessage are alternatives if AirDrop misbehaves.)
+
+**Note her fingerprint's last 8 hex chars.** She reads them aloud over an OUT-OF-BAND channel while I'm watching the import prompt. NOT via iMessage / Slack / email — those could be MitM'd in principle. Voice call or in-person.
+
+### Phase 3 — operator: import wife's pubkey (verify-fingerprint ceremony)
+
+```sh
+nous identity import ~/Downloads/wife.pub
+```
+
+**Expected interaction:**
+```
+Pubkey to admit:
+  fingerprint: ABCDEF... (40 hex)
+  last-8:      XXXXXXXX
+  uid:         Wife <wife@example.com>
+
+Verify the last 8 hex chars match what the peer sent you OUT OF BAND
+...
+
+Type the last-8 to confirm (attempt 1/3): _
+```
+
+I type what wife reads aloud. If it matches → import commits, prints `Imported XXXXXXXX.`. If not → mismatch hint, re-try, abort after 3.
+
+**Smoke after:**
+```sh
+nous identity list
+```
+Should now show wife's pubkey under "Public keys (peers admitted to brains)" annotated `(peer)`. No brain assignment yet (none have her as recipient).
+
+**Watch for:**
+- Multi-key armor refusal (M4 review fix #3) — shouldn't fire for a single-key export, but if it does, something's weird with her keygen.
+- Case sensitivity in the prompt. M4 implementation is case-insensitive; verify in practice.
+- Wife's fingerprint visible to me earlier in the flow — does the ceremony still feel meaningful? (Honest UX feedback worth logging.)
+
+### Phase 4 — operator: provision brain-shared-family
+
+```sh
+WIFE_FP=ABCDEF...           # her full 40-char fingerprint, copied from `nous identity list`
+nous brain new ~/workspace/brain-shared-family --fingerprint $WIFE_FP
+```
+
+**Expected interaction:**
+1. Verify-fingerprint ceremony for wife's key (one more confirmation — admitting to a brain is a separate trust event from importing).
+2. Confirms list of recipients (me + wife), then runs scripts/new-brain.sh:
+   - prompts for GitHub repo name + visibility (private)
+   - creates the repo via `gh repo create`
+   - git init, sets remote, writes single-recipient manifest, single-recipient gcrypt push.
+3. nous re-keys: rewrites manifest to multi-recipient (me + wife, no `mode:`), updates gcrypt-participants, commits, pushes.
+4. Final line: `Brain provisioned.`
+
+**Smoke after:**
+```sh
+nous brain list                                    # should show brain-shared-family with 2 recipients
+nous brain recipient list ~/workspace/brain-shared-family
+# Expect:
+#   Shared: true (2 recipients)
+#   Recipients (manifest): both fingerprints, annotated (self) and (peer)
+#   gcrypt-participants: same two
+#   No mismatch warning
+```
+
+**Watch for:**
+- The two-push pattern's wall-clock impact. If it's >30 seconds, log it.
+- gcrypt errors during the second push (re-encryption to wife's key). If `gpg: encryption failed: Unusable public key`, her pubkey is missing the encryption-capable subkey — Phase 1 went wrong.
+- Manifest `mode:` field present after provisioning — should be absent. (M4c schema cleanup verifies.)
+
+### Phase 5 — wife's machine: clone the shared brain
+
+She runs:
+
+```sh
+cd ~/workspace
+git clone gcrypt::ssh://git@github.com/xianxu/brain-shared-family.git
+cd brain-shared-family
+ls -la                              # should see .brain/config.md + the seed content
+cat .brain/config.md                # should show both recipients, no mode:
+```
+
+**Expected:**
+- Clone takes a beat (gcrypt has to decrypt). pinentry-mac may pop up asking for her passphrase if gpg-agent's cache is cold.
+- `.brain/config.md` is plaintext on her side — gcrypt is at the remote, working tree is decrypted.
+- Manifest matches what I provisioned.
+
+**Watch for:**
+- `gcrypt: cannot decrypt for any of the recipients` → her keyring doesn't have her own secret key (Phase 1 didn't actually generate it) OR my `--recipient $WIFE_FP` was wrong.
+- pinentry-mac silent failures (her macOS Keychain not configured). If she has to type her passphrase every operation, log it for `nous#3` follow-up.
+
+### Phase 6 — round-trip edit
+
+Both sides exercise commit + push + pull.
+
+**Operator (me):**
+```sh
+cd ~/workspace/brain-shared-family
+mkdir -p data/life/travel
+$EDITOR data/life/travel/2026-08-01-paris.md   # whatever placeholder content; date + 2-3 ideas
+git add -A && git commit -m "seed: paris trip plan"
+git push
+```
+
+**Wife:**
+```sh
+cd ~/workspace/brain-shared-family
+git pull --ff-only
+cat data/life/travel/2026-08-01-paris.md         # should see what I wrote
+$EDITOR data/life/travel/2026-08-01-paris.md     # add a few of her own ideas
+git add -A && git commit -m "+ wife's paris ideas"
+git push
+```
+
+**Operator:**
+```sh
+git pull --ff-only
+cat data/life/travel/2026-08-01-paris.md         # should see her additions
+```
+
+**Watch for:**
+- Wall-clock for push/pull (gcrypt overhead). If pulls take >20s on Wi-Fi, that's friction worth logging.
+- Authorship in `git log` — should show her email on her commits, mine on mine.
+
+### Phase 7 — install brain-sync daemon on wife's machine
+
+```sh
+cd ~/workspace/nous
+./bin/nous service install        # plists for both charon + brain-sync
+./bin/nous service start
+./bin/nous service status         # verify both running
+./bin/nous service doctor         # green across the board
+```
+
+**Watch for:**
+- Whether brain-sync auto-discovers `brain-shared-family` (it should — `WORKSPACE_ROOT` resolution + multi-recipient = shared).
+- charon may be irrelevant on her machine if she's not using AI agents through it. Note for later — possibly the install should be split (`nous service install --brain-only`).
+
+### Phase 8 — conflict exercise (when natural conflict shows up)
+
+Don't manufacture a synthetic conflict — wait for one to happen during real co-editing. When it does (probably mid-trip-plan):
+
+```sh
+git pull
+# … merge conflict on 2026-08-01-paris.md …
+/nous-resolve ~/workspace/brain-shared-family    # via Claude Code skill
+```
+
+**Log:**
+- What was the conflict (sentence-level disagreement, structural reorg, both adding new sections, …)
+- How `/nous-resolve` handled it
+- Whether the resolution preserved both intents
+- Any data loss
+
+This is the load-bearing dogfood evidence. Aim for ≥3 real conflicts before evaluating M3.
+
+### Things to log over the ≥2-week window
+
+In `workshop/issues/000012-shared-brain-dogfood.md`'s `## Log` section, append entries as observations come in:
+
+- Every conflict (date, files, cause, resolution, verdict, data-loss verdict).
+- Every recipient operation (add, remove, who, why) — should be rare.
+- Every push that took unusually long, every pull that hit gcrypt errors.
+- Any time pinentry-mac surprised either of us (cache-flush, passphrase re-prompt, keychain access).
+- Wife's UX feedback verbatim — her perspective is the ground truth on whether this scales beyond a sample size of one operator.
+- Any place the docs (`atlas/`, `nous instructions`) sent us wrong.
+
+### Failure-mode triage table
+
+Quick reference for common things that go wrong. If hit, decide on the spot: fix-forward (small, same session) vs file an issue.
+
+| Symptom | Likely cause | Quick check |
+|---|---|---|
+| `nous identity import` says "armored input contains 2 keys" | Wife's `gpg --export` picked up an old key by accident | She runs `gpg --list-secret-keys` — should be 1 key |
+| `nous brain new` errors at `gh repo create` | gh auth on operator missing or wrong account | `gh auth status` |
+| Wife's clone errors `cannot decrypt for any of the recipients` | Her keyring missing her own private key | Re-run `nous identity init` |
+| Wife's clone errors `gpg: encryption failed: Unusable public key` | Operator's `nous brain new --recipient` got the wrong fingerprint | `nous identity list` — confirm her pubkey is in operator's keyring + matches what was passed |
+| `nous brain recipient list` shows "WARNING: manifest and gcrypt-participants disagree" | Hand-edit drift, or interrupted re-key | `nous brain recipient add/remove` reconciles via the canonical writers |
+| `nous service doctor` red on "recipient fingerprints in keyring" | Wife's pubkey not yet imported on operator | `nous identity import` |
+| brain-sync log shows repeated `gcrypt: Repository not found` | `gh` repo wasn't created or branch is wrong | Visit the GH URL |
+| pinentry-mac doesn't launch | gpg-agent stale | `gpgconf --launch gpg-agent` |
+
+### Done-when (for this test plan, not the issue)
+
+- Phases 1–6 walked through without filing a Critical/Important bug, OR all such bugs filed + addressed.
+- Wife and operator have both pushed + pulled the trip plan at least once.
+- brain-sync running on both machines.
+- ≥1 honest piece of UX feedback captured (positive or negative).
+- The above logged in `## Log`.
+
+That marks the M1+M2 milestones as substantively walked. M3 (≥2 weeks dogfood) is then a calendar gate, not a code gate.
 
 ## Notes
 
