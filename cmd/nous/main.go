@@ -20,7 +20,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -41,7 +40,7 @@ specific docs.`,
 	}
 
 	root.AddCommand(newIdentityCmd())
-	root.AddCommand(brainCmd())
+	root.AddCommand(newBrainCmd())
 	root.AddCommand(providerCmd())
 	root.AddCommand(serviceCmdImpl())
 	root.AddCommand(instructionsCmd())
@@ -52,26 +51,6 @@ specific docs.`,
 	}
 }
 
-// brainCmd is the placeholder brain cluster. M4 ships new/list/recipient/
-// resolve/status. Bare `nous brain` will open the TUI.
-func brainCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "brain",
-		Short: "Brain provisioning, recipients, sync, resolve (placeholder; M4)",
-		Long: `Brain cluster — provision a private/shared brain, manage recipients
-(with TTY-only safeguards + verify-fingerprint ceremony), resolve
-sync conflicts via /nous-resolve.
-
-Coming in nous#14 M4. For now, use the legacy entry points:
-  - make new-brain         provision a brain (single-recipient only)
-  - make brain-sync        run the sync daemon
-  - /nous-resolve <root>   resolve conflicts via the Claude Code skill`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("nous brain is not yet implemented (nous#14 M4); see legacy 'make new-brain' / 'make brain-sync' for now")
-		},
-	}
-	return cmd
-}
 
 // providerCmd mounts charon's auth TUI as `nous provider` (the bare cluster
 // command IS the TUI entry, not `nous provider auth`). Adds `nous provider
