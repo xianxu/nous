@@ -40,7 +40,7 @@ func main() {
 					return err
 				}
 				if len(auto) == 0 {
-					return fmt.Errorf("no shared brains found under $HOME/workspace; pass --brain explicitly")
+					return fmt.Errorf("no shared brains found under the workspace root (parent of nous); pass --brain explicitly")
 				}
 				brainPaths = auto
 				log.Printf("brainsync: auto-discovered %d shared brain(s)", len(auto))

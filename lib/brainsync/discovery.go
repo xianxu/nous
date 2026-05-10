@@ -10,14 +10,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/xianxu/nous/lib/workspace"
 )
 
 // FindSharedBrains walks each root, returning the absolute path of every
 // directory that contains a .brain/config.md with `mode: shared`.
 //
-// Walks one level deep — brains live as immediate children of $HOME/workspace
-// or wherever the operator points it. A nested .brain/ inside a brain isn't a
-// distinct brain.
+// Walks one level deep — brains live as immediate children of the workspace
+// root (parent of nous; see lib/workspace.Root). A nested .brain/ inside a
+// brain isn't a distinct brain.
 func FindSharedBrains(roots []string) ([]string, error) {
 	var found []string
 	for _, root := range roots {
@@ -47,17 +49,15 @@ func FindSharedBrains(roots []string) ([]string, error) {
 	return found, nil
 }
 
-// FindAllSharedBrainsInWorkspace looks under $HOME/workspace/ (or
-// $WORKSPACE_ROOT if set) for shared brains. Used as the auto-discovery
-// default when the operator doesn't pass --brain flags.
+// FindAllSharedBrainsInWorkspace looks under the workspace root
+// (lib/workspace.Root — $WORKSPACE_ROOT, $NOUS_DIR's parent, the running
+// binary's grandparent, or $HOME/workspace) for shared brains. Used as
+// the auto-discovery default when the operator doesn't pass --brain
+// flags.
 func FindAllSharedBrainsInWorkspace() ([]string, error) {
-	root := os.Getenv("WORKSPACE_ROOT")
-	if root == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, err
-		}
-		root = filepath.Join(home, "workspace")
+	root, err := workspace.Root()
+	if err != nil {
+		return nil, err
 	}
 	return FindSharedBrains([]string{root})
 }

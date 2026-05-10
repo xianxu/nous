@@ -20,6 +20,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/xianxu/nous/lib/workspace"
 )
 
 // Manifest captures the .brain/config.md fields nous operates on.
@@ -57,18 +59,16 @@ func Read(brainRoot string) (Manifest, error) {
 	return m, nil
 }
 
-// DiscoverAll walks $WORKSPACE_ROOT (or $HOME/workspace as fallback) one
-// level deep and returns every directory that's a brain. Mirrors
+// DiscoverAll walks the workspace root (resolved by lib/workspace.Root —
+// $WORKSPACE_ROOT, $NOUS_DIR's parent, the running binary's grandparent,
+// or $HOME/workspace as the final fallback) one level deep and returns
+// every directory that's a brain. Mirrors
 // lib/brainsync.FindAllSharedBrainsInWorkspace but doesn't filter by
 // mode — useful for `nous identity list` and `nous brain list`.
 func DiscoverAll() ([]Manifest, error) {
-	root := os.Getenv("WORKSPACE_ROOT")
-	if root == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, err
-		}
-		root = filepath.Join(home, "workspace")
+	root, err := workspace.Root()
+	if err != nil {
+		return nil, err
 	}
 	entries, err := os.ReadDir(root)
 	if err != nil {

@@ -56,6 +56,11 @@ lib/
   tui/         — bubbletea + lipgloss components. Used by cmd/charon
                  today via charoncli; future TUIs (`nous brain`,
                  `nous provider`) will use it directly.
+  workspace/   — Root() resolver: $WORKSPACE_ROOT → $NOUS_DIR's parent
+                 → binary's grandparent (when shaped <root>/<repo>/bin/
+                 <exe>) → $HOME/workspace as final fallback. lib/brain
+                 and lib/brainsync both consume; centralized so brain
+                 discovery doesn't hardcode $HOME/workspace.
 ```
 
 ## Cmd consumers
