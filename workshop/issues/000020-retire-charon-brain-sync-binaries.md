@@ -89,22 +89,81 @@ Subagent-friendly audit pass first:
    labels. After nous#16 M2 these are written by `nous serve` to
    the same paths (compat), but verify.
 
+## Verb migration map (decided 2026-05-10)
+
+`charon` verbs not yet on `nous` get mounted as follows. Operator
+retrains; no compat shim or alias (single operator, acceptable cost).
+
+| `charon …`       | `nous …`              | rationale                                          |
+|------------------|-----------------------|----------------------------------------------------|
+| `run <cmd>`      | `run <cmd>`           | top-level: heaviest-use verb (proxy env wrapper)   |
+| `status`         | `status` (aggregated) | top-level: aggregate proxy + sync daemon health    |
+| `vault set/del`  | `vault set/del`       | top-level: keychain abstraction, not per-provider  |
+| `arm` / `disarm` | `arm` / `disarm`      | top-level: global session gate, not per-provider   |
+| `gcp …`          | `provider gcp …`      | cluster: provider-specific auth helper             |
+| `who`            | `provider who`        | cluster: provider introspection                    |
+| `stats`          | `provider stats`      | cluster: per-provider request stats                |
+| `scopes`         | `provider scopes`     | cluster: per-provider OAuth scope view             |
+
+Already on `nous` (no work): `serve`, `provider` (= AuthCmd),
+`provider manifest`, `service install/...`, `instructions`,
+`manifest`.
+
+For `nous status`, M2's job is **aggregate proxy + sync daemon
+state** (both run in the same `nous serve` process). Broader
+status (brain, identity, etc.) is out of scope for this issue —
+file a follow-up issue when wanted.
+
 ## Plan
 
-- [ ] M1: Audit external references to standalone `charon` and
-  `brain-sync` binaries. Document findings in `## Log`.
-- [ ] M2: Migrate any remaining callers to `nous <verb>` form, or
-  decide to ship thin-shim binaries (with rationale in this issue).
-- [ ] M3: Strip `cmd/charon/` + `cmd/brain-sync/` (or reduce to
-  shims), update `Makefile.nous` install/uninstall/banner, fix
-  the misleading ad-hoc ACL note, update `doctor.go` checks.
-- [ ] M4: Verify `make nous-install` followed by `nous service
-  status` works on a freshly-uninstalled machine. Confirm only
-  `nous` is signed and installed.
-- [ ] M5: Atlas update — anywhere the three-binary model is
-  documented gets updated to single-binary.
+- [x] M1: Audit external references to standalone `charon` and
+  `brain-sync` binaries. Findings in `## Log`.
+- [ ] M2: Mount the 9 missing verbs on `nous` per the table above.
+  `cmd/nous/main.go` gets ~5 lines of `root.AddCommand` for the
+  top-level verbs (run/status/vault/arm/disarm); `providerCmd()`
+  gets 4 lines for the cluster verbs (gcp/who/stats/scopes).
+  `nous status` aggregates proxy + sync state. Build + smoke-test
+  each new verb.
+- [ ] M3: Delete `cmd/charon/` + `cmd/brain-sync/`. Update
+  `Makefile.nous` (drop charon + brain-sync from build/sign/install
+  loops; update banner comments; fix the misleading ad-hoc ACL
+  note at lines 152-158). Update `cmd/nous/doctor.go` (collapse
+  `checkCharonInstalled`/`checkBrainSyncInstalled` into a single
+  `com.42shots.nous`-service check). Retarget or delete
+  `scripts/test-brain-sync.sh`. Strip legacy-launchd-migration code
+  paths in `cmd/nous/service.go` if they only existed to handle
+  the two-binary → one-binary transition (verify they're not
+  doing anything useful first).
+- [ ] M4: `make nous-install` from a clean state; verify only
+  `nous` lands in `$(NOUS_INSTALL_PREFIX)`. `nous service status`
+  shows the unified service. `nous arm` / `nous disarm` /
+  `nous vault set test/test/value` smoke-tested.
+- [ ] M5: Atlas update — `atlas/charon/index.md` and
+  `atlas/nous/lib-layout.md` reflect single-binary model.
+  Update `atlas/index.md` if needed.
 
 ## Log
+
+**2026-05-10 — M1 audit complete.** No Go imports cross the
+`cmd/charon` or `cmd/brain-sync` boundary (they're main packages).
+External references concentrate in:
+- `Makefile.nous` lines 55, 67-68, 140-141, 144, 175, 196
+  (build/sign/install/banner)
+- `cmd/nous/service.go` lines 62, 114-124 (legacy plist migration
+  code; `resolveSiblingBinary("charon")` helper)
+- `cmd/nous/doctor.go` lines 62-65, 188-210 (four checks for the
+  two legacy plists)
+- `cmd/nous/instructions.go` line 180, 185 (operator-facing docs
+  about sibling-binary discovery)
+- `scripts/test-brain-sync.sh` lines 38, 40, 80-82 (execs the
+  brain-sync binary directly)
+- `atlas/charon/index.md` line 18, `atlas/nous/lib-layout.md`
+  lines 69-70
+
+CLI verb surface from `lib/charoncli/charoncli.go` lines 50-63:
+charon exposes 14 root subcommands; nous already mounts 5 (Auth,
+Manifest×2, Service, Serve, Instructions). 9 verbs need migration
+or drop — see verb migration map above.
 
 Filed 2026-05-10. Surfaced from a debugging session about keychain
 prompt churn during `make nous-install`. Three-binary signing
