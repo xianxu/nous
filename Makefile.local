@@ -55,6 +55,32 @@ TART_VM        ?= nous-test
 # to tart-mount's --dir handling).
 GRAPHICS_FLAG  ?= --no-graphics
 
+# Detect other tart VMs running on the host. Each VM costs 4-8 GB of
+# resident RAM; running several in parallel is rarely intended. List
+# them, ask y/N, stop them on yes. Bare Enter or anything not-yes
+# leaves them alone and proceeds.
+#
+# Filter: source=local (skip OCI images), name != $(TART_VM) (skip
+# ourself), last field == "running". Tart's `Accessed` column has
+# spaces ("3 days ago") but state is always a single word at $NF.
+define _tart_check_others
+	@others=$$(tart list 2>/dev/null | awk -v me=$(TART_VM) \
+	    'NR>1 && $$1=="local" && $$2!=me && $$NF=="running" {print $$2}'); \
+	if [ -n "$$others" ]; then \
+	    echo "==> Other tart VMs currently running:"; \
+	    echo "$$others" | sed 's/^/    /'; \
+	    printf "Stop them before continuing? [y/N] "; \
+	    read -r answer; \
+	    case "$$answer" in \
+	        [yY]|[yY][eE][sS]) \
+	            for vm in $$others; do \
+	                echo "    stopping $$vm..."; \
+	                tart stop "$$vm" 2>/dev/null || true; \
+	            done ;; \
+	    esac; \
+	fi
+endef
+
 # Common preamble: tart present, base pulled, VM cloned (idempotent).
 define _tart_ensure_vm
 	@command -v tart >/dev/null || \
@@ -129,11 +155,13 @@ endef
 .PHONY: tart tart-gui tart-mount tart-stop tart-clean
 
 tart:
+	$(call _tart_check_others)
 	$(call _tart_ensure_vm)
 	$(call _tart_boot_and_ssh)
 
 tart-gui: GRAPHICS_FLAG :=
 tart-gui:
+	$(call _tart_check_others)
 	$(call _tart_ensure_vm)
 	@# Graphics mode is a cold-boot setting; can't be hot-attached
 	@# to a running VM. If the VM is up headless (e.g., from a prior
@@ -147,6 +175,7 @@ tart-gui:
 
 tart-mount: RUN_FLAGS = --dir=nous:$(CURDIR):ro
 tart-mount:
+	$(call _tart_check_others)
 	$(call _tart_ensure_vm)
 	@# `tart run --dir=...` is a cold-boot setting; can't be hot-attached
 	@# to a running VM. If the VM is already up (e.g., from a prior
