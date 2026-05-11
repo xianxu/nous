@@ -441,7 +441,7 @@ func (m adminKeyPasteModel) viewReplaceConfirm() string {
 	if len(m.cascadeAccounts) == 0 {
 		b.WriteString("  No minted credentials to remove from charon.\n")
 	} else {
-		b.WriteString(fmt.Sprintf("  Charon will remove %d minted %s from its vault:\n",
+		b.WriteString(fmt.Sprintf("  nous will remove %d minted %s from its vault:\n",
 			len(m.cascadeAccounts), entityTermPlural(m.providerName)))
 		for _, a := range m.cascadeAccounts {
 			b.WriteString(rowDelStyle.Render("    - " + a))
@@ -450,7 +450,7 @@ func (m adminKeyPasteModel) viewReplaceConfirm() string {
 		b.WriteString("\n")
 		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("178")).Render(
 			"  The underlying API keys keep working at the provider until\n" +
-				"  you revoke them at the provider's dashboard. Charon will\n" +
+				"  you revoke them at the provider's dashboard. nous will\n" +
 				"  no longer be able to revoke them through this admin key."))
 		b.WriteString("\n\n")
 	}

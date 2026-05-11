@@ -525,7 +525,7 @@ func (m scopesModel) updateList(msg tea.KeyMsg) (scopesModel, tea.Cmd) {
 		if len(m.filtered) > 0 {
 			i := m.filtered[m.cursor]
 			if m.rows[i].required {
-				m.applyStatus = fmt.Sprintf("%s is required for charon to identify the account.", m.rows[i].short)
+				m.applyStatus = fmt.Sprintf("%s is required for nous to identify the account.", m.rows[i].short)
 			} else {
 				m.rows[i].target = !m.rows[i].target
 				m.applyStatus = ""
@@ -1069,7 +1069,7 @@ func (m scopesModel) viewReduceConfirm() string {
 		}
 	}
 	b.WriteString("\n")
-	b.WriteString("  Charon will re-authorize with only the remaining scopes.\n")
+	b.WriteString("  nous will re-authorize with only the remaining scopes.\n")
 	b.WriteString("  You'll see a fresh consent screen in your browser.\n")
 	b.WriteString("\n")
 	b.WriteString(helpStyle.Render("[y/enter] continue    [n/esc] cancel"))
@@ -1083,10 +1083,10 @@ func (m scopesModel) viewRevokeConfirm() string {
 	b.WriteString("\n\n")
 	b.WriteString(rowDelStyle.Render("  This will revoke ALL Google scopes for this account"))
 	b.WriteString("\n")
-	b.WriteString(rowDelStyle.Render("  and remove the credential from charon's keychain."))
+	b.WriteString(rowDelStyle.Render("  and remove the credential from nous's keychain."))
 	b.WriteString("\n\n")
 	b.WriteString("  Agents using this account will lose access immediately.\n")
-	b.WriteString("  You'll need to run charon auth again to use this account.\n")
+	b.WriteString("  You'll need to run `nous provider` again to use this account.\n")
 	b.WriteString("\n")
 	b.WriteString(helpStyle.Render("[y/enter] revoke    [n/esc] cancel"))
 	b.WriteString("\n")

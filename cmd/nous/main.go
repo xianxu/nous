@@ -58,14 +58,19 @@ specific docs.`,
 func providerCmd() *cobra.Command {
 	auth := charoncli.AuthCmd()
 	auth.Use = "provider"
-	auth.Short = "AI provider config + auth (interactive TUI)"
+	auth.Short = "AI provider config + auth (interactive TUI) (h)"
 	auth.Long = `Interactive TUI for managing AI provider credentials. List configured
 providers, drill into auth flows (OAuth dance for gcp / anthropic /
 openai / etc., or paste an API key). Add and remove operations also
 happen in the TUI — no separate CLI subcommand for those.
 
-Agent-facing read: ` + "`nous provider manifest`" + ` (machine-readable
-JSON of configured providers + granted scopes).`
+Audience tags:
+  - provider           (h)  bare cluster command launches the TUI on
+                            a TTY; non-TTY callers should use the
+                            manifest subcommand for a scriptable view.
+  - provider manifest  (a)  JSON: configured providers + granted scopes.
+
+Agent-facing read: ` + "`nous provider manifest`" + `.`
 	// Reject unknown positional args. Without this, cobra falls through
 	// to RunE (the TUI) when a non-existent subcommand is passed —
 	// `nous provider whatever` would silently launch the TUI as if the

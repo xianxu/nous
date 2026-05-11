@@ -255,7 +255,7 @@ func (m gcpSetupModel) Update(msg tea.Msg) (gcpSetupModel, tea.Cmd) {
 		case !msg.enabled:
 			// Block here so the user fixes billing before they end
 			// up with calls that fail. Both Vertex and AI Studio
-			// (charon-created projects) need billing.
+			// (projects nous created) need billing.
 			m.state = gcpStateBillingBlocked
 			m.notice = ""
 		default:
@@ -549,7 +549,7 @@ func (m gcpSetupModel) View() string {
 		b.WriteString("\n\n")
 		fmt.Fprintf(&b, "  Project %s has no billing account linked.\n", m.chosenProject.ProjectID)
 		b.WriteString("  Vertex calls will return BILLING_DISABLED, and AI Studio's free-tier\n")
-		b.WriteString("  quota is 0 for charon-created projects. Both fail until billing is linked.\n\n")
+		b.WriteString("  quota is 0 for projects nous created. Both fail until billing is linked.\n\n")
 		b.WriteString("  Open this URL in a browser, link a billing account, then press [r]:\n\n")
 		fmt.Fprintf(&b, "    %s\n\n", gcp.BillingFixURL(m.chosenProject.ProjectID))
 		b.WriteString(helpStyle.Render("  [r] re-check    [c] continue without billing    [esc] cancel"))

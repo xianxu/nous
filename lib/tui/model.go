@@ -862,7 +862,7 @@ func (m model) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 // hasn't propagated a recent create yet.
 func (m model) openGCPSetup(req gcpSetupRequestMsg) (tea.Model, tea.Cmd) {
 	if m.gcpClientFactory == nil {
-		m.scopes.applyStatus = "GCP setup not wired in this build — run 'charon gcp setup " + req.account + "' from the shell."
+		m.scopes.applyStatus = "GCP setup not wired in this build — re-launch with the production binary that wires gcpClientFactory."
 		return m, nil
 	}
 	client, err := m.gcpClientFactory(req.account)

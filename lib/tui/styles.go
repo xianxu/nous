@@ -5,16 +5,18 @@ import (
 	"github.com/xianxu/nous/lib/provider/vault/keychain"
 )
 
-// appName returns "Charon" for the production (signed) build, or
-// "Charon-dev" for the unsigned dev build. Used in TUI titles so the
-// user can tell at a glance which binary they're running. Detection
-// reuses keychain.ResolveServiceName so the title and the vault
-// namespace can never disagree.
+// appName returns "nous provider" for the production (signed) build,
+// or "nous provider (dev)" for the unsigned dev build. Used in TUI
+// titles so the operator can tell at a glance which binary they're
+// running. Detection reuses keychain.ResolveServiceName so the title
+// and the vault namespace can never disagree. The trailing "(dev)"
+// suffix mirrors the charon-era "Charon-dev" convention so existing
+// instinct around "did I run the signed build?" still works.
 func appName() string {
 	if keychain.ResolveServiceName() == keychain.ServiceProd {
-		return "Charon"
+		return "nous provider"
 	}
-	return "Charon-dev"
+	return "nous provider (dev)"
 }
 
 var (

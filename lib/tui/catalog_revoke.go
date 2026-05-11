@@ -231,10 +231,10 @@ func (m catalogRevokeModel) View() string {
 			b.WriteString("\n")
 		}
 		if m.entry.Revoke != nil {
-			b.WriteString("  Charon will attempt to deactivate the key upstream and\n")
+			b.WriteString("  nous will attempt to deactivate the key upstream and\n")
 			b.WriteString("  remove the credential from its vault.\n")
 		} else {
-			b.WriteString("  Charon will remove the credential from its vault. The\n")
+			b.WriteString("  nous will remove the credential from its vault. The\n")
 			b.WriteString("  key remains active at the provider until you delete it\n")
 			b.WriteString("  manually:\n\n")
 			if m.entry.ConsoleURL != "" {

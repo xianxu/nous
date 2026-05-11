@@ -157,7 +157,7 @@ func TestProviderPicker_View_RendersCleanly(t *testing.T) {
 	m, _ := newProviderPickerModel(v, stores, nil)
 	view := m.View()
 
-	for _, want := range []string{"Charon", "Provider", "Google", "OpenAI", "Anthropic", "+ add provider"} {
+	for _, want := range []string{"nous provider", "Provider", "Google", "OpenAI", "Anthropic", "+ add provider"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("View() missing %q\n%s", want, view)
 		}

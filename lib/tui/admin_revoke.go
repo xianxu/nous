@@ -291,7 +291,7 @@ func (m adminRevokeModel) viewConfirm() string {
 		b.WriteString(fmt.Sprintf("    %s ID:  %s\n", titleCase(entityTerm(m.providerName)), m.projectID))
 		b.WriteString(fmt.Sprintf("    Key ID:      %s\n", m.keyID))
 		b.WriteString("\n")
-		b.WriteString("  Charon will revoke the API key upstream and remove\n")
+		b.WriteString("  nous will revoke the API key upstream and remove\n")
 		b.WriteString("  the credential from its vault. Agents using\n")
 		b.WriteString(fmt.Sprintf("  X-Charon-Account: %s will fail until you re-mint.\n", m.account))
 	case revokeAdminKey:
@@ -301,7 +301,7 @@ func (m adminRevokeModel) viewConfirm() string {
 		if len(m.cascadeAccounts) == 0 {
 			b.WriteString("  No minted credentials under this OrgID — clean removal.\n")
 		} else {
-			b.WriteString(fmt.Sprintf("  This will also remove %d minted %s from charon's vault:\n",
+			b.WriteString(fmt.Sprintf("  This will also remove %d minted %s from nous's vault:\n",
 				len(m.cascadeAccounts), entityTermPlural(m.providerName)))
 			for _, a := range m.cascadeAccounts {
 				b.WriteString(rowDelStyle.Render("    - " + a))
