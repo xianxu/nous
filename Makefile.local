@@ -91,7 +91,7 @@ define _tart_boot_and_ssh
 	    echo "==> ssh admin@$$ip (password: admin)"; \
 	    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
 	        -t admin@$$ip \
-	        'export TERM=xterm-256color; stty erase "^?"; exec $$SHELL -l' \
+	        'export TERM=xterm-256color; stty erase "^?"; M="/Volumes/My Shared Files/nous"; if [ -d "$$M" ]; then ln -sfn "$$M" "$$HOME/repo"; elif [ -L "$$HOME/repo" ]; then rm "$$HOME/repo"; fi; exec $$SHELL -l' \
 	        || true
 endef
 # `|| true` on the ssh: ssh propagates the remote shell's exit status.
