@@ -7,7 +7,7 @@
 # Makefile currently being processed.
 NOUS_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 
-.PHONY: build nous-dev nous-install test clean trim identity moveto cloneto new-brain nous-bootstrap nous-test-bootstrap nous-test-snapshot nous-test-roundtrip nous-test-brain-sync
+.PHONY: build nous-dev nous-install nous-uninstall test clean trim identity moveto cloneto new-brain nous-bootstrap nous-test-bootstrap nous-test-snapshot nous-test-roundtrip nous-test-brain-sync
 
 # Where installed binaries land. PATH-stable on most operator
 # machines; no sudo; survives Homebrew rebuilds.
@@ -78,6 +78,7 @@ build:
 # iteration; keep the rm.
 nous-dev:
 	@echo "==> Stopping launchd-installed services (best-effort)..."
+	@launchctl bootout gui/$$(id -u) com.42shots.nous 2>/dev/null || true
 	@launchctl bootout gui/$$(id -u) com.charon.proxy 2>/dev/null || true
 	@launchctl bootout gui/$$(id -u) com.xianxu.brain-sync 2>/dev/null || true
 	@launchctl bootout gui/$$(id -u) com.xianxu.nous 2>/dev/null || true
@@ -97,16 +98,21 @@ nous-dev:
 	@echo ""
 	@exec ./bin/nous serve $(NOUS_DEV_ARGS)
 
-# make nous-install — stops the dev foreground process, builds the
-# binaries unsigned, installs them into $(NOUS_INSTALL_PREFIX), and
-# brings up the unified com.xianxu.nous launchd service.
+# make nous-install — stops dev foreground, builds unsigned, installs
+# binaries to $(NOUS_INSTALL_PREFIX), and registers + starts the
+# unified com.42shots.nous launchd service.
 #
 # Posture: dev-mode only. Binaries are unsigned; keychain reads/writes
-# land in the charon-dev namespace via the runtime self-check. This is
-# the right posture for the engineer operator's daily use — stable
-# across rebuilds, no per-rebuild ACL re-grant friction. Production
+# land in the charon-dev namespace via the runtime self-check. Stable
+# across rebuilds (no per-rebuild ACL re-grant friction). Production
 # signing / wider-deployment packaging is future work (homebrew bottle,
 # nous-security .app per nous#19).
+#
+# Lifecycle invariants this target maintains:
+#   - At most one nous serve process running (kills any dev foreground
+#     before installing; service install bounces the existing plist).
+#   - launchctl load auto-starts the service (plist has RunAtLoad=true).
+#   - Symmetric counterpart: make nous-uninstall stops + removes.
 nous-install:
 	@echo "==> Stopping dev foreground process (best-effort)..."
 	@pkill -f '$(NOUS_DIR)bin/nous serve' 2>/dev/null || true
@@ -126,12 +132,42 @@ nous-install:
 		install -m 0755 bin/$$name $(NOUS_INSTALL_PREFIX)/$$name; \
 		echo "  installed $(NOUS_INSTALL_PREFIX)/$$name"; \
 	done
-	@echo "==> Registering com.xianxu.nous launchd service..."
-	@$(NOUS_INSTALL_PREFIX)/nous service install --unified
+	@echo "==> Registering + starting com.42shots.nous launchd service..."
+	@$(NOUS_INSTALL_PREFIX)/nous service install
 	@echo ""
 	@echo "==> Done. Verify with: nous service status"
 	@echo "    Dev-mode install (unsigned; charon-dev keychain namespace)."
 	@echo "    For nous-security menubar + notifications, see nous#19."
+
+# make nous-uninstall — symmetric counterpart to nous-install. Stops
+# and removes the unified launchd service plus any legacy plists left
+# over from earlier milestones. Idempotent; safe on a machine that
+# never installed.
+#
+# Doesn't remove the binaries from $(NOUS_INSTALL_PREFIX) — the
+# operator may still want to invoke nous directly. To fully wipe:
+#   make nous-uninstall && rm $(NOUS_INSTALL_PREFIX)/{nous,charon,brain-sync}
+nous-uninstall:
+	@echo "==> Stopping dev foreground process (best-effort)..."
+	@pkill -f '$(NOUS_DIR)bin/nous serve' 2>/dev/null || true
+	@pkill -f 'bin/nous serve' 2>/dev/null || true
+	@echo "==> Removing launchd service(s)..."
+	@if [ -x $(NOUS_INSTALL_PREFIX)/nous ]; then \
+		$(NOUS_INSTALL_PREFIX)/nous service uninstall; \
+	else \
+		echo "  no installed nous binary at $(NOUS_INSTALL_PREFIX)/nous; falling back to direct launchctl"; \
+		launchctl bootout gui/$$(id -u) com.42shots.nous 2>/dev/null || true; \
+		launchctl bootout gui/$$(id -u) com.charon.proxy 2>/dev/null || true; \
+		launchctl bootout gui/$$(id -u) com.xianxu.brain-sync 2>/dev/null || true; \
+		launchctl bootout gui/$$(id -u) com.xianxu.nous 2>/dev/null || true; \
+		rm -f ~/Library/LaunchAgents/com.42shots.nous.plist; \
+		rm -f ~/Library/LaunchAgents/com.charon.proxy.plist; \
+		rm -f ~/Library/LaunchAgents/com.xianxu.brain-sync.plist; \
+		rm -f ~/Library/LaunchAgents/com.xianxu.nous.plist; \
+	fi
+	@echo ""
+	@echo "==> Done. Installed binaries left at $(NOUS_INSTALL_PREFIX)/."
+	@echo "    To fully wipe: rm $(NOUS_INSTALL_PREFIX)/{nous,charon,brain-sync}"
 
 test:
 	go test ./...

@@ -49,15 +49,16 @@ func NewLabeled(label, logName, envPath string) (Manager, error) {
 
 // NewUnified returns the manager for the unified `nous serve` daemon
 // (one process running both proxy + brain-sync goroutines). Label:
-// com.xianxu.nous. EnvPath includes the Homebrew prefix so the
-// brain-sync goroutine can find git-remote-gcrypt, gpg, etc.
+// com.42shots.nous (matching the 42shots-product reverse-DNS
+// namespace). EnvPath includes the Homebrew prefix so the brain-sync
+// goroutine can find git-remote-gcrypt, gpg, etc.
 func NewUnified() (Manager, error) {
 	// PATH mirrors lib/brainsync/service_darwin.go's launchd template
 	// — operators on Apple Silicon need /opt/homebrew/bin/, Intel Macs
 	// need /usr/local/bin/, both standard for direct interactive
 	// shells but absent from launchd's default minimal PATH.
 	return NewLabeled(
-		"com.xianxu.nous",
+		"com.42shots.nous",
 		"nous.log",
 		"/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
 	)

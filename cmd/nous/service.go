@@ -76,97 +76,41 @@ func resolveSiblingBinary(name string) (string, error) {
 }
 
 func serviceInstallCmdImpl() *cobra.Command {
-	var unified bool
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "install",
-		Short: "Install (or reinstall) the launchd service(s)",
-		Long: `Writes the launchd plist(s) and bootstraps the service(s). Idempotent:
-re-running after a binary rebuild updates the plists with the new
-paths. If a service is already loaded, install stops + uninstalls
-it first (so launchd picks up the new plist) before installing the
-fresh one.
+		Short: "Install (or reinstall) the unified com.42shots.nous launchd service",
+		Long: `Writes the launchd plist for com.42shots.nous and loads it
+(launchd starts it immediately via RunAtLoad). Idempotent:
+re-running after a binary rebuild updates the plist with the new
+path and bounces the service.
 
-Two paths during the M4/M5 transition:
+Backed by ` + "`bin/nous serve`" + ` (one process running proxy +
+brain-sync as goroutines under one signal-handled context). Output
+goes to ~/Library/Logs/nous.log.
 
-  --unified (new):    one plist com.xianxu.nous → ` + "`bin/nous serve`" + ` runs
-                      both proxy + brain-sync as goroutines in one
-                      process. Will become the default in M5; for now,
-                      opt-in. Migration: stops + uninstalls the legacy
-                      com.charon.proxy + com.xianxu.brain-sync plists.
-
-  legacy (default):   two plists (com.charon.proxy backed by
-                      ` + "`bin/charon serve`" + ` and com.xianxu.brain-sync backed
-                      by ` + "`bin/brain-sync`" + `). Sibling-binary lookup: nous
-                      expects bin/brain-sync and bin/charon next to
-                      itself, falling back to PATH.`,
+Migration: stops + uninstalls any pre-existing legacy plists found
+(com.charon.proxy, com.xianxu.brain-sync, and the M4-era
+com.xianxu.nous label that briefly existed before the 42shots
+namespace move) so the install lands clean on machines that ran
+earlier nous#16 milestones.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			out := cmd.OutOrStdout()
-			if unified {
-				return runServiceInstallUnified(out)
-			}
-			return runServiceInstallLegacy(out)
+			return runServiceInstall(cmd.OutOrStdout())
 		},
 	}
-	cmd.Flags().BoolVar(&unified, "unified", false, "install one com.xianxu.nous plist running `nous serve` (replaces the two-plist legacy)")
-	return cmd
 }
 
-// runServiceInstallLegacy installs the two-plist setup (charon proxy +
-// brain-sync as separate launchd services). The default path until M5
-// flips --unified on.
-func runServiceInstallLegacy(out io.Writer) error {
-	charonBin, err := resolveSiblingBinary("charon")
-	if err != nil {
-		return fmt.Errorf("charon binary not found: %w (build with 'make build')", err)
-	}
-	brainSyncBin, err := resolveSiblingBinary("brain-sync")
-	if err != nil {
-		return fmt.Errorf("brain-sync binary not found: %w (build with 'make build')", err)
-	}
-	charonMgr, err := service.New()
-	if err != nil {
-		return fmt.Errorf("charon service manager: %w", err)
-	}
-	// Reinstall hygiene: if charon is currently loaded with an old
-	// plist, launchctl load would silently no-op and the running
-	// service keeps the stale config. Stop+uninstall first ensures
-	// the new plist is what launchctl picks up. Errors here are
-	// non-fatal (service may not be loaded yet).
-	_ = charonMgr.Stop()
-	_ = charonMgr.Uninstall()
-	if err := charonMgr.Install(charonBin, []string{"serve"}); err != nil {
-		return fmt.Errorf("install charon: %w", err)
-	}
-	fmt.Fprintf(out, "  [ok] charon service installed (%s serve)\n", charonBin)
-
-	brainSyncMgr, err := brainsync.NewServiceManager()
-	if err != nil {
-		return fmt.Errorf("brain-sync service manager: %w", err)
-	}
-	_ = brainSyncMgr.Stop()
-	_ = brainSyncMgr.Uninstall()
-	if err := brainSyncMgr.Install(brainSyncBin, nil); err != nil {
-		return fmt.Errorf("install brain-sync: %w", err)
-	}
-	fmt.Fprintf(out, "  [ok] brain-sync service installed (%s)\n", brainSyncBin)
-	fmt.Fprintf(out, "Both services installed. Use 'nous service status' to verify.\n")
-	return nil
-}
-
-// runServiceInstallUnified installs one com.xianxu.nous plist backed
-// by `nous serve` (proxy + brain-sync as goroutines in one process).
-// Stops and uninstalls the legacy com.charon.proxy +
-// com.xianxu.brain-sync plists first so operators migrating from the
-// two-plist setup don't run both. M5 will make this the default;
-// today it's opt-in via --unified.
-func runServiceInstallUnified(out io.Writer) error {
+// runServiceInstall is the canonical install path: one unified plist
+// (com.42shots.nous) backed by `nous serve`. Cleans up any legacy
+// plists found before laying down the new one.
+func runServiceInstall(out io.Writer) error {
 	nousBin, err := resolveSelfBinary()
 	if err != nil {
 		return fmt.Errorf("resolve nous binary: %w", err)
 	}
 
-	// Migration: stop + uninstall the legacy two-plist setup if
-	// present. Errors are non-fatal (services may not be loaded).
+	// Migration: stop + uninstall any pre-existing legacy plists.
+	// Errors are non-fatal — most operators won't have all of these.
 	if charonMgr, mgrErr := service.New(); mgrErr == nil {
 		_ = charonMgr.Stop()
 		if err := charonMgr.Uninstall(); err == nil {
@@ -179,18 +123,30 @@ func runServiceInstallUnified(out io.Writer) error {
 			fmt.Fprintln(out, "  [ok] legacy com.xianxu.brain-sync plist removed")
 		}
 	}
+	// The brief M4-era com.xianxu.nous label (renamed to
+	// com.42shots.nous before any operator ran it for real, but
+	// belt-and-braces in case anyone did).
+	if oldUnified, mgrErr := service.NewLabeled("com.xianxu.nous", "nous.log", ""); mgrErr == nil {
+		_ = oldUnified.Stop()
+		if err := oldUnified.Uninstall(); err == nil {
+			fmt.Fprintln(out, "  [ok] pre-rename com.xianxu.nous plist removed")
+		}
+	}
 
 	unifiedMgr, err := service.NewUnified()
 	if err != nil {
 		return fmt.Errorf("unified service manager: %w", err)
 	}
+	// Re-install hygiene: if the plist already exists from a prior
+	// install, stop+uninstall first so launchctl picks up the new
+	// binary path.
 	_ = unifiedMgr.Stop()
 	_ = unifiedMgr.Uninstall()
 	if err := unifiedMgr.Install(nousBin, []string{"serve"}); err != nil {
-		return fmt.Errorf("install unified nous service: %w", err)
+		return fmt.Errorf("install com.42shots.nous: %w", err)
 	}
-	fmt.Fprintf(out, "  [ok] com.xianxu.nous installed (%s serve)\n", nousBin)
-	fmt.Fprintln(out, "Unified service installed. Use 'nous service status' to verify.")
+	fmt.Fprintf(out, "  [ok] com.42shots.nous installed (%s serve) — started by launchd\n", nousBin)
+	fmt.Fprintln(out, "Use 'nous service status' to verify.")
 	return nil
 }
 
@@ -209,36 +165,68 @@ func resolveSelfBinary() (string, error) {
 func serviceUninstallCmdImpl() *cobra.Command {
 	return &cobra.Command{
 		Use:   "uninstall",
-		Short: "Remove brain-sync + charon proxy launchd services",
+		Short: "Remove the nous launchd service (and any legacy plists found)",
+		Long: `Symmetric to ` + "`nous service install`" + `: stops and removes the
+unified com.42shots.nous plist. Also clears any legacy plists from
+prior milestones (com.charon.proxy, com.xianxu.brain-sync, the
+pre-rename com.xianxu.nous) so a re-install lands clean.
+
+Idempotent: services not currently installed silently skip; only
+real failures surface.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := cmd.OutOrStdout()
 			var firstErr error
 
-			charonMgr, err := service.New()
-			if err != nil {
-				firstErr = err
-			} else if err := charonMgr.Uninstall(); err != nil {
-				fmt.Fprintf(out, "  [warn] charon uninstall: %v\n", err)
-				if firstErr == nil {
-					firstErr = err
-				}
-			} else {
-				fmt.Fprintf(out, "  [ok] charon service uninstalled\n")
+			// Local interface so the helper can accept both
+			// service.Manager (unified + charon legacy) and
+			// brainsync.ServiceManager (brain-sync legacy) — Go's
+			// nominal interfaces require this adapter at the call
+			// site even though both have identical method sets.
+			type uninstaller interface {
+				Stop() error
+				Uninstall() error
 			}
 
-			brainSyncMgr, err := brainsync.NewServiceManager()
-			if err != nil {
-				if firstErr == nil {
-					firstErr = err
+			tryUninstall := func(label string, mgr uninstaller, mgrErr error) {
+				if mgrErr != nil {
+					if firstErr == nil {
+						firstErr = mgrErr
+					}
+					return
 				}
-			} else if err := brainSyncMgr.Uninstall(); err != nil {
-				fmt.Fprintf(out, "  [warn] brain-sync uninstall: %v\n", err)
-				if firstErr == nil {
-					firstErr = err
+				_ = mgr.Stop()
+				if err := mgr.Uninstall(); err != nil {
+					// "service not installed" / file-not-found is the
+					// common case for legacy labels on a machine that
+					// only ever ran the unified install; suppress
+					// those rather than surface noise.
+					if !os.IsNotExist(err) {
+						fmt.Fprintf(out, "  [warn] %s uninstall: %v\n", label, err)
+						if firstErr == nil {
+							firstErr = err
+						}
+					}
+					return
 				}
-			} else {
-				fmt.Fprintf(out, "  [ok] brain-sync service uninstalled\n")
+				fmt.Fprintf(out, "  [ok] %s uninstalled\n", label)
 			}
+
+			// Unified (the canonical install today).
+			unifiedMgr, mgrErr := service.NewUnified()
+			tryUninstall("com.42shots.nous", unifiedMgr, mgrErr)
+
+			// Legacy / pre-rename plists. tryUninstall already
+			// suppresses not-installed warnings so these are no-ops
+			// on a clean machine.
+			charonMgr, mgrErr := service.New()
+			tryUninstall("com.charon.proxy", charonMgr, mgrErr)
+
+			brainSyncMgr, mgrErr := brainsync.NewServiceManager()
+			tryUninstall("com.xianxu.brain-sync", brainSyncMgr, mgrErr)
+
+			oldUnified, mgrErr := service.NewLabeled("com.xianxu.nous", "nous.log", "")
+			tryUninstall("com.xianxu.nous (pre-rename)", oldUnified, mgrErr)
 
 			return firstErr
 		},
