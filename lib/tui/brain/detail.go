@@ -17,16 +17,25 @@ type statusLoadedMsg struct {
 	err    error
 }
 
-// openConflictPreviewMsg / popToListMsg are emitted by the detail model
-// for the root model to act on. Keeping nav as messages (rather than
-// having the detail model own the stack) keeps each sub-model's
-// responsibility local to its own screen.
+// openConflictPreviewMsg / popToListMsg / launchRecipient{Add,Remove}Msg
+// are emitted by the detail model for the root model to act on. Keeping
+// nav as messages (rather than having the detail model own the stack)
+// keeps each sub-model's responsibility local to its own screen.
 type openConflictPreviewMsg struct {
 	root string
 	rels []string
 }
 
 type popToListMsg struct{}
+
+type launchRecipientAddMsg struct {
+	brainPath string
+}
+
+type launchRecipientRemoveMsg struct {
+	brainPath  string
+	recipients []libbrain.RecipientInfo
+}
 
 // detailModel renders the drill-in for one brain. It owns the loading
 // state machine (loading → ready / failed) and the action keystrokes.
@@ -74,12 +83,24 @@ func (m detailModel) Update(msg tea.Msg) (detailModel, tea.Cmd) {
 			return m, func() tea.Msg {
 				return openConflictPreviewMsg{root: m.path, rels: m.status.ConflictFiles}
 			}
-		case "a", "r":
-			// M5b lands the recipient add/remove sub-models. Until then,
-			// surface a deliberate "deferred" banner so operators don't
-			// think the keystrokes are broken.
-			m.banner = "recipient add/remove lands in M5b — use `nous brain recipient add|remove` from the shell for now"
-			return m, nil
+		case "a":
+			if m.loading || m.err != nil {
+				return m, nil
+			}
+			return m, func() tea.Msg {
+				return launchRecipientAddMsg{brainPath: m.path}
+			}
+		case "r":
+			if m.loading || m.err != nil {
+				return m, nil
+			}
+			if len(m.status.Recipients) == 0 {
+				m.banner = "no recipients to remove"
+				return m, nil
+			}
+			return m, func() tea.Msg {
+				return launchRecipientRemoveMsg{brainPath: m.path, recipients: m.status.Recipients}
+			}
 		}
 	}
 	return m, nil

@@ -183,7 +183,7 @@ brain/atlas/threat-model-shared-brain.md.`,
 			if err != nil {
 				return err
 			}
-			if containsFold(m.Recipients, key.Fingerprint) {
+			if brain.ContainsRecipient(m.Recipients, key.Fingerprint) {
 				// Already a recipient locally. If we have unpushed
 				// commits (e.g., previous push failed and operator
 				// re-ran), retry the push so the remote catches up.
@@ -349,20 +349,9 @@ TTY-only.`,
 			if err != nil {
 				return err
 			}
-			// Find the recipient to remove. Accept full 40-char form
-			// or 8+ trailing hex chars (last-8). Shorter inputs error
-			// explicitly — typo-protection.
-			want := strings.ToUpper(strings.TrimSpace(fpArg))
-			if len(want) != 40 && len(want) < 8 {
-				return fmt.Errorf("fingerprint %q is too short — pass the last 8 hex chars (or full 40-char form) to avoid accidental matches", fpArg)
-			}
-			var match string
-			for _, fp := range m.Recipients {
-				up := strings.ToUpper(fp)
-				if up == want || (len(want) >= 8 && strings.HasSuffix(up, want)) {
-					match = fp
-					break
-				}
+			match, err := brain.MatchRecipient(m.Recipients, fpArg)
+			if err != nil {
+				return err
 			}
 			if match == "" {
 				// Not in the manifest. Either the operator typo'd, or
@@ -383,21 +372,19 @@ TTY-only.`,
 			}
 
 			// Last-recipient guard.
-			if len(m.Recipients) == 1 {
-				return fmt.Errorf("refusing to remove the only recipient (%s) — would orphan %s. Add another recipient first, or delete the brain", match, brainPath)
+			if err := brain.CanRemoveRecipient(m); err != nil {
+				return fmt.Errorf("%w (removing %s from %s)", err, match, brainPath)
 			}
 
-			// Self-removal warning.
-			ownKeys, _ := identity.List()
-			isSelf := false
-			for _, k := range ownKeys {
-				if strings.EqualFold(k.Fingerprint, match) {
-					isSelf = true
-					break
-				}
+			// Self-removal warning: refuse when the removal would leave
+			// no local-secret recipient on the brain (real lockout
+			// floor, not just "you happen to have the secret half").
+			wouldLock, err := brain.WouldLockOut(m.Recipients, match)
+			if err != nil {
+				return fmt.Errorf("check decrypt path: %w", err)
 			}
-			if isSelf && !force {
-				return fmt.Errorf("refusing to remove your own key (%s) — you would lose access to %s. Re-run with --force if intentional", match, filepath.Base(brainPath))
+			if wouldLock && !force {
+				return fmt.Errorf("refusing — removing %s leaves you with no decrypt path on %s. Re-run with --force if intentional", match, filepath.Base(brainPath))
 			}
 
 			// Revocation reality.
@@ -417,13 +404,7 @@ TTY-only.`,
 			}
 
 			// Apply.
-			next := make([]string, 0, len(m.Recipients)-1)
-			for _, fp := range m.Recipients {
-				if !strings.EqualFold(fp, match) {
-					next = append(next, fp)
-				}
-			}
-			m.Recipients = next
+			m.Recipients = brain.WithoutRecipient(m.Recipients, match)
 			if err := brain.RewriteFrontmatter(brainPath, m); err != nil {
 				return err
 			}
@@ -490,11 +471,3 @@ func setDiff(a, b map[string]bool) []string {
 	return out
 }
 
-func containsFold(xs []string, target string) bool {
-	for _, x := range xs {
-		if strings.EqualFold(x, target) {
-			return true
-		}
-	}
-	return false
-}

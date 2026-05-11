@@ -44,6 +44,7 @@ Subcommands:
   export [FP]      print armored public key to stdout (default: own primary key)
   import FILE      admit a peer's pubkey (TTY-only; verify-fingerprint ceremony)
   list             list local keys joined with brain recipient assignments
+  primary [FP]     show or set the operator's primary identity
   agent <verb>     gpg-agent lifecycle: prewarm | flush | status`,
 		Args: cobra.NoArgs,
 	}
@@ -52,6 +53,7 @@ Subcommands:
 		newIdentityExportCmd(),
 		newIdentityImportCmd(),
 		newIdentityListCmd(),
+		newIdentityPrimaryCmd(),
 		newIdentityAgentCmd(),
 	)
 	return cmd

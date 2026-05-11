@@ -2,6 +2,7 @@ package brain
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -22,8 +23,13 @@ func (it listItem) label() string {
 	if it.manifest.Shared() {
 		kind = "shared"
 	}
+	// Display the directory basename rather than manifest.Name. The
+	// manifest's `name:` field is operator-authored and can drift from
+	// the on-disk location (e.g. brain `name: personal` sits at
+	// ~/workspace/brain); for "which repo am I looking at?" the
+	// basename is the unambiguous answer.
 	return fmt.Sprintf("%-22s  (%s, %d recipients)",
-		it.manifest.Name, kind, len(it.manifest.Recipients))
+		filepath.Base(it.manifest.Path), kind, len(it.manifest.Recipients))
 }
 
 type listModel struct {
@@ -42,7 +48,7 @@ func newListModel() listModel {
 		items = append(items, listItem{manifest: m})
 	}
 	sort.Slice(items, func(i, j int) bool {
-		return items[i].manifest.Name < items[j].manifest.Name
+		return filepath.Base(items[i].manifest.Path) < filepath.Base(items[j].manifest.Path)
 	})
 	return listModel{items: items}
 }

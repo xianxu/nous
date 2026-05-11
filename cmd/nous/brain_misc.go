@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -40,8 +41,10 @@ func runBrainList(w io.Writer) error {
 		if b.Shared() {
 			kind = "shared"
 		}
-		fmt.Fprintf(w, "  %-20s  %s  %d recipient%s  sync=%s\n",
-			b.Name, kind, len(b.Recipients), pluralS(len(b.Recipients)), defaultStr(b.SyncSubstrate, "?"))
+		// Display directory basename — that's the unambiguous on-disk
+		// identity. manifest.Name is operator-authored and can drift.
+		fmt.Fprintf(w, "  %-22s  %s  %d recipient%s  sync=%s\n",
+			filepath.Base(b.Path), kind, len(b.Recipients), pluralS(len(b.Recipients)), defaultStr(b.SyncSubstrate, "?"))
 		fmt.Fprintf(w, "      %s\n", b.Path)
 	}
 	return nil
