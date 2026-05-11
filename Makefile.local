@@ -105,7 +105,7 @@ tart:
 	$(call _tart_ensure_vm)
 	$(call _tart_boot_and_ssh)
 
-tart-mount: RUN_FLAGS = --dir=nous=$(CURDIR):ro
+tart-mount: RUN_FLAGS = --dir=nous:$(CURDIR):ro
 tart-mount:
 	$(call _tart_ensure_vm)
 	@# `tart run --dir=...` is a cold-boot setting; can't be hot-attached
