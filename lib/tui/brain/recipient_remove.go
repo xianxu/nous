@@ -52,7 +52,6 @@ type recipientRemoveModel struct {
 	recipients  []libbrain.RecipientInfo
 	cursor      int
 	selfConfirm textinput.Model
-	caveatConf  textinput.Model
 
 	chosen        string // canonical fingerprint after pick
 	wouldLockOut  bool   // removing `chosen` leaves no local secret on the brain
@@ -63,21 +62,19 @@ type recipientRemoveModel struct {
 	err    error
 }
 
-const (
-	selfRemovePhrase   = "REMOVE-SELF"
-	caveatRemovePhrase = "REVOKED-OUT-OF-BAND"
-)
+// Typed-phrase ceremony only for REMOVE-SELF — that stage gates the
+// destruction of the operator's own decrypt path, which earns the
+// friction. The revocation caveat is informational (gcrypt re-keys
+// only future blobs; already-pushed blobs stay readable to the
+// removed recipient), so it's an enter-to-confirm prompt rather than
+// another typed-phrase ceremony.
+const selfRemovePhrase = "REMOVE-SELF"
 
 func newRecipientRemoveModel(brainPath string, recipients []libbrain.RecipientInfo) recipientRemoveModel {
 	sc := textinput.New()
 	sc.Prompt = "  type " + selfRemovePhrase + "> "
 	sc.CharLimit = len(selfRemovePhrase) + 4
 	sc.Width = 40
-
-	cc := textinput.New()
-	cc.Prompt = "  type " + caveatRemovePhrase + "> "
-	cc.CharLimit = len(caveatRemovePhrase) + 4
-	cc.Width = 40
 
 	all := make([]string, 0, len(recipients))
 	for _, r := range recipients {
@@ -89,7 +86,6 @@ func newRecipientRemoveModel(brainPath string, recipients []libbrain.RecipientIn
 		recipients:    recipients,
 		allRecipients: all,
 		selfConfirm:   sc,
-		caveatConf:    cc,
 	}
 }
 
@@ -152,7 +148,6 @@ func (m recipientRemoveModel) updatePick(msg tea.Msg) (recipientRemoveModel, tea
 			m.selfConfirm.Focus()
 		} else {
 			m.stage = removeStageCaveatConfirm
-			m.caveatConf.Focus()
 		}
 		return m, nil
 	case "esc":
@@ -176,7 +171,6 @@ func (m recipientRemoveModel) updateSelfConfirm(msg tea.Msg) (recipientRemoveMod
 			m.banner = ""
 			m.stage = removeStageCaveatConfirm
 			m.selfConfirm.Blur()
-			m.caveatConf.Focus()
 			return m, nil
 		case "esc":
 			return m, func() tea.Msg { return cancelRecipientFlowMsg{} }
@@ -189,29 +183,29 @@ func (m recipientRemoveModel) updateSelfConfirm(msg tea.Msg) (recipientRemoveMod
 	return m, cmd
 }
 
+// updateCaveatConfirm — informational caveat, enter to proceed,
+// esc to cancel. The caveat content is the value (forcing the
+// operator to read it); typing a phrase here would be friction
+// without a matching threat (we're not gating credential leakage,
+// just making sure they internalize that already-pushed blobs stay
+// readable). REMOVE-SELF still uses a typed phrase because that
+// stage destroys the operator's own decrypt path.
 func (m recipientRemoveModel) updateCaveatConfirm(msg tea.Msg) (recipientRemoveModel, tea.Cmd) {
-	if k, ok := msg.(tea.KeyMsg); ok {
-		switch k.String() {
-		case "enter":
-			got := strings.TrimSpace(m.caveatConf.Value())
-			if got != caveatRemovePhrase {
-				m.banner = "doesn't match — type " + caveatRemovePhrase + " exactly (case-sensitive)"
-				m.caveatConf.SetValue("")
-				return m, nil
-			}
-			m.banner = ""
-			m.stage = removeStageApply
-			m.caveatConf.Blur()
-			return m, m.applyCmd()
-		case "esc":
-			return m, func() tea.Msg { return cancelRecipientFlowMsg{} }
-		case "ctrl+c":
-			return m, tea.Quit
-		}
+	k, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
 	}
-	var cmd tea.Cmd
-	m.caveatConf, cmd = m.caveatConf.Update(msg)
-	return m, cmd
+	switch k.String() {
+	case "enter":
+		m.banner = ""
+		m.stage = removeStageApply
+		return m, m.applyCmd()
+	case "esc":
+		return m, func() tea.Msg { return cancelRecipientFlowMsg{} }
+	case "ctrl+c":
+		return m, tea.Quit
+	}
+	return m, nil
 }
 
 func (m recipientRemoveModel) updateApply(msg tea.Msg) (recipientRemoveModel, tea.Cmd) {
@@ -327,15 +321,9 @@ func (m recipientRemoveModel) View() string {
 		b.WriteString("  However: any gcrypt blob currently in the remote (or in their local clone)\n")
 		b.WriteString("  remains readable to them with their existing key material. True revocation\n")
 		b.WriteString("  requires re-keying the brain (rotate the operator's key + re-encrypt all\n")
-		b.WriteString("  history).\n\n")
-		b.WriteString(m.caveatConf.View())
+		b.WriteString("  history).\n")
 		b.WriteString("\n")
-		if m.banner != "" {
-			b.WriteString(warnStyle.Render(m.banner))
-			b.WriteString("\n")
-		}
-		b.WriteString("\n")
-		b.WriteString(helpStyle.Render("enter  confirm    esc  cancel    ctrl+c  quit"))
+		b.WriteString(helpStyle.Render("enter  proceed    esc  cancel    ctrl+c  quit"))
 	case removeStageApply:
 		b.WriteString(mutedStyle.Render("applying..."))
 		b.WriteString("\n  manifest → gcrypt participants → commit → push")
