@@ -2,15 +2,20 @@
 #
 # Mirrors the portable, daily-useful pieces of ariadne's
 # .openshell/overlay/setup.sh, ported from bash → zsh (the macOS
-# default) and stripped of Linux-specific machinery:
-#   - oh-my-bash: bash-only; the VM defaults to zsh
-#   - output capture via script(1) + DEBUG trap: would need to be
-#     ported to zsh's preexec/precmd hooks; deferred
+# default). oh-my-zsh itself is installed by tart-vm-setup.sh on
+# first VM boot (the zsh counterpart to openshell's oh-my-bash,
+# which only existed because the Linux sandbox base image was bash).
+#
+# What's deliberately not ported:
+#   - output capture via script(1) + DEBUG trap: would need a port
+#     to zsh's preexec/precmd hooks; deferred
 #   - Linux ARM64 nvim/zellij binaries: VM is macOS
 #   - AI-agent aliases (claude/codex): VMs aren't where we run agents
 #
 # Pushed to ~/.tart-vm-rc.zsh on first `make tart`; sourced from
-# the VM's ~/.zshrc. Edit on the host, re-push on next make tart.
+# the VM's ~/.zshrc AFTER oh-my-zsh's source line (so this rc gets
+# the last word on aliases/keybindings). Edit on the host, re-push
+# on next make tart.
 
 # PATH: ~/.local/bin first for any operator-installed tools.
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
