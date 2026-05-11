@@ -68,7 +68,7 @@ Keep a session log as you go (timestamps + observations + anything surprising). 
 ### Phase 0 — prereqs
 
 **Operator (this machine):**
-- [ ] `nous` binary built + on PATH (signed if testing the agent-threat boundary; ad-hoc fine for a first pass). Smoke: `nous identity list` shows my fingerprint annotated `(self)`.
+- [ ] `nous` binary built +on PATH (signed if testing the agent-threat boundary; ad-hoc fine for a first pass). Smoke: `nous identity list` shows my fingerprint annotated `(self)`.
 - [ ] `gh auth status` is logged in to GitHub with `xianxu` (or whichever account owns shared-brain repos).
 - [ ] `nous service doctor` returns 9/9 green. Anything red blocks the rest.
 - [ ] **Decide install posture before Phase 7.** Two valid choices:
