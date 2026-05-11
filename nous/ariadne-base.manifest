@@ -35,6 +35,10 @@ merge     .claude/settings.ariadne.json        .claude/settings.json
 scaffold  .claude/skills
 
 # ── Makefile system ───────────────────────────────────────────────────────────
+# Root Makefile is a thin generic template (workflow + local + help).
+# Per-repo concerns (Makefile.nous chain, UPSTREAM_NAME overrides, etc.)
+# belong in the consumer's Makefile.local, NOT in this vendored root.
+symlink   Makefile
 symlink   Makefile.workflow
 symlink   scripts/lib.sh
 symlink   scripts/issue-sync.sh
