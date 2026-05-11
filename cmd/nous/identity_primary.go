@@ -1,4 +1,9 @@
 // nous identity primary — show or set the operator's primary identity.
+//
+// Audience: (b). TTY → heuristic + interactive persist confirm.
+// Non-TTY → emits a single canonical `primary: <fp> [source]` line
+// so agents can parse the resolved value without falling over on
+// the verbose human-prose branch.
 // Distinct from "any key with a secret half on this machine"; primary
 // is the *one* key nous treats as "you" (annotations, self-removal
 // safeguards, future signing identity).
@@ -17,13 +22,14 @@
 //	4. Punt: list the local secret keys + prompt the operator to pass
 //	   one as an arg.
 //
-// Audience: (h). Interactive prompt for the persist confirmation when
-// the heuristic resolves a candidate; non-TTY callers see the
-// resolved value without prompting (read-only).
+// Audience: (b). Interactive on a TTY (heuristic + persist confirm);
+// machine-stable single-line output on non-TTY so agents can parse
+// the resolved value reliably.
 
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -51,8 +57,8 @@ persist).
 With a fingerprint: persists that key as primary. Refuses unless the
 key has a secret half on this machine.
 
-Audience: (h) when interactive (persist confirmation prompt fires);
-read-only display otherwise.`,
+Audience: (b). TTY runs the heuristic + persist confirm; non-TTY emits
+a single machine-stable line.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := cmd.OutOrStdout()
@@ -100,18 +106,11 @@ func canonicalSecretFingerprint(input string) (string, error) {
 }
 
 func showOrResolvePrimary(out io.Writer) error {
+	isTTY := term.IsTerminal(int(os.Stdin.Fd()))
+
 	// Stored / single-secret resolution first.
 	if key, err := identity.Primary(); err == nil {
-		fmt.Fprintf(out, "Primary identity: %s\n", key.Fingerprint)
-		fmt.Fprintf(out, "  uid:    %s\n", displayUID(key))
-		fmt.Fprintf(out, "  last-8: %s\n", key.Last8())
-		statePath, _ := identity.PrimaryStatePath()
-		if _, statErr := os.Stat(statePath); statErr == nil {
-			fmt.Fprintf(out, "  source: %s\n", statePath)
-		} else {
-			fmt.Fprintln(out, "  source: implicit (only one secret key in keyring; run `nous identity primary <FP>` to make persistent)")
-		}
-		return nil
+		return emitResolvedPrimary(out, key, sourceForPrimary(), isTTY)
 	} else if err != identity.ErrPrimaryUnset {
 		// Stale state, gpg outage, etc. Surface and bail rather than
 		// silently fall into the heuristic — the operator should know
@@ -119,21 +118,25 @@ func showOrResolvePrimary(out io.Writer) error {
 		return err
 	}
 
-	// Heuristic: scan brains for a private-recipient hint.
-	candidate, hint, err := resolvePrimaryHeuristic()
+	// Heuristic. Shared with lib/brain.Annotator's fallback so the
+	// CLI and the TUI can't disagree about which key is "(self)".
+	candidate, hint, err := brain.HeuristicPrimary()
 	if err != nil {
 		return err
 	}
 	if candidate == "" {
-		return printAmbiguousAndExit(out)
+		return printAmbiguousAndExit(out, isTTY)
+	}
+	if !isTTY {
+		// Machine-stable single line. Agents parsing this see exactly
+		// one shape regardless of whether resolution went stored vs.
+		// heuristic. The verbose prompt-to-persist branch is TTY-only.
+		fmt.Fprintf(out, "primary: %s (heuristic; %s)\n", candidate, hint)
+		return nil
 	}
 	fmt.Fprintf(out, "Heuristic primary candidate: %s\n", candidate)
 	fmt.Fprintf(out, "  reason: %s\n", hint)
 	fmt.Fprintln(out)
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		fmt.Fprintln(out, "(non-TTY: not persisting. Run interactively to confirm, or pass the fingerprint explicitly to persist.)")
-		return nil
-	}
 	if !confirmPersist(out) {
 		fmt.Fprintln(out, "Skipped persistence. Re-run with the fingerprint to make it sticky.")
 		return nil
@@ -146,41 +149,51 @@ func showOrResolvePrimary(out io.Writer) error {
 	return nil
 }
 
-// resolvePrimaryHeuristic looks for a private brain (single recipient)
-// whose recipient is also a local secret key. Returns the matching
-// fingerprint + a human-readable hint, or ("", "", nil) if none match.
-func resolvePrimaryHeuristic() (fp, hint string, err error) {
-	secret, err := identity.List()
-	if err != nil {
-		return "", "", err
+// emitResolvedPrimary prints the resolved primary identity. Verbose
+// human prose on a TTY; single canonical line on non-TTY for agent
+// consumption.
+func emitResolvedPrimary(out io.Writer, key identity.Key, source string, isTTY bool) error {
+	if !isTTY {
+		fmt.Fprintf(out, "primary: %s (%s)\n", key.Fingerprint, source)
+		return nil
 	}
-	if len(secret) == 0 {
-		return "", "", nil
+	fmt.Fprintf(out, "Primary identity: %s\n", key.Fingerprint)
+	fmt.Fprintf(out, "  uid:    %s\n", displayUID(key))
+	fmt.Fprintf(out, "  last-8: %s\n", key.Last8())
+	if source == "stored" {
+		statePath, _ := identity.PrimaryStatePath()
+		fmt.Fprintf(out, "  source: %s\n", statePath)
+	} else {
+		fmt.Fprintln(out, "  source: implicit (only one secret key in keyring; run `nous identity primary <FP>` to make persistent)")
 	}
-	secretSet := map[string]bool{}
-	for _, k := range secret {
-		secretSet[strings.ToUpper(k.Fingerprint)] = true
-	}
-	manifests, err := brain.DiscoverAll()
-	if err != nil {
-		return "", "", err
-	}
-	for _, m := range manifests {
-		if len(m.Recipients) != 1 {
-			continue
-		}
-		fpU := strings.ToUpper(m.Recipients[0])
-		if secretSet[fpU] {
-			return fpU, fmt.Sprintf("private brain %s has this key as its sole recipient", m.Path), nil
-		}
-	}
-	return "", "", nil
+	return nil
 }
 
-func printAmbiguousAndExit(out io.Writer) error {
+// sourceForPrimary returns "stored" if the state file exists,
+// "implicit" otherwise. Read-only probe; no side effects.
+func sourceForPrimary() string {
+	statePath, err := identity.PrimaryStatePath()
+	if err != nil {
+		return "implicit"
+	}
+	if _, err := os.Stat(statePath); err == nil {
+		return "stored"
+	}
+	return "implicit"
+}
+
+func printAmbiguousAndExit(out io.Writer, isTTY bool) error {
 	keys, err := identity.List()
 	if err != nil {
 		return err
+	}
+	if !isTTY {
+		// Machine-stable: one line per candidate, prefix marks "unset".
+		fmt.Fprintln(out, "primary: unset")
+		for _, k := range keys {
+			fmt.Fprintf(out, "candidate: %s  %s\n", k.Fingerprint, displayUID(k))
+		}
+		return nil
 	}
 	fmt.Fprintln(out, "Primary identity unset; multiple local secret keys present and no private-brain hint:")
 	for _, k := range keys {
@@ -191,10 +204,19 @@ func printAmbiguousAndExit(out io.Writer) error {
 	return nil
 }
 
+// confirmPersist prompts the operator. Empty input / EOF / any
+// non-y/yes input → decline. Explicitly NOT default-yes: the M5
+// review caught that fmt.Fscanln returns empty string on EOF, and
+// default-yes would silently persist a heuristic candidate the
+// operator never confirmed (a TTY-attached stdin closed via ctrl+d
+// would do this in practice).
 func confirmPersist(out io.Writer) bool {
-	fmt.Fprint(out, "Persist this as the primary identity? [Y/n] ")
-	var line string
-	fmt.Fscanln(os.Stdin, &line)
+	fmt.Fprint(out, "Persist this as the primary identity? [y/N] ")
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil && line == "" {
+		return false
+	}
 	v := strings.ToLower(strings.TrimSpace(line))
-	return v == "" || v == "y" || v == "yes"
+	return v == "y" || v == "yes"
 }

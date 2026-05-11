@@ -69,11 +69,13 @@ func Annotator() (func(string) string, error) {
 
 // resolvePrimaryFingerprint returns the fp to treat as (self):
 //   - identity.Primary state (file or implicit single-secret).
-//   - On ErrPrimaryUnset, fall back to brain heuristic: scan brains
-//     for a private brain whose only recipient is a local secret
-//     key — that recipient is almost certainly the operator.
+//   - On ErrPrimaryUnset, fall back to HeuristicPrimary (brain-aware).
 //   - Otherwise empty string (caller renders no (self), only
 //     (local secret) labels).
+//
+// `secret` is passed in by Annotator to avoid a redundant
+// identity.List call inside HeuristicPrimary; the public function
+// re-derives it from gpg directly.
 func resolvePrimaryFingerprint(secret []identity.Key) string {
 	if key, err := identity.Primary(); err == nil {
 		return strings.ToUpper(key.Fingerprint)
@@ -81,28 +83,58 @@ func resolvePrimaryFingerprint(secret []identity.Key) string {
 		// Stale state, transient outage, etc. — fall through to the
 		// heuristic rather than block on it.
 	}
+	fp, _, err := heuristicPrimaryFromKeys(secret)
+	if err != nil {
+		return ""
+	}
+	return fp
+}
 
+// HeuristicPrimary infers the operator's primary identity from brain
+// state without consulting `identity.Primary`'s persistent record. A
+// private brain (single recipient) whose recipient also has a secret
+// half on this machine is almost certainly the operator's primary —
+// operator-private brains are by definition encrypted to one's own
+// key.
+//
+// Returns (fp, hint, nil) on match where `hint` explains which brain
+// supplied the signal. Returns ("", "", nil) on no-match (not an
+// error). Errors propagate from gpg / brain discovery.
+//
+// Used in two places: lib/brain.Annotator (read-only fallback when
+// identity.Primary is unset) and cmd/nous/identity_primary
+// (interactive `nous identity primary` runs this and offers to
+// persist).
+func HeuristicPrimary() (fp, hint string, err error) {
+	secret, err := identity.List()
+	if err != nil {
+		return "", "", err
+	}
+	return heuristicPrimaryFromKeys(secret)
+}
+
+func heuristicPrimaryFromKeys(secret []identity.Key) (fp, hint string, err error) {
+	if len(secret) == 0 {
+		return "", "", nil
+	}
 	secretSet := map[string]bool{}
 	for _, k := range secret {
 		secretSet[strings.ToUpper(k.Fingerprint)] = true
 	}
-	if len(secretSet) == 0 {
-		return ""
-	}
 	manifests, err := DiscoverAll()
 	if err != nil {
-		return ""
+		return "", "", err
 	}
 	for _, m := range manifests {
 		if len(m.Recipients) != 1 {
 			continue
 		}
-		fp := strings.ToUpper(m.Recipients[0])
-		if secretSet[fp] {
-			return fp
+		fpU := strings.ToUpper(m.Recipients[0])
+		if secretSet[fpU] {
+			return fpU, fmt.Sprintf("private brain %s has this key as its sole recipient", m.Path), nil
 		}
 	}
-	return ""
+	return "", "", nil
 }
 
 func uidFor(keys []identity.Key, fp string) string {

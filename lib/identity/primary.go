@@ -135,7 +135,21 @@ func SetPrimary(fp string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
 	}
-	return os.WriteFile(path, []byte(fp+"\n"), 0o644)
+	// Atomic write (tmp + rename) so a concurrent `nous identity primary`
+	// from two terminals can't leave a half-written file that subsequent
+	// reads choke on as "expected 40-char fingerprint, got N chars".
+	// Mode 0o600: a fingerprint isn't a secret, but the state dir can be
+	// world-readable on multi-user boxes; tighten on principle since
+	// "what primary identity is this operator using" is mild fingerprinting
+	// information for another local UID.
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(fp+"\n"), 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("rename %s -> %s: %w", tmp, path, err)
+	}
+	return nil
 }
 
 // ClearPrimary removes the state file. No-op if absent.

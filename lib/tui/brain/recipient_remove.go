@@ -56,6 +56,12 @@ type recipientRemoveModel struct {
 	chosen        string // canonical fingerprint after pick
 	wouldLockOut  bool   // removing `chosen` leaves no local secret on the brain
 	allRecipients []string
+	// lockoutMarker[i] is true if removing recipients[i] would leave no
+	// local-secret recipient on this brain. Computed up front so the
+	// picker row can render the safeguard marker before enter is
+	// pressed — so the operator sees what they're about to gate on,
+	// not after.
+	lockoutMarker []bool
 
 	banner string
 	final  string
@@ -80,11 +86,20 @@ func newRecipientRemoveModel(brainPath string, recipients []libbrain.RecipientIn
 	for _, r := range recipients {
 		all = append(all, r.Fingerprint)
 	}
+	// Pre-compute the would-lock-out marker per row. WouldLockOut is
+	// fail-closed, so an outage shows the safeguard on every row
+	// rather than hiding it — defensive UX matching defensive logic.
+	markers := make([]bool, len(recipients))
+	for i, r := range recipients {
+		locked, _ := libbrain.WouldLockOut(all, r.Fingerprint)
+		markers[i] = locked
+	}
 	return recipientRemoveModel{
 		brainPath:     brainPath,
 		stage:         removeStagePick,
 		recipients:    recipients,
 		allRecipients: all,
+		lockoutMarker: markers,
 		selfConfirm:   sc,
 	}
 }
@@ -133,17 +148,13 @@ func (m recipientRemoveModel) updatePick(msg tea.Msg) (recipientRemoveModel, tea
 		ri := m.recipients[m.cursor]
 		m.chosen = ri.Fingerprint
 		// Functional safeguard: does removing this leave the operator
-		// with no decrypt path on this brain? If yes, run the
-		// REMOVE-SELF stage. Annotation tier ("(self)" vs "(local
-		// secret)") is cosmetic and intentionally not used here.
-		wouldLock, err := libbrain.WouldLockOut(m.allRecipients, ri.Fingerprint)
-		if err != nil {
-			m.banner = "check decrypt path: " + err.Error()
-			return m, nil
-		}
-		m.wouldLockOut = wouldLock
+		// with no decrypt path on this brain? Pre-computed at model
+		// init so the picker row can flag it before enter is pressed
+		// — operator sees [⚠ would lock you out] next to the row that
+		// triggers the REMOVE-SELF stage.
+		m.wouldLockOut = m.lockoutMarker[m.cursor]
 		m.banner = ""
-		if wouldLock {
+		if m.wouldLockOut {
 			m.stage = removeStageSelfConfirm
 			m.selfConfirm.Focus()
 		} else {
@@ -287,9 +298,18 @@ func (m recipientRemoveModel) View() string {
 			b.WriteString("\n")
 		}
 		for i, r := range m.recipients {
-			row := fmt.Sprintf("  %s  %s", shortFP(r.Fingerprint), styledAnnotation(r.Annotation))
+			lockMarker := ""
+			if i < len(m.lockoutMarker) && m.lockoutMarker[i] {
+				lockMarker = " " + warnStyle.Render("[⚠ would lock you out]")
+			}
+			row := fmt.Sprintf("  %s  %s%s", shortFP(r.Fingerprint), styledAnnotation(r.Annotation), lockMarker)
 			if i == m.cursor {
-				row = cursorRowStyle.Render("▸ " + fmt.Sprintf("%s  %s", shortFP(r.Fingerprint), r.Annotation))
+				// Cursor row: keep the marker visible (cursorRowStyle's
+				// background would otherwise blanket-tint it). Render
+				// the row chrome and lockMarker as separate spans so
+				// the warning still pops on the highlighted line.
+				rowBody := fmt.Sprintf("▸ %s  %s", shortFP(r.Fingerprint), r.Annotation)
+				row = cursorRowStyle.Render(rowBody) + lockMarker
 			}
 			b.WriteString(row + "\n")
 		}

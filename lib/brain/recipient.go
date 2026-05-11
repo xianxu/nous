@@ -85,14 +85,16 @@ func LocalSecretFingerprints(fps []string) ([]string, error) {
 // identity. Both checks are needed: "(self)" makes the UI honest
 // about which key is "you"; WouldLockOut is the functional refusal.
 //
-// Returns (false, err) on gpg outage; callers should default to
-// blocking the operation in that case (defensive fallback for
-// safety-critical paths).
+// Fail-closed on gpg outage: returns (true, err) so a caller that
+// forgets to check `err` still routes through the REMOVE-SELF / abort
+// path rather than silently bypassing the safeguard. Callers MUST
+// surface the error; this is a "would lock out by default unless we
+// can prove otherwise" semantics.
 func WouldLockOut(recipients []string, fp string) (bool, error) {
 	remaining := WithoutRecipient(recipients, fp)
 	localSecrets, err := LocalSecretFingerprints(remaining)
 	if err != nil {
-		return false, err
+		return true, err
 	}
 	return len(localSecrets) == 0, nil
 }
