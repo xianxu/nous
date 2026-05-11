@@ -7,7 +7,18 @@
 # Makefile currently being processed.
 NOUS_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 
-.PHONY: build nous-dev test clean trim identity moveto cloneto new-brain nous-bootstrap nous-test-bootstrap nous-test-snapshot nous-test-roundtrip nous-test-brain-sync
+.PHONY: build nous-dev nous-install test clean trim identity moveto cloneto new-brain nous-bootstrap nous-test-bootstrap nous-test-snapshot nous-test-roundtrip nous-test-brain-sync
+
+# Where signed prod binaries land. PATH-stable on most operator
+# machines; no sudo; survives Homebrew rebuilds.
+NOUS_INSTALL_PREFIX ?= $(HOME)/.local/bin
+
+# Signing identity. Default ad-hoc ("-") so `make nous-install` works
+# without operator setup; flips the binary into the production keychain
+# namespace (identifier "com.charon.cli") but ACL'd entries from a
+# prior Developer-ID install stay unreadable until re-granted.
+# Override: `make nous-install NOUS_CODESIGN_IDENTITY="Developer ID Application: <name> (<team>)"`.
+NOUS_CODESIGN_IDENTITY ?= -
 
 build:
 	@for dir in cmd/*/; do \
@@ -74,6 +85,54 @@ nous-dev:
 	@echo "    Re-install production: make nous-install"
 	@echo ""
 	@exec ./bin/nous serve $(NOUS_DEV_ARGS)
+
+# make nous-install — stops the dev foreground process, builds + signs
+# the prod-relevant binaries (nous, charon, brain-sync; nous-security
+# is its own concern w/ separate identifier), installs them into
+# $(NOUS_INSTALL_PREFIX), and brings up the unified com.xianxu.nous
+# launchd service.
+#
+# Signing uses scripts/sign.sh which stamps identifier=com.charon.cli
+# regardless of identity (so the runtime self-check passes either
+# way). Identity defaults to ad-hoc ("-"); override via env to use a
+# real Developer ID for ACL-bound keychain entries.
+#
+# Today (M4): opt-in via --unified flag on `nous service install`.
+# Tomorrow (M5): unified becomes the default.
+nous-install:
+	@echo "==> Stopping dev foreground process (best-effort)..."
+	@pkill -f '$(NOUS_DIR)bin/nous serve' 2>/dev/null || true
+	@pkill -f 'bin/nous serve' 2>/dev/null || true
+	@echo "==> Building all binaries to bin/..."
+	@mkdir -p bin
+	@for dir in cmd/*/; do \
+		[ -f "$$dir/main.go" ] || continue; \
+		name=$$(basename "$$dir"); \
+		echo "  building bin/$$name"; \
+		rm -f "bin/$$name"; \
+		go build -o "bin/$$name" "./$$dir"; \
+	done
+	@echo "==> Signing prod-relevant binaries (identity=$(NOUS_CODESIGN_IDENTITY))..."
+	@NOUS_CODESIGN_IDENTITY=$(NOUS_CODESIGN_IDENTITY) scripts/sign.sh bin/nous
+	@NOUS_CODESIGN_IDENTITY=$(NOUS_CODESIGN_IDENTITY) scripts/sign.sh bin/charon
+	@NOUS_CODESIGN_IDENTITY=$(NOUS_CODESIGN_IDENTITY) scripts/sign.sh bin/brain-sync
+	@echo "==> Installing signed binaries to $(NOUS_INSTALL_PREFIX)/"
+	@mkdir -p $(NOUS_INSTALL_PREFIX)
+	@for name in nous charon brain-sync; do \
+		install -m 0755 bin/$$name $(NOUS_INSTALL_PREFIX)/$$name; \
+		echo "  installed $(NOUS_INSTALL_PREFIX)/$$name"; \
+	done
+	@echo "==> Registering com.xianxu.nous launchd service..."
+	@$(NOUS_INSTALL_PREFIX)/nous service install --unified
+	@echo ""
+	@echo "==> Done. Verify with: nous service status"
+	@if [ "$(NOUS_CODESIGN_IDENTITY)" = "-" ]; then \
+		echo ""; \
+		echo "  [note] signed ad-hoc. Keychain entries ACL'd to a previous"; \
+		echo "         Developer ID won't be readable. Re-run with"; \
+		echo "         NOUS_CODESIGN_IDENTITY=\"Developer ID Application: ...\""; \
+		echo "         once you have the identity set up."; \
+	fi
 
 test:
 	go test ./...
