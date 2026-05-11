@@ -1,3 +1,115 @@
 # Nous repo-specific targets.
 # Include nous layer targets (build, test, clean, trim)
 -include Makefile.nous
+
+# ----------------------------------------------------------------------------
+# Tart integration — test nous on a clean macOS VM.
+#
+# Apple Silicon only (Tart uses Apple Virtualization framework). One-time
+# `tart pull` of the base image is ~30 GB; subsequent `tart clone` is
+# copy-on-write via APFS clones, so per-VM cost is small (only the diff
+# from the base, not a full duplicate of the 30 GB).
+#
+# Cache is system-wide and automatic:
+#   ~/.tart/cache/         OCI image cache, shared across every repo on
+#                           this Mac. Any `tart pull` from any repo lands
+#                           here; subsequent pulls of the same digest are
+#                           no-ops. There's no per-repo cache to manage.
+#   ~/.tart/vms/<name>/    Per-VM working state. Named clones; sized as
+#                           "base + diff" thanks to APFS CoW. Naming the
+#                           VM per-repo (nous-test, pair-test, …) keeps
+#                           clones isolated without re-downloading the
+#                           base image.
+# To relocate the cache (e.g., onto an external SSD), set TART_HOME
+# system-wide; do NOT override per-repo or the sharing breaks.
+#
+# Workflow:
+#   make tart            # boots a fresh VM, ssh's in (admin / admin)
+#   (inside) install brew + clone nous + run, e.g.:
+#     /bin/bash -c "$$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+#     eval "$$(/opt/homebrew/bin/brew shellenv)"
+#     git clone https://github.com/xianxu/nous.git && cd nous
+#     make nous-dev      # unsigned dev daemon, charon-dev keychain namespace
+#     # — or, to test the signed install flow —
+#     # import your Developer ID Application cert into the VM keychain first,
+#     # then: make nous-install
+#   exit                 # leave ssh; VM keeps running
+#   make tart-stop       # stop VM, state preserved
+#   make tart-clean      # stop + delete VM
+#
+#   make tart-mount      # same as `make tart` but mounts the local
+#                        # nous tree into the VM at
+#                        # /Volumes/My\ Shared\ Files/nous
+#                        # (read-only) so you can edit on the host and
+#                        # rebuild inside without re-cloning.
+#
+# All four targets are idempotent: if the VM already exists / is running,
+# they reuse it instead of erroring.
+# ----------------------------------------------------------------------------
+
+TART_BASE ?= ghcr.io/cirruslabs/macos-tahoe-base:latest
+TART_VM   ?= nous-test
+
+# Common preamble: tart present, base pulled, VM cloned (idempotent).
+define _tart_ensure_vm
+	@command -v tart >/dev/null || \
+	    { echo "Install tart: brew install cirruslabs/cli/tart"; exit 1; }
+	@if ! tart list --source local -q 2>/dev/null | grep -qx $(TART_VM); then \
+	    echo "==> Pulling $(TART_BASE) (cached at ~/.tart/cache/, shared with other repos)..."; \
+	    tart pull $(TART_BASE); \
+	    echo "==> Cloning to $(TART_VM)..."; \
+	    tart clone $(TART_BASE) $(TART_VM); \
+	fi
+endef
+
+# Boot in background (no-op if already running), poll for SSH, then
+# exec ssh -t for an interactive shell. RUN_FLAGS lets `tart-mount`
+# inject --dir without duplicating the rest of the recipe.
+#
+# Gate the boot decision on `tart list`'s State column, not on
+# `tart ip`. Tart caches the last-known IP for a stopped VM, so
+# `tart ip` succeeds even when the VM isn't running — which was
+# silently skipping the boot branch and leaving the loop polling a
+# dead address until ssh inevitably failed with "Host is down".
+define _tart_boot_and_ssh
+	@state=$$(tart list 2>/dev/null | awk -v vm=$(TART_VM) '$$2==vm {print $$NF}'); \
+	if [ "$$state" != "running" ]; then \
+	    echo "==> Booting VM..."; \
+	    nohup tart run --no-graphics $(RUN_FLAGS) $(TART_VM) >/tmp/tart-$(TART_VM).log 2>&1 & \
+	fi
+	@echo "==> Waiting for SSH..."
+	@for i in $$(seq 1 60); do \
+	    ip=$$(tart ip $(TART_VM) 2>/dev/null); \
+	    if [ -n "$$ip" ] && nc -z -G 2 "$$ip" 22 2>/dev/null; then break; fi; \
+	    sleep 2; \
+	done
+	@ip=$$(tart ip $(TART_VM)); \
+	    if ! nc -z -G 2 "$$ip" 22 2>/dev/null; then \
+	        echo "==> SSH never came up at $$ip (boot log: /tmp/tart-$(TART_VM).log)"; \
+	        exit 1; \
+	    fi; \
+	    echo "==> ssh admin@$$ip (password: admin)"; \
+	    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+	        -t admin@$$ip \
+	        'export TERM=xterm-256color; stty erase "^?"; exec $$SHELL -l'
+endef
+
+.PHONY: tart tart-mount tart-stop tart-clean
+
+tart:
+	$(call _tart_ensure_vm)
+	$(call _tart_boot_and_ssh)
+
+tart-mount: RUN_FLAGS = --dir=nous=$(CURDIR):ro
+tart-mount:
+	$(call _tart_ensure_vm)
+	@echo "==> Local tree mounted at /Volumes/My Shared Files/nous (read-only)"
+	$(call _tart_boot_and_ssh)
+
+tart-stop:
+	@if tart ip $(TART_VM) >/dev/null 2>&1; then tart stop $(TART_VM); fi
+
+tart-clean: tart-stop
+	@if tart list --source local -q 2>/dev/null | grep -qx $(TART_VM); then \
+	    tart delete $(TART_VM); \
+	fi
