@@ -69,97 +69,36 @@ func newVault() vault.Store {
 	return keychain.New()
 }
 
+// ServeCmd is a thin cobra wrapper around lib/provider/proxy.Serve.
+// All bootstrap moved into proxy.Serve in nous#16 M1 so the runtime
+// can also be mounted from `nous serve` (M2) as one goroutine in a
+// unified daemon. This wrapper owns flag parsing + signal handling +
+// the cobra surface; the runtime itself lives in lib/.
 func ServeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Start the HTTPS credential proxy",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Catalog bootstrap lives at the caller layer rather than
+			// inside proxy.Serve — pulling it down into lib/provider/
+			// proxy would close a dep cycle since
+			// lib/provider/providers/catalog already imports
+			// lib/provider/proxy (for its router types).
 			cat, err := catalog.Load()
 			if err != nil {
-				return fmt.Errorf("failed to load provider catalog: %w", err)
+				return fmt.Errorf("load provider catalog: %w", err)
 			}
 			catalog.Register(cat)
 			log.Printf("catalog: registered %d Tier-3 provider(s)", len(cat.Entries))
 
-			ca, err := proxy.LoadOrCreateCA()
-			if err != nil {
-				return fmt.Errorf("failed to init CA: %w", err)
-			}
-			log.Printf("CA loaded from keychain")
-
-			bundlePath, cleanup, err := proxy.BuildCABundle(ca.CertPEM)
-			if err != nil {
-				return fmt.Errorf("failed to build CA bundle: %w", err)
-			}
-			defer cleanup()
-			log.Printf("CA bundle: %s", bundlePath)
-
-			audit, err := proxy.NewAuditLog(auditPath)
-			if err != nil {
-				return fmt.Errorf("failed to init audit log: %w", err)
-			}
-			defer audit.Close()
-
-			refreshers := make(map[string]proxy.Refresher)
-			if gp, err := oauth.NewGoogleProvider(); err == nil {
-				refreshers["google"] = gp
-			} else {
-				log.Printf("warning: Google OAuth not available: %v", err)
-			}
-
-			srv := &proxy.Server{
-				Vault:        newVault(),
-				Audit:        audit,
-				Addr:         listenAddr,
-				CA:           ca,
-				Refreshers:   refreshers,
-				Verbose:      verbose,
-				ScopeTracker: proxy.NewScopeTracker(100, 24*time.Hour),
-				// Boots disarmed (#16 A spec). User must `charon arm`
-				// or click Charon Security.app's menubar to enable
-				// CONNECTs.
-				Session: proxy.NewSession(),
-			}
-
-			// Publish runtime info so other CLI invocations can find
-			// us without --addr. Best-effort: write failure logs but
-			// doesn't abort serve. Removed on graceful shutdown
-			// (signal trap below); stale files from a crash are
-			// tolerated since the next serve overwrites and
-			// `manifest`'s healthz probe surfaces "running: false".
-			if err := charonruntime.Write(listenAddr); err != nil {
-				log.Printf("warning: runtime file write failed: %v", err)
-			} else {
-				log.Printf("runtime file: %s", charonruntime.Path())
-			}
-			// Bring up the runtime-consent unix socket (#16 C). DR-
-			// pinned to com.charon.security so only Charon
-			// Security.app can drive arm/disarm. Best-effort: bind
-			// failure logs but doesn't abort serve — the HTTP
-			// /session/* endpoints still work as a fallback (and
-			// are the only path until #16 D's menubar lands).
-			runtimeSock, sockErr := proxy.StartRuntimeSocket(srv)
-			if sockErr != nil {
-				log.Printf("warning: runtime socket bind failed: %v", sockErr)
-			}
-			sigCh := make(chan os.Signal, 1)
-			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-			go func() {
-				<-sigCh
-				_ = charonruntime.Remove()
-				if runtimeSock != nil {
-					_ = runtimeSock.Close()
-				}
-				os.Exit(0)
-			}()
-			defer charonruntime.Remove()
-			defer func() {
-				if runtimeSock != nil {
-					_ = runtimeSock.Close()
-				}
-			}()
-
-			return srv.ListenAndServe()
+			ctx, cancel := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+			defer cancel()
+			return proxy.Serve(ctx, proxy.ServeOptions{
+				Listen:    listenAddr,
+				Vault:     newVault(),
+				AuditPath: auditPath,
+				Verbose:   verbose,
+			})
 		},
 	}
 	cmd.Flags().StringVar(&auditPath, "audit-log", "", "audit log file path (default: stderr)")

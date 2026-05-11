@@ -102,8 +102,12 @@ func (s *Server) transport() http.RoundTripper {
 	return http1Transport
 }
 
-// ListenAndServe starts the proxy server.
-func (s *Server) ListenAndServe() error {
+// ListenAndServe starts the proxy server and blocks until ctx is
+// cancelled or the underlying http.Server errors out. On ctx cancel,
+// runs Shutdown with a 5s grace window before returning. Callers
+// (charon serve / nous serve) own the signal handler and cancel ctx;
+// this function does NOT install signal traps itself.
+func (s *Server) ListenAndServe(ctx context.Context) error {
 	srv := &http.Server{
 		Addr:    s.Addr,
 		Handler: s,
@@ -118,7 +122,22 @@ func (s *Server) ListenAndServe() error {
 		},
 	}
 	log.Printf("charon proxy listening on %s", s.Addr)
-	return srv.ListenAndServe()
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServe() }()
+	select {
+	case <-ctx.Done():
+		// Graceful shutdown — 5s is generous for a CONNECT proxy with
+		// in-flight tunnels; tunnels are best-effort cancelled by
+		// closing the underlying listener.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return srv.Shutdown(shutdownCtx)
+	case err := <-errCh:
+		if err == http.ErrServerClosed {
+			return nil
+		}
+		return err
+	}
 }
 
 // connCtxKey is the context-key type for the per-conn net.Conn

@@ -8,7 +8,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -33,20 +32,11 @@ func main() {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer cancel()
-
-			if len(brainPaths) == 0 {
-				auto, err := brainsync.FindAllSharedBrainsInWorkspace()
-				if err != nil {
-					return err
-				}
-				if len(auto) == 0 {
-					return fmt.Errorf("no shared brains found under the workspace root (parent of nous); pass --brain explicitly")
-				}
-				brainPaths = auto
-				log.Printf("brainsync: auto-discovered %d shared brain(s)", len(auto))
-			}
-
-			return brainsync.Watch(ctx, brainPaths, fetchEvery, verbose)
+			return brainsync.Run(ctx, brainsync.RunOptions{
+				Brains:     brainPaths,
+				FetchEvery: fetchEvery,
+				Verbose:    verbose,
+			})
 		},
 	}
 	root.Flags().StringSliceVar(&brainPaths, "brain", nil, "absolute path to a shared brain (repeatable)")
