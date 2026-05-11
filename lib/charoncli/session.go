@@ -121,10 +121,13 @@ func formatSessionResp(out map[string]any, status int, verb string) string {
 	return string(raw)
 }
 
-// renderSessionStatus is used by the extended `charon status` to
-// surface armed/disarmed + expiry. Reads from /session/status; the
-// healthz call still happens separately.
-func renderSessionStatus(addr string) string {
+// RenderSessionStatus surfaces armed/disarmed + expiry as a single
+// line suitable for appending to a status command's output. Reads
+// from /session/status; the /healthz call is the caller's job.
+//
+// Exported so cmd/nous/status.go can compose proxy health + session
+// state into an aggregated `nous status` view.
+func RenderSessionStatus(addr string) string {
 	url := fmt.Sprintf("http://%s/session/status", addr)
 	resp, err := http.Get(url)
 	if err != nil {
@@ -147,15 +150,16 @@ func renderSessionStatus(addr string) string {
 		return "Session: unparseable response"
 	}
 	if !st.Armed {
-		return "Session: disarmed (run 'charon arm' or click Charon Security.app's menubar dot)"
+		return "Session: disarmed (run 'nous arm' or click Charon Security.app's menubar dot)"
 	}
 	rem := time.Duration(st.TTLRemaining).Truncate(time.Second)
 	return fmt.Sprintf("Session: armed; %s remaining (%s timer expires %s)",
 		rem, st.ExpiresReason, st.ExpiresAt.Format(time.RFC3339))
 }
 
-// extendStatusOutput is exported so StatusCmd can append session info
-// to its existing output without growing main.go further.
+// extendStatusOutput is the legacy `charon status` adapter; trims any
+// trailing newline so the line slots into existing output formatting.
+// Callers outside this package use RenderSessionStatus directly.
 func extendStatusOutput(addr string) string {
-	return strings.TrimRight(renderSessionStatus(addr), "\n")
+	return strings.TrimRight(RenderSessionStatus(addr), "\n")
 }

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -12,38 +11,31 @@ import (
 	"github.com/xianxu/nous/lib/service"
 )
 
-// serviceCmdImpl is the real `nous service` cluster (replaces the M3b
-// placeholder). One install/start/stop manages both subsystems
-// (brain-sync watcher + charon credential proxy) as a unit. No per-
-// subsystem service subcommands — there's no value in starting one
-// without the other.
+// serviceCmdImpl is the `nous service` cluster. One install/start/stop
+// manages the unified `com.42shots.nous` launchd plist that runs both
+// the credential proxy and brain-sync watcher as goroutines under a
+// single `nous serve` process (nous#16 M2). nous#20 retired the
+// previous two-binary install model.
 //
-// Implementation: each subcommand dispatches to both lib/service
-// (charon's launchd manager, label com.charon.proxy) and lib/brainsync
-// (brain-sync's launchd manager, label com.xianxu.brain-sync), aggregating
-// output. Future M5+ work may collapse the two daemons into a single
-// `nous serve` process; for now they stay separate launchd services
-// for failure isolation.
-//
-// Binary paths resolved by sibling-binary discovery: cmd/nous looks for
-// charon and brain-sync next to itself (same bin/ dir). Falls back to
-// PATH lookup if not co-located.
+// `runServiceInstall` still includes one-shot migration of pre-unified
+// plists (com.charon.proxy, com.xianxu.brain-sync) so an operator
+// upgrading across the boundary lands cleanly.
 func serviceCmdImpl() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "service",
-		Short: "Service control: install/start/stop brain-sync + proxy together",
-		Long: `Manages all nous services together as a unit. brain-sync (the brain
-sync watcher) and charon (the credential proxy) install/start/stop with
-one command — there's no value in starting one without the other.
+		Short: "Service control: install/start/stop the unified daemon",
+		Long: `Manages the com.42shots.nous launchd service. ` + "`nous serve`" + `
+runs the credential proxy and brain-sync watcher as goroutines under
+one process, so install/start/stop act on one plist.
 
 Subcommands:
-  install     Install brain-sync + proxy as launchd services
-  uninstall   Remove both
-  start       Start (or restart) both
-  stop        Stop both
-  status      Show what's installed + running across both
-  doctor      Prescriptive health check (gpg, identity, brains, services)
-  audit       Tail/filter audit logs (charon proxy + brain-sync)`,
+  install     Install the com.42shots.nous launchd service
+  uninstall   Remove it
+  start       Start (or restart)
+  stop        Stop
+  status      Show installed + running state
+  doctor      Prescriptive health check (gpg, identity, brains, service)
+  audit       Tail/filter the audit log (~/Library/Logs/nous.log)`,
 	}
 
 	cmd.AddCommand(serviceInstallCmdImpl())
@@ -55,24 +47,6 @@ Subcommands:
 	cmd.AddCommand(newServiceAuditCmd())
 
 	return cmd
-}
-
-// resolveSiblingBinary looks for a binary next to the running nous
-// executable, falling back to PATH lookup. Returns absolute path.
-func resolveSiblingBinary(name string) (string, error) {
-	nousBin, err := os.Executable()
-	if err == nil {
-		candidate := filepath.Join(filepath.Dir(nousBin), name)
-		if _, err := os.Stat(candidate); err == nil {
-			abs, err := filepath.Abs(candidate)
-			if err == nil {
-				return abs, nil
-			}
-		}
-	}
-	// Fall back to PATH lookup (works if user has bin/ on PATH or
-	// has installed binaries via go install).
-	return exec.LookPath(name)
 }
 
 func serviceInstallCmdImpl() *cobra.Command {

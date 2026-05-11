@@ -44,6 +44,11 @@ specific docs.`,
 	root.AddCommand(providerCmd())
 	root.AddCommand(serviceCmdImpl())
 	root.AddCommand(newServeCmd())
+	root.AddCommand(newStatusCmd())
+	root.AddCommand(charoncli.RunCmd())
+	root.AddCommand(charoncli.ArmCmd())
+	root.AddCommand(charoncli.DisarmCmd())
+	root.AddCommand(charoncli.VaultCmd())
 	root.AddCommand(instructionsCmd())
 	root.AddCommand(manifestCmd())
 
@@ -86,6 +91,10 @@ Agent-facing read: ` + "`nous provider manifest`" + `.`
 	manifest.Short = "Machine-readable: configured providers + granted scopes (JSON)"
 
 	auth.AddCommand(manifest)
+	auth.AddCommand(charoncli.GcpCmd())
+	auth.AddCommand(charoncli.WhoCmd())
+	auth.AddCommand(charoncli.StatsCmd())
+	auth.AddCommand(charoncli.ScopesCmd())
 	return auth
 }
 

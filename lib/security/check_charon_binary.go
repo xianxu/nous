@@ -8,15 +8,16 @@ import (
 	"strings"
 )
 
-// charonInstallPath is where `make install` places the charon CLI.
-// Hardcoded to match the Makefile target; deliberately not parameterized
-// — alternate install paths (homebrew, /usr/local/bin) would need
-// per-path attestation logic which we punt on for now.
-var charonInstallPath = filepath.Join(os.Getenv("HOME"), ".local", "bin", "charon")
+// nousInstallPath is where `make nous-install` places the unified nous
+// binary. Hardcoded to match the Makefile target; deliberately not
+// parameterized — alternate install paths (homebrew, /usr/local/bin)
+// would need per-path attestation logic which we punt on for now.
+var nousInstallPath = filepath.Join(os.Getenv("HOME"), ".local", "bin", "nous")
 
-// CheckCharonBinary attests that the installed charon binary at
-// ~/.local/bin/charon has the codesign properties charon's threat
-// model relies on:
+// CheckCharonBinary attests that the installed nous binary at
+// ~/.local/bin/nous has the codesign properties charon's threat
+// model relies on (nous embeds the credential proxy + vault since
+// nous#20 retired the separate cmd/charon/ binary):
 //
 //   - exists (otherwise the check is moot)
 //   - is signed (not unsigned/ad-hoc — the M4 ACL would refuse to
@@ -32,18 +33,18 @@ var charonInstallPath = filepath.Join(os.Getenv("HOME"), ".local", "bin", "charo
 // have hardened runtime; an impostor binary with the right
 // identifier but a different signature will fail the ACL outright.
 func CheckCharonBinary() []Finding {
-	if _, err := os.Stat(charonInstallPath); err != nil {
+	if _, err := os.Stat(nousInstallPath); err != nil {
 		if os.IsNotExist(err) {
 			return []Finding{{
 				ID:       "charon-binary-not-installed",
 				Severity: SevInfo,
-				Title:    "charon CLI not installed at " + charonInstallPath,
+				Title:    "nous CLI not installed at " + nousInstallPath,
 				Detail: fmt.Sprintf(
-					"Couldn't find a charon binary at %s. If you've installed "+
-						"charon to a non-standard location, this check is skipped "+
+					"Couldn't find a nous binary at %s. If you've installed "+
+						"nous to a non-standard location, this check is skipped "+
 						"and you should manually verify codesign properties. Otherwise: "+
-						"`make install` from the charon repo.",
-					charonInstallPath),
+						"`make nous-install` from the nous repo.",
+					nousInstallPath),
 				BarItem: BarCharonBinary,
 			}}
 		}
@@ -51,12 +52,12 @@ func CheckCharonBinary() []Finding {
 			ID:       "charon-binary-stat-error",
 			Severity: SevImportant,
 			Title:    "Could not stat installed charon CLI",
-			Detail:   fmt.Sprintf("os.Stat(%q): %v", charonInstallPath, err),
+			Detail:   fmt.Sprintf("os.Stat(%q): %v", nousInstallPath, err),
 			BarItem:  BarCharonBinary,
 		}}
 	}
 
-	out, err := exec.Command("codesign", "-dvv", charonInstallPath).CombinedOutput()
+	out, err := exec.Command("codesign", "-dvv", nousInstallPath).CombinedOutput()
 	if err != nil {
 		// codesign returns non-zero for unsigned binaries. The
 		// stderr ("code object is not signed at all") gets mixed
@@ -72,8 +73,8 @@ func CheckCharonBinary() []Finding {
 					"ACL — it can't write or update charon entries. Worse, an "+
 					"agent could replace the binary in place since there's no "+
 					"signature to verify against. Run `make install` to sign.",
-				err, charonInstallPath, strings.TrimSpace(string(out))),
-			Affects:   []string{charonInstallPath},
+				err, nousInstallPath, strings.TrimSpace(string(out))),
+			Affects:   []string{nousInstallPath},
 			RemedyRef: "charon-binary",
 			BarItem:   BarCharonBinary,
 		}}
@@ -96,8 +97,8 @@ func CheckCharonBinary() []Finding {
 					"impostor binary was placed at %s, or `make install` was "+
 					"misconfigured. Inspect the binary; if you didn't install "+
 					"it, treat as a compromise.",
-				actualIdentifier, charonInstallPath),
-			Affects:   []string{charonInstallPath},
+				actualIdentifier, nousInstallPath),
+			Affects:   []string{nousInstallPath},
 			RemedyRef: "charon-binary",
 			BarItem:   BarCharonBinary,
 		})
@@ -120,8 +121,8 @@ func CheckCharonBinary() []Finding {
 					"set since #12G landed. Most likely cause: the installed "+
 					"binary predates that change. Re-run `make install` to "+
 					"re-sign with `--options runtime`.",
-				charonInstallPath),
-			Affects:   []string{charonInstallPath},
+				nousInstallPath),
+			Affects:   []string{nousInstallPath},
 			RemedyRef: "charon-binary",
 			BarItem:   BarCharonBinary,
 		})

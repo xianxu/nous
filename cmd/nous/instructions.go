@@ -169,27 +169,26 @@ Subcommands:
   nous service install     Write both launchd plists, bootstrap them.
                            Idempotent — safe to re-run after binary
                            rebuilds.
-  nous service uninstall   Remove both plists.
-  nous service start       Start (or restart) both via launchctl.
+  nous service uninstall   Remove the com.42shots.nous plist.
+  nous service start       Start (or restart) the daemon via launchctl.
                            If the proxy can't bind 127.0.0.1:8230,
                            launchd's KeepAlive will retry; check
-                           ~/Library/Logs/charon.log for the cause.
-  nous service stop        Stop both.
-  nous service status      Show installed-and-running state for both.
+                           ~/Library/Logs/nous.log for the cause.
+  nous service stop        Stop the daemon.
+  nous service status      Show installed-and-running state.
 
-Sibling-binary discovery: nous looks for bin/charon and bin/brain-sync
-next to itself, falling back to PATH. Both must be built before
-` + "`nous service install`" + ` runs. ` + "`make build`" + ` (or ` + "`go build ./...`" + `
-in the repo) produces them.
+Single-binary daemon: ` + "`nous serve`" + ` runs both the credential proxy
+and brain-sync watcher as goroutines under one process. The plist
+invokes ` + "`nous serve`" + ` directly — no sibling binaries needed.
 
-Common gotcha: a manual ` + "`charon serve`" + ` left running outside launchd
+Common gotcha: a manual ` + "`nous serve`" + ` left running outside launchd
 will hold port 8230 and prevent the launchd-installed copy from
-binding. Diagnose with ` + "`lsof -i :8230`" + ` and ` + "`pkill -f 'charon serve'`" + `
+binding. Diagnose with ` + "`lsof -i :8230`" + ` and ` + "`pkill -f 'nous serve'`" + `
 before ` + "`nous service start`" + `.
 
-Future (M4): ` + "`nous service doctor`" + ` (prescriptive checks with named
-fixes) and ` + "`nous service audit`" + ` (unified audit log query across
-proxy + brain ops + recipient changes).
+Now (M4 shipped): ` + "`nous service doctor`" + ` (prescriptive checks
+with named fixes) and ` + "`nous service audit`" + ` (unified log query
+over ~/Library/Logs/nous.log).
 `
 	fmt.Fprint(cmd.OutOrStdout(), txt)
 	return nil

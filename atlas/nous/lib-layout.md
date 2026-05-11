@@ -65,22 +65,25 @@ lib/
 
 ## Cmd consumers
 
-- `cmd/nous/` — unified binary (M3b+). Cobra root with cluster subcommands. Mounts `charoncli.{InstructionsCmd, ManifestCmd, AuthCmd}` at top-level / `nous provider` paths. `cmd/nous/service.go` (M3c) dispatches `nous service install/start/stop/status` to both `lib/service` and `lib/brainsync`. `cmd/nous/identity.go` (M4a) wires the identity cluster over `lib/identity` + `lib/brain` (joined `list` view). Brain cluster remains a placeholder pending M4b.
-- `cmd/charon/` — legacy entry, ~15-line `main.go` shim that calls `charoncli.BuildRoot().Execute()`. Stays for backwards-compat; eventual cleanup after operator migration.
-- `cmd/brain-sync/` — legacy entry for the brain-sync watcher. Same posture: kept for backwards-compat.
+- `cmd/nous/` — the substrate binary. Single executable that hosts both the CLI/TUI surface and the `nous serve` daemon (proxy + brain-sync as goroutines under one process). Cobra root mounts:
+  - Top-level verbs from `lib/charoncli`: `run`, `arm`, `disarm`, `vault`, plus the substrate-owned `serve`, `service`, `status`, `instructions`, `manifest`, `identity`, `brain`.
+  - `nous provider` cluster (also from `lib/charoncli`): bare cmd is the auth TUI (`AuthCmd`), subcommands `manifest`, `gcp`, `who`, `stats`, `scopes`.
+  Wires `nous service install/start/stop/status` to the unified `com.42shots.nous` plist via `lib/service.NewUnified`. Identity + brain clusters import `lib/identity` + `lib/brain`.
 - `cmd/nous-security/` — macOS menubar app. Separate cmd (different Info.plist + signing). Imports `lib/security`.
 - `cmd/gmail/`, `cmd/oneshot/` — Gmail tool entry points. Import `lib/gmail`.
 
+(Historical: `cmd/charon/` and `cmd/brain-sync/` existed as standalone binaries until nous#20. Their CLI verbs migrated onto `nous` and they were retired to keep the keychain ACL story coherent — every daemon read uses one codesign identity rather than three.)
+
 ## Cross-import rule
 
-`lib/provider` does not import `lib/brainsync` (or future `lib/brain`). `lib/brainsync` does not import `lib/provider`. They are independent domains. Common ground modules are:
+`lib/provider` does not import `lib/brainsync` (or `lib/brain`). `lib/brainsync` does not import `lib/provider`. They are independent domains. Common ground modules are:
 
 - `lib/agent/` — gpg-agent ops (M3d shipped foundation; M4 adds verbs)
 - `lib/tui/` — bubbletea + lipgloss components
 - `lib/service/` — launchd plist + service control
-- `lib/charoncli/` — cobra constructors for the provider-cluster surface
+- `lib/charoncli/` — cobra constructors for the provider/credential CLI surface (mounted by `cmd/nous`)
 
-This separation is what allows future repackaging: a charon-only binary imports `lib/provider` + `lib/agent` + `lib/charoncli` + `lib/tui` + `lib/service`, not `lib/brainsync`.
+The separation lets `nous serve` glue both daemons into one process without leaking provider concerns into the sync layer or vice versa.
 
 ## What's planned but not yet here
 

@@ -220,34 +220,34 @@ The bootstrap script intentionally omits ` + "`-T /usr/bin/codesign`" + `. The l
 	},
 	{
 		Ref:   "charon-binary",
-		Title: "Installed charon CLI codesign attestation",
-		Why: `The installed charon binary at ` + "`~/.local/bin/charon`" + ` is what reads and writes your OAuth tokens and CA private key. Its codesign properties matter for two reasons:
+		Title: "Installed nous CLI codesign attestation",
+		Why: `The installed nous binary at ` + "`~/.local/bin/nous`" + ` is what reads and writes your OAuth tokens and CA private key (nous embeds the credential proxy + vault since nous#20 retired the separate ` + "`charon`" + ` binary). Its codesign properties matter for two reasons:
 
-1. **Identifier + signer**: must match what the M4 keychain ACL expects (` + "`identifier \"com.charon.cli\"`" + ` plus the signer's anchor / leaf hash). A binary with a different identifier or signed by an unauthorized identity won't be able to read the entries silently — and it shouldn't be at this path either.
-2. **Hardened runtime**: blocks DYLD_INSERT_LIBRARIES injection, debugger-attach without entitlement, unsigned dylib loading. Without it, a hostile process running as your user can inject code into a running charon and read decrypted tokens from memory.
+1. **Identifier + signer**: must match what the keychain ACL expects (` + "`identifier \"com.charon.cli\"`" + ` plus the signer's anchor / leaf hash). A binary with a different identifier or signed by an unauthorized identity won't be able to read the entries silently — and it shouldn't be at this path either.
+2. **Hardened runtime**: blocks DYLD_INSERT_LIBRARIES injection, debugger-attach without entitlement, unsigned dylib loading. Without it, a hostile process running as your user can inject code into a running nous and read decrypted tokens from memory.
 
 The audit checks both via ` + "`codesign -dvv`" + ` on the installed binary. Findings:
 
-- ` + "`charon-binary-not-installed`" + ` — Info, just means you haven't run ` + "`make install`" + `.
+- ` + "`charon-binary-not-installed`" + ` — Info, just means you haven't run ` + "`make nous-install`" + `.
 - ` + "`charon-binary-unsigned`" + ` — Critical. Anyone could replace the binary; no signature to verify.
 - ` + "`charon-binary-wrong-identifier`" + ` — Critical. Either misconfigured or impostor.
 - ` + "`charon-binary-not-hardened`" + ` — Important. Lacks hardened runtime, A5 mitigation missing.`,
-		Fix: "**The fix for almost every variant** is the same: re-run `make install` from the charon repo. That signs with the auto-detected identity, sets `Identifier=com.charon.cli`, and enables `--options runtime`.\n\n" +
+		Fix: "**The fix for almost every variant** is the same: re-run `make nous-install` from the nous repo. That signs with the auto-detected identity, sets `Identifier=com.charon.cli`, and enables `--options runtime`.\n\n" +
 			"```bash\n" +
-			"cd /path/to/charon\n" +
-			"make install\n" +
+			"cd /path/to/nous\n" +
+			"make nous-install\n" +
 			"# Click Allow on the keychain dialog (single-use, never Always Allow)\n" +
 			"```\n\n" +
-			"After re-signing, restart any running charon service so it picks up the new binary:\n" +
+			"After re-signing, restart the service so it picks up the new binary:\n" +
 			"```bash\n" +
-			"launchctl kickstart -k gui/$(id -u)/com.charon.proxy\n" +
+			"launchctl kickstart -k gui/$(id -u)/com.42shots.nous\n" +
 			"# or:\n" +
-			"charon service uninstall && charon service install\n" +
+			"nous service uninstall && nous service install\n" +
 			"```\n\n" +
 			"**If `charon-binary-wrong-identifier` shows an unexpected name** — for example `Identifier=com.attacker.foo` — that's an active compromise. Treat the machine as suspect, revoke OAuth tokens at the provider, and inspect what other binaries in `~/.local/bin/` may have been replaced.\n\n" +
 			"**Verify the result**:\n" +
 			"```bash\n" +
-			"codesign -dvv ~/.local/bin/charon 2>&1 | grep -E 'Identifier|Authority|flags'\n" +
+			"codesign -dvv ~/.local/bin/nous 2>&1 | grep -E 'Identifier|Authority|flags'\n" +
 			"```\n" +
 			"Expected:\n" +
 			"```\n" +

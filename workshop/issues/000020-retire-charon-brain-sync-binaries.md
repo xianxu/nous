@@ -118,31 +118,68 @@ file a follow-up issue when wanted.
 
 - [x] M1: Audit external references to standalone `charon` and
   `brain-sync` binaries. Findings in `## Log`.
-- [ ] M2: Mount the 9 missing verbs on `nous` per the table above.
-  `cmd/nous/main.go` gets ~5 lines of `root.AddCommand` for the
-  top-level verbs (run/status/vault/arm/disarm); `providerCmd()`
-  gets 4 lines for the cluster verbs (gcp/who/stats/scopes).
-  `nous status` aggregates proxy + sync state. Build + smoke-test
-  each new verb.
-- [ ] M3: Delete `cmd/charon/` + `cmd/brain-sync/`. Update
-  `Makefile.nous` (drop charon + brain-sync from build/sign/install
-  loops; update banner comments; fix the misleading ad-hoc ACL
-  note at lines 152-158). Update `cmd/nous/doctor.go` (collapse
-  `checkCharonInstalled`/`checkBrainSyncInstalled` into a single
-  `com.42shots.nous`-service check). Retarget or delete
-  `scripts/test-brain-sync.sh`. Strip legacy-launchd-migration code
-  paths in `cmd/nous/service.go` if they only existed to handle
-  the two-binary → one-binary transition (verify they're not
-  doing anything useful first).
+- [x] M2: Mounted the 9 missing verbs on `nous` per the table.
+  `cmd/nous/main.go`: top-level `run`, `arm`, `disarm`, `vault`,
+  `status`. `providerCmd()`: `gcp`, `who`, `stats`, `scopes`.
+  `cmd/nous/status.go` is new and aggregates service + proxy +
+  session state. Exported `charoncli.RenderSessionStatus` so the
+  aggregator can reuse the /session/status probe without
+  duplication.
+- [x] M3: Deleted `cmd/charon/` + `cmd/brain-sync/` +
+  `scripts/test-brain-sync.sh`. Stripped charon/brain-sync from
+  `Makefile.nous` build/sign/install loops + uninstall reference.
+  Rewrote the ad-hoc ACL note (was claiming "binds to identifier
+  only" — codesign actually emits a `cdhash H"..."`-only DR for
+  ad-hoc, NOT identifier-only; the rewritten note says so).
+  `cmd/nous/doctor.go`: 4 legacy checks → 2 unified ones.
+  `cmd/nous/audit.go`: rewrote to tail `~/Library/Logs/nous.log`
+  (the unified service's actual log path) instead of the two
+  legacy paths nothing writes to anymore. `cmd/nous/service.go`:
+  removed orphan `resolveSiblingBinary`, refreshed docstrings.
+  `cmd/nous/instructions.go`: refreshed the service-cluster docs.
+  `lib/security/check_charon_binary.go` + `check_charon.go` +
+  `remedy.go`: renamed `charonInstallPath` → `nousInstallPath`,
+  pointed all findings/remedies at `~/.local/bin/nous` and
+  `make nous-install`. Test fixtures updated. Build + go vet +
+  package tests clean.
 - [ ] M4: `make nous-install` from a clean state; verify only
   `nous` lands in `$(NOUS_INSTALL_PREFIX)`. `nous service status`
-  shows the unified service. `nous arm` / `nous disarm` /
-  `nous vault set test/test/value` smoke-tested.
-- [ ] M5: Atlas update — `atlas/charon/index.md` and
-  `atlas/nous/lib-layout.md` reflect single-binary model.
-  Update `atlas/index.md` if needed.
+  shows the unified service. **Requires operator verification on
+  the install machine — agent cannot run codesign + launchctl
+  inside the sandbox.**
+- [x] M5: Atlas updated — `atlas/charon/index.md` and
+  `atlas/nous/lib-layout.md` reflect single-binary model. No
+  top-level `atlas/index.md` exists; cluster atlases are the
+  index here.
+
+**Out-of-scope, follow-up candidates:**
+- `lib/charoncli`: `BuildRoot`, `ServeCmd`, `ServiceCmd`, `StatusCmd`
+  are now orphaned (their only caller was `cmd/charon/main.go`).
+  Go allows unused exported functions; deleting risks breaking grep
+  references in agent docs I haven't audited. Worth a focused
+  follow-up "trim charoncli orphans" issue.
+- `lib/charoncli` → `lib/nouscli` rename. The package is no longer
+  charon-specific; nous owns the CLI verbs. Pure-cosmetic rename
+  touching every import; defer until there's a coupled change to
+  justify the churn.
+- `lib/identity` tests hardcode `/tmp` instead of `os.TempDir()`,
+  failing under sandboxed runs. Pre-existing; not nous#20 scope.
 
 ## Log
+
+**2026-05-10 — M2 + M3 + M5 shipped.** Verb mounting (`cmd/nous/main.go`)
++ new aggregated `nous status` (`cmd/nous/status.go`) + binary
+deletions + Makefile/doctor/audit/instructions/service cleanup +
+`lib/security` rename. Build clean (`go build ./...`), `go vet ./...`
+clean, package tests pass on lib/security, lib/charoncli, lib/brainsync,
+lib/provider/.... Pre-existing `lib/identity` test failures (hardcoded
+`/tmp`) unrelated to this issue. Smoke-tested: `nous --help` shows
+all 9 new verbs at the right paths; `nous status` produces three-line
+aggregate; `nous service doctor` reports unified-service checks.
+
+M4 (verify clean `make nous-install` on operator machine) gated on
+operator running it — agent cannot exercise codesign + launchctl
+from sandbox.
 
 **2026-05-10 — M1 audit complete.** No Go imports cross the
 `cmd/charon` or `cmd/brain-sync` boundary (they're main packages).

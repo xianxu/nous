@@ -14,7 +14,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/xianxu/nous/lib/brain"
-	"github.com/xianxu/nous/lib/brainsync"
 	"github.com/xianxu/nous/lib/identity"
 	"github.com/xianxu/nous/lib/service"
 )
@@ -59,10 +58,8 @@ func runDoctor(w io.Writer) error {
 		{"identity exists in keyring", checkIdentityExists},
 		{"brain manifests parse", checkBrainsParse},
 		{"recipient fingerprints present in keyring", checkRecipientsInKeyring},
-		{"charon service installed", checkCharonInstalled},
-		{"brain-sync service installed", checkBrainSyncInstalled},
-		{"charon service running", checkCharonRunning},
-		{"brain-sync service running", checkBrainSyncRunning},
+		{"com.42shots.nous service installed", checkUnifiedInstalled},
+		{"com.42shots.nous service running", checkUnifiedRunning},
 	}
 
 	failed := 0
@@ -185,47 +182,20 @@ func checkRecipientsInKeyring() checkResult {
 	return ok(fmt.Sprintf("%d recipient(s) across %d brain(s) all known", total, len(brains)))
 }
 
-func checkCharonInstalled() checkResult {
-	mgr, err := service.New()
+func checkUnifiedInstalled() checkResult {
+	mgr, err := service.NewUnified()
 	if err != nil {
 		return fail(fmt.Sprintf("manager init: %v", err), "")
 	}
 	status, _ := mgr.Status()
 	if strings.Contains(strings.ToLower(status), "not installed") {
-		return fail("charon launchd service not installed", "nous service install")
+		return fail("com.42shots.nous launchd service not installed", "nous service install")
 	}
 	return ok("plist present")
 }
 
-func checkBrainSyncInstalled() checkResult {
-	mgr, err := brainsync.NewServiceManager()
-	if err != nil {
-		return fail(fmt.Sprintf("manager init: %v", err), "")
-	}
-	status, _ := mgr.Status()
-	if strings.Contains(strings.ToLower(status), "not installed") {
-		return fail("brain-sync launchd service not installed", "nous service install")
-	}
-	return ok("plist present")
-}
-
-func checkCharonRunning() checkResult {
-	mgr, err := service.New()
-	if err != nil {
-		return fail(fmt.Sprintf("manager init: %v", err), "")
-	}
-	status, err := mgr.Status()
-	if err != nil {
-		return fail(fmt.Sprintf("status query: %v", err), "nous service start")
-	}
-	if !strings.Contains(strings.ToLower(status), "running") && !strings.Contains(status, "PID") {
-		return fail(strings.TrimSpace(status), "nous service start")
-	}
-	return ok(strings.TrimSpace(status))
-}
-
-func checkBrainSyncRunning() checkResult {
-	mgr, err := brainsync.NewServiceManager()
+func checkUnifiedRunning() checkResult {
+	mgr, err := service.NewUnified()
 	if err != nil {
 		return fail(fmt.Sprintf("manager init: %v", err), "")
 	}

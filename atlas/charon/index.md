@@ -15,7 +15,8 @@ The charon-origin code lives in nous's substrate. Original charon GitHub repo (`
 - `lib/security/` — host-security audit machinery (powers `cmd/nous-security/`)
 - `lib/tui/` — bubbletea + lipgloss components
 - `lib/service/` — launchd plist generation + service control
-- `cmd/charon/` and `cmd/nous-security/` — the binaries (still distinct cmds; `cmd/charon/`'s subcommands fold under the unified `cmd/nous/` in M3)
+- `cmd/nous/` — the substrate binary; mounts `lib/charoncli`'s cobra constructors at top-level + under `nous provider` (run, arm, disarm, vault top-level; gcp/who/stats/scopes under provider). The unified daemon entry is `nous serve`. (`cmd/charon/` existed until nous#20 as a standalone shim over `charoncli.BuildRoot`; retired so all keychain reads use one codesign identity.)
+- `cmd/nous-security/` — separate menubar binary; signing model differs (Info.plist + notarization), so it stays its own cmd
 
 Full layout map: [`atlas/nous/lib-layout.md`](../nous/lib-layout.md).
 

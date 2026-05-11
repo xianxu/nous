@@ -190,7 +190,7 @@ func extractTrustedPath(dr string) string {
 // charon to a different bin dir, or had a previous install at a
 // different path that's still trusted while the new install isn't).
 func driftFindings(label string, classified []classifiedTrustedApp) []Finding {
-	installPath := charonInstallPath
+	installPath := nousInstallPath
 	var trustedPaths []string
 	hasInstallPath := false
 	for _, a := range classified {

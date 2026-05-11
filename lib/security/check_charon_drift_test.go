@@ -9,7 +9,7 @@ func TestExtractTrustedPath(t *testing.T) {
 		dr   string
 		want string
 	}{
-		{`identifier "/Users/foo/.local/bin/charon"`, "/Users/foo/.local/bin/charon"},
+		{`identifier "/Users/foo/.local/bin/nous"`, "/Users/foo/.local/bin/nous"},
 		{`identifier "/usr/bin/security"`, "/usr/bin/security"},
 		{`identifier "com.charon.cli" and anchor apple generic`, ""},
 		{`identifier H"abc..."`, ""},
@@ -26,11 +26,11 @@ func TestExtractTrustedPath(t *testing.T) {
 
 func TestDriftFindings(t *testing.T) {
 	// Setup: pretend the install path is at a known location for the
-	// duration of this test. driftFindings reads charonInstallPath
+	// duration of this test. driftFindings reads nousInstallPath
 	// directly so we can override.
-	orig := charonInstallPath
-	t.Cleanup(func() { charonInstallPath = orig })
-	charonInstallPath = "/Users/foo/.local/bin/charon"
+	orig := nousInstallPath
+	t.Cleanup(func() { nousInstallPath = orig })
+	nousInstallPath = "/Users/foo/.local/bin/nous"
 
 	cases := []struct {
 		name     string
@@ -40,7 +40,7 @@ func TestDriftFindings(t *testing.T) {
 		{
 			name: "all expected, install path among trusted → silent",
 			apps: []classifiedTrustedApp{
-				{DR: `identifier "/Users/foo/.local/bin/charon"`, Verdict: verdictExpected},
+				{DR: `identifier "/Users/foo/.local/bin/nous"`, Verdict: verdictExpected},
 			},
 			wantFire: false,
 		},
@@ -68,7 +68,7 @@ func TestDriftFindings(t *testing.T) {
 		{
 			name: "expected at install path AND elsewhere → silent (install path present)",
 			apps: []classifiedTrustedApp{
-				{DR: `identifier "/Users/foo/.local/bin/charon"`, Verdict: verdictExpected},
+				{DR: `identifier "/Users/foo/.local/bin/nous"`, Verdict: verdictExpected},
 				{DR: `identifier "/opt/charon/bin/charon"`, Verdict: verdictExpected},
 			},
 			wantFire: false,

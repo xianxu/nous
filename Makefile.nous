@@ -17,20 +17,25 @@ NOUS_INSTALL_PREFIX ?= $(HOME)/.local/bin
 # the security rationale.
 NOUS_CODESIGN_IDENTITY ?= -
 
-# Codesigning posture (post nous#16 ACL realization): `make nous-install`
-# signs nous, charon, brain-sync so they identify as the production
-# `charon` keychain namespace + bind ACLs to the signed binary. Closes
-# the agent-bypass gap where an agent-written script could
-# `security find-generic-password ...` and exfiltrate raw OAuth
-# tokens — bypassing the proxy's audit trail.
+# Codesigning posture (post nous#16 ACL realization + nous#20
+# single-binary): `make nous-install` signs the unified `nous` binary
+# so it identifies as the production `charon` keychain namespace +
+# binds ACLs to its codesign identity. Closes the agent-bypass gap
+# where an agent-written script could `security find-generic-password
+# ...` and exfiltrate raw OAuth tokens — bypassing the proxy's audit
+# trail.
 #
 # Identity selection:
 #   NOUS_CODESIGN_IDENTITY="Developer ID Application: ..." — real
-#     identity; ACL binds to cert leaf + identifier. Strongest.
-#   NOUS_CODESIGN_IDENTITY=- (default) — ad-hoc; ACL binds to
-#     identifier "com.charon.cli" only. Sufficient for the
-#     agent-as-threat boundary: a different binary signed with
-#     a different identifier (or no signing) is denied.
+#     identity; ACL binds to certificate leaf + identifier
+#     "com.charon.cli". Stable across rebuilds (DR is cert-anchored),
+#     so first-time "Always Allow" survives every subsequent install.
+#     Recommended.
+#   NOUS_CODESIGN_IDENTITY=- (default) — ad-hoc; codesign cannot
+#     anchor a DR to a cert chain it doesn't have, so it falls back
+#     to `cdhash H"..."`. Every rebuild produces a new cdhash → every
+#     keychain item re-prompts. Acceptable for one-off bring-up; for
+#     daily install loops, set a real identity.
 #
 # `make nous-dev` keeps producing unsigned binaries — those live in
 # the `charon-dev` namespace, isolated from production credentials.
@@ -52,30 +57,25 @@ build:
 
 # Build every cmd/<name>/ binary unsigned to top-level bin/ for
 # development. Stops the launchd-installed production services first
-# so port 8230 is free for foreground `bin/charon serve` testing
+# so port 8230 is free for foreground `bin/nous serve` testing
 # (and so the running prod instance doesn't keep doing work while
 # you iterate on dev binaries).
 #
 # Unsigned binaries → charon-dev keychain namespace at runtime
-# (charon's lib/provider/vault/keychain/service.go::ResolveServiceName
+# (lib/provider/vault/keychain/service.go::ResolveServiceName
 # inspects code-signing state). Isolated from the production install's
 # charon namespace — no chance of dev iteration corrupting prod
 # OAuth state.
 #
-# Layout (post nous#14):
-#   bin/nous              unified CLI/TUI (cluster subcommands)
-#   bin/charon            legacy entry — same surface, slim shim over lib/charoncli
-#   bin/brain-sync        sync watcher daemon
+# Layout (post nous#20):
+#   bin/nous              unified CLI/TUI + daemon (proxy + brain-sync)
 #   bin/nous-security     macOS menubar app (security audit)
 #   bin/gmail, bin/oneshot, ...
 #
-# Sibling-binary layout matches what `nous service install` expects:
-# nous looks for charon and brain-sync next to itself in bin/, so
-# `make nous-dev && bin/nous service install` works without further
-# path config.
-#
-# See nous#16 for the eventual single-binary `nous serve` workflow
-# where nous-dev runs the unified foreground daemon directly.
+# Single daemon binary: `nous serve` runs both the credential proxy
+# and brain-sync watcher as goroutines under one process. The previous
+# cmd/charon/ and cmd/brain-sync/ binaries were retired in nous#20
+# once their CLI verbs moved onto `nous`.
 #
 # Why `rm -f bin/<name>` before each `go build -o`: macOS code-signing
 # state can stick to a binary's prior inode in cached form (Gatekeeper
@@ -108,11 +108,10 @@ nous-dev:
 	@echo ""
 	@exec ./bin/nous serve $(NOUS_DEV_ARGS)
 
-# make nous-install — stops dev foreground, builds, signs nous +
-# charon + brain-sync (so they identify as the `charon` production
-# keychain namespace + ACL'd-only access), installs to
-# $(NOUS_INSTALL_PREFIX), and registers + starts the unified
-# com.42shots.nous launchd service.
+# make nous-install — stops dev foreground, builds + signs the unified
+# `nous` binary (so it identifies as the `charon` production keychain
+# namespace + ACL'd-only access), installs to $(NOUS_INSTALL_PREFIX),
+# and registers + starts the com.42shots.nous launchd service.
 #
 # Lifecycle invariants this target maintains:
 #   - At most one nous serve process running (kills any dev foreground
@@ -120,42 +119,37 @@ nous-dev:
 #   - launchctl load auto-starts the service (plist has RunAtLoad=true).
 #   - Symmetric counterpart: make nous-uninstall stops + removes.
 #   - Signing happens BEFORE install copy so $(NOUS_INSTALL_PREFIX)
-#     always holds signed binaries. The runtime self-check resolves
-#     them into the `charon` keychain namespace.
+#     always holds the signed binary. The runtime self-check resolves
+#     it into the `charon` keychain namespace.
 nous-install:
 	@echo "==> Stopping dev foreground process (best-effort)..."
 	@pkill -f '$(NOUS_DIR)bin/nous serve' 2>/dev/null || true
 	@pkill -f 'bin/nous serve' 2>/dev/null || true
-	@echo "==> Building all binaries to bin/..."
+	@echo "==> Building nous to bin/..."
 	@mkdir -p bin
-	@for dir in cmd/*/; do \
-		[ -f "$$dir/main.go" ] || continue; \
-		name=$$(basename "$$dir"); \
-		echo "  building bin/$$name"; \
-		rm -f "bin/$$name"; \
-		go build -o "bin/$$name" "./$$dir"; \
-	done
-	@echo "==> Signing prod binaries (identity=$(NOUS_CODESIGN_IDENTITY))..."
+	@rm -f bin/nous
+	@go build -o bin/nous ./cmd/nous
+	@echo "==> Signing bin/nous (identity=$(NOUS_CODESIGN_IDENTITY))..."
 	@NOUS_CODESIGN_IDENTITY=$(NOUS_CODESIGN_IDENTITY) scripts/sign.sh bin/nous
-	@NOUS_CODESIGN_IDENTITY=$(NOUS_CODESIGN_IDENTITY) scripts/sign.sh bin/charon
-	@NOUS_CODESIGN_IDENTITY=$(NOUS_CODESIGN_IDENTITY) scripts/sign.sh bin/brain-sync
-	@echo "==> Installing signed binaries to $(NOUS_INSTALL_PREFIX)/"
+	@echo "==> Installing signed bin/nous to $(NOUS_INSTALL_PREFIX)/"
 	@mkdir -p $(NOUS_INSTALL_PREFIX)
-	@for name in nous charon brain-sync; do \
-		install -m 0755 bin/$$name $(NOUS_INSTALL_PREFIX)/$$name; \
-		echo "  installed $(NOUS_INSTALL_PREFIX)/$$name"; \
-	done
+	@install -m 0755 bin/nous $(NOUS_INSTALL_PREFIX)/nous
+	@echo "  installed $(NOUS_INSTALL_PREFIX)/nous"
 	@echo "==> Registering + starting com.42shots.nous launchd service..."
 	@$(NOUS_INSTALL_PREFIX)/nous service install
 	@echo ""
 	@echo "==> Done. Verify with: nous service status"
 	@if [ "$(NOUS_CODESIGN_IDENTITY)" = "-" ]; then \
 		echo ""; \
-		echo "  [note] signed ad-hoc — ACLs bind to identifier"; \
-		echo "         \"com.charon.cli\" only. Real Developer ID gives"; \
-		echo "         cert-leaf-bound ACLs (stronger; survives an"; \
-		echo "         attacker who can sign with the same identifier)."; \
-		echo "         Override: make nous-install NOUS_CODESIGN_IDENTITY=\"Developer ID Application: ...\""; \
+		echo "  [note] signed ad-hoc — codesign falls back to a"; \
+		echo "         cdhash-only Designated Requirement (no cert chain"; \
+		echo "         to anchor with). Every rebuild produces a new"; \
+		echo "         cdhash, so prior \"Always Allow\" grants on keychain"; \
+		echo "         items will re-prompt on next read. Acceptable for"; \
+		echo "         one-off bring-up; for daily install loops, use:"; \
+		echo "         make nous-install NOUS_CODESIGN_IDENTITY=\"Developer ID Application: ...\""; \
+		echo "         A real cert anchors the DR to identifier +"; \
+		echo "         cert-leaf, stable across rebuilds."; \
 	fi
 	@echo ""
 	@echo "  [note] this is a namespace flip: production credentials"
@@ -170,9 +164,9 @@ nous-install:
 # over from earlier milestones. Idempotent; safe on a machine that
 # never installed.
 #
-# Doesn't remove the binaries from $(NOUS_INSTALL_PREFIX) — the
+# Doesn't remove the binary from $(NOUS_INSTALL_PREFIX) — the
 # operator may still want to invoke nous directly. To fully wipe:
-#   make nous-uninstall && rm $(NOUS_INSTALL_PREFIX)/{nous,charon,brain-sync}
+#   make nous-uninstall && rm $(NOUS_INSTALL_PREFIX)/nous
 nous-uninstall:
 	@echo "==> Stopping dev foreground process (best-effort)..."
 	@pkill -f '$(NOUS_DIR)bin/nous serve' 2>/dev/null || true
