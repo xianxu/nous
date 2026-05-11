@@ -47,8 +47,13 @@
 # they reuse it instead of erroring.
 # ----------------------------------------------------------------------------
 
-TART_BASE ?= ghcr.io/cirruslabs/macos-tahoe-base:latest
-TART_VM   ?= nous-test
+TART_BASE      ?= ghcr.io/cirruslabs/macos-tahoe-base:latest
+TART_VM        ?= nous-test
+# --no-graphics by default; tart-gui overrides to empty to bring up
+# the macOS Virtualization window. Graphics mode is a cold-boot
+# setting, so tart-gui force-restarts a running headless VM (parallel
+# to tart-mount's --dir handling).
+GRAPHICS_FLAG  ?= --no-graphics
 
 # Common preamble: tart present, base pulled, VM cloned (idempotent).
 define _tart_ensure_vm
@@ -75,7 +80,7 @@ define _tart_boot_and_ssh
 	@state=$$(tart list 2>/dev/null | awk -v vm=$(TART_VM) '$$2==vm {print $$NF}'); \
 	if [ "$$state" != "running" ]; then \
 	    echo "==> Booting VM..."; \
-	    nohup tart run --no-graphics $(RUN_FLAGS) $(TART_VM) >/tmp/tart-$(TART_VM).log 2>&1 & \
+	    nohup tart run $(GRAPHICS_FLAG) $(RUN_FLAGS) $(TART_VM) >/tmp/tart-$(TART_VM).log 2>&1 & \
 	fi
 	@echo "==> Waiting for SSH..."
 	@for i in $$(seq 1 60); do \
@@ -121,10 +126,23 @@ endef
 # command (commonly non-zero from compinit / /etc/zshrc on fresh macOS).
 # That's a normal session-ended event, not a make failure — swallow it.
 
-.PHONY: tart tart-mount tart-stop tart-clean
+.PHONY: tart tart-gui tart-mount tart-stop tart-clean
 
 tart:
 	$(call _tart_ensure_vm)
+	$(call _tart_boot_and_ssh)
+
+tart-gui: GRAPHICS_FLAG :=
+tart-gui:
+	$(call _tart_ensure_vm)
+	@# Graphics mode is a cold-boot setting; can't be hot-attached
+	@# to a running VM. If the VM is up headless (e.g., from a prior
+	@# `make tart`), stop it so the next boot brings up the window.
+	@if tart list 2>/dev/null | awk -v vm=$(TART_VM) '$$2==vm {print $$NF}' | grep -qx running; then \
+	    echo "==> Stopping VM to switch to GUI mode (cold-boot only setting)..."; \
+	    tart stop $(TART_VM); \
+	fi
+	@echo "==> Booting with macOS Virtualization window (close window or 'make tart-stop' to stop)"
 	$(call _tart_boot_and_ssh)
 
 tart-mount: RUN_FLAGS = --dir=nous:$(CURDIR):ro
