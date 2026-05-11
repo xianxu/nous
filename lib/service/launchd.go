@@ -9,9 +9,7 @@ import (
 	"text/template"
 )
 
-const (
-	label    = "com.charon.proxy"
-	plistTpl = `<?xml version="1.0" encoding="UTF-8"?>
+const plistTpl = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -32,21 +30,41 @@ const (
     <string>{{.LogPath}}</string>
     <key>StandardErrorPath</key>
     <string>{{.LogPath}}</string>
+{{- if .EnvPath}}
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- launchd's default PATH lacks /opt/homebrew/bin; without it
+             git can't find git-remote-gcrypt, gnupg, etc. Needed by the
+             unified nous serve (which runs brainsync as a goroutine)
+             and by brain-sync standalone. -->
+        <key>PATH</key>
+        <string>{{.EnvPath}}</string>
+    </dict>
+{{- end}}
 </dict>
 </plist>
 `
-)
 
-type launchdManager struct{}
-
-func plistPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "Library", "LaunchAgents", label+".plist")
+// launchdManager handles one launchd service identified by Label.
+// Pre-nous#14 the package was charon-only and hardcoded
+// "com.charon.proxy"; nous#16 M4 parameterizes it so the same code
+// path serves both the legacy two-service install (charon proxy +
+// brain-sync as separate plists) and the unified `nous serve` plist
+// (com.xianxu.nous, M5).
+type launchdManager struct {
+	Label   string
+	LogName string // basename in ~/Library/Logs/
+	EnvPath string // optional PATH override; empty → omit EnvironmentVariables block
 }
 
-func logPath() string {
+func (l *launchdManager) plistPath() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "Library", "Logs", "charon.log")
+	return filepath.Join(home, "Library", "LaunchAgents", l.Label+".plist")
+}
+
+func (l *launchdManager) logPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, "Library", "Logs", l.LogName)
 }
 
 func (l *launchdManager) Install(binary string, args []string) error {
@@ -62,7 +80,7 @@ func (l *launchdManager) Install(binary string, args []string) error {
 		return err
 	}
 
-	path := plistPath()
+	path := l.plistPath()
 	f, err := os.Create(path)
 	if err != nil {
 		return fmt.Errorf("failed to create plist at %s: %w", path, err)
@@ -74,11 +92,13 @@ func (l *launchdManager) Install(binary string, args []string) error {
 		Binary  string
 		Args    []string
 		LogPath string
+		EnvPath string
 	}{
-		Label:   label,
+		Label:   l.Label,
 		Binary:  absBinary,
 		Args:    args,
-		LogPath: logPath(),
+		LogPath: l.logPath(),
+		EnvPath: l.EnvPath,
 	}
 	if err := tmpl.Execute(f, data); err != nil {
 		return err
@@ -93,19 +113,19 @@ func (l *launchdManager) Install(binary string, args []string) error {
 }
 
 func (l *launchdManager) Start() error {
-	path := plistPath()
+	path := l.plistPath()
 	if _, err := os.Stat(path); err != nil {
-		return fmt.Errorf("service not installed — run 'charon service install' first")
+		return fmt.Errorf("service %s not installed — run install first", l.Label)
 	}
-	return exec.Command("launchctl", "start", label).Run()
+	return exec.Command("launchctl", "start", l.Label).Run()
 }
 
 func (l *launchdManager) Stop() error {
-	return exec.Command("launchctl", "stop", label).Run()
+	return exec.Command("launchctl", "stop", l.Label).Run()
 }
 
 func (l *launchdManager) Uninstall() error {
-	path := plistPath()
+	path := l.plistPath()
 
 	// Unload first (ignore error if not loaded).
 	_ = exec.Command("launchctl", "unload", path).Run()
@@ -117,7 +137,7 @@ func (l *launchdManager) Uninstall() error {
 }
 
 func (l *launchdManager) Status() (string, error) {
-	out, err := exec.Command("launchctl", "list", label).Output()
+	out, err := exec.Command("launchctl", "list", l.Label).Output()
 	if err != nil {
 		return "not installed", nil
 	}
@@ -137,7 +157,7 @@ func (l *launchdManager) Status() (string, error) {
 	}
 
 	// Check if it's in the list at all.
-	if strings.Contains(output, label) {
+	if strings.Contains(output, l.Label) {
 		return "installed (not running)", nil
 	}
 	return "installed", nil
