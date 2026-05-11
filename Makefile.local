@@ -108,7 +108,14 @@ tart:
 tart-mount: RUN_FLAGS = --dir=nous=$(CURDIR):ro
 tart-mount:
 	$(call _tart_ensure_vm)
-	@echo "==> Local tree mounted at /Volumes/My Shared Files/nous (read-only)"
+	@# `tart run --dir=...` is a cold-boot setting; can't be hot-attached
+	@# to a running VM. If the VM is already up (e.g., from a prior
+	@# `make tart`), stop it so the next boot applies the share.
+	@if tart list 2>/dev/null | awk -v vm=$(TART_VM) '$$2==vm {print $$NF}' | grep -qx running; then \
+	    echo "==> Stopping VM to apply --dir mount (cold-boot only setting)..."; \
+	    tart stop $(TART_VM); \
+	fi
+	@echo "==> Local tree will be mounted at /Volumes/My Shared Files/nous (read-only)"
 	$(call _tart_boot_and_ssh)
 
 tart-stop:
