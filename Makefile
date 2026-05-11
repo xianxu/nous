@@ -5,18 +5,16 @@ REPO_NAME := $(shell git remote get-url origin 2>/dev/null | sed 's|.*/||; s|\.g
 WF_ISSUES_DIR = workshop/issues
 WF_HISTORY_DIR = workshop/history
 
-# Self-refresh: when run inside nous, route make refresh through nous's own
-# setup script (which re-vendors the ariadne base layer from ../ariadne).
-UPSTREAM_NAME    := nous
-UPSTREAM_REFRESH := nous/setup.sh
-
 # Include ariadne workflow targets
 include Makefile.workflow
 
-# Include local targets (repo-specific)
+# Include local targets (repo-specific). nous-specific concerns
+# (UPSTREAM_* overrides for self-refresh via nous/setup.sh,
+# Makefile.nous chain) live in Makefile.local so the root Makefile
+# can be a uniform ariadne-vendored template.
 -include Makefile.local
 
 .PHONY: help
 
-help: help-workflow
+help: help-workflow help-sandbox help-tart
 	@true

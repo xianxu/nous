@@ -1,4 +1,13 @@
 # Nous repo-specific targets.
+
+# Self-refresh: when run inside nous, route `make refresh` through
+# nous's own setup script (which re-vendors the ariadne base layer
+# from ../ariadne AND nous's own internal manifests). Lives here
+# rather than the root Makefile so the vendored ariadne Makefile
+# stays uniform across all consumers.
+UPSTREAM_NAME    := nous
+UPSTREAM_REFRESH := nous/setup.sh
+
 # Include nous layer targets (build, test, clean, trim)
 -include Makefile.nous
 
