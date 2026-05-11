@@ -73,5 +73,9 @@ symlink   .openshell/policy.yaml
 symlink   .openshell/ssh_wrapper.sh
 symlink   .openshell/ssh-bin
 
+# ── Tart (macOS VM testing — Apple Silicon only) ─────────────────────────────
+symlink   .tart/Makefile
+symlink   .tart/scripts
+
 # ── Documentation ─────────────────────────────────────────────────────────────
 symlink   atlas/workflow
