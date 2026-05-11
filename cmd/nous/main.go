@@ -43,6 +43,7 @@ specific docs.`,
 	root.AddCommand(newBrainCmd())
 	root.AddCommand(providerCmd())
 	root.AddCommand(serviceCmdImpl())
+	root.AddCommand(newServeCmd())
 	root.AddCommand(instructionsCmd())
 	root.AddCommand(manifestCmd())
 
