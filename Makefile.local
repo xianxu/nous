@@ -91,8 +91,13 @@ define _tart_boot_and_ssh
 	    echo "==> ssh admin@$$ip (password: admin)"; \
 	    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
 	        -t admin@$$ip \
-	        'export TERM=xterm-256color; stty erase "^?"; exec $$SHELL -l'
+	        'export TERM=xterm-256color; stty erase "^?"; exec $$SHELL -l' \
+	        || true
 endef
+# `|| true` on the ssh: ssh propagates the remote shell's exit status.
+# When the VM user types `exit`, zsh returns $? from its last automatic
+# command (commonly non-zero from compinit / /etc/zshrc on fresh macOS).
+# That's a normal session-ended event, not a make failure — swallow it.
 
 .PHONY: tart tart-mount tart-stop tart-clean
 
