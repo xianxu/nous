@@ -167,6 +167,23 @@ file a follow-up issue when wanted.
 
 ## Log
 
+**2026-05-10 — side-quest: dropped ad-hoc signing path from
+`make nous-install`.** Followed naturally from the operator
+conversation that filed this issue: ad-hoc signing produces a
+cdhash-only DR (invalidating keychain ACLs every rebuild) AND
+blocks hardened runtime (codesign refuses `--options runtime`
+with ad-hoc), so it's strictly worse than either alternative
+once the operator has a Developer ID. `scripts/sign.sh` now
+auto-detects a single "Developer ID Application" identity when
+`NOUS_CODESIGN_IDENTITY` is unset, fails loudly with the candidate
+list on zero or multiple matches. The ad-hoc branch in sign.sh
+and the `NOUS_CODESIGN_IDENTITY ?= -` default in Makefile.nous
+are gone. `make nous-dev` remains the unsigned-iteration path.
+Verified: auto-detect picks up the single Developer ID Application
+identity on the operator's machine; the actual codesign call
+requires network (Apple timestamp server) which the agent sandbox
+blocks — final verification rides on operator's M4 install run.
+
 **2026-05-10 — M2 + M3 + M5 shipped.** Verb mounting (`cmd/nous/main.go`)
 + new aggregated `nous status` (`cmd/nous/status.go`) + binary
 deletions + Makefile/doctor/audit/instructions/service cleanup +

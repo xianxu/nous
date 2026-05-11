@@ -13,34 +13,31 @@ NOUS_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 # machines; no sudo; survives Homebrew rebuilds.
 NOUS_INSTALL_PREFIX ?= $(HOME)/.local/bin
 
-# Codesign identity for `make nous-install`. See banner above for
-# the security rationale.
-NOUS_CODESIGN_IDENTITY ?= -
+# Codesign identity for `make nous-install`. Unset → scripts/sign.sh
+# auto-detects a single "Developer ID Application" identity from the
+# codesigning keychain. Set to override (cert rotation, multi-team
+# operator). No ad-hoc fallback: ad-hoc emits a cdhash-only DR that
+# invalidates keychain ACL grants on every rebuild, and blocks
+# hardened runtime — degraded posture with no offsetting upside.
+NOUS_CODESIGN_IDENTITY ?=
 
 # Codesigning posture (post nous#16 ACL realization + nous#20
-# single-binary): `make nous-install` signs the unified `nous` binary
-# so it identifies as the production `charon` keychain namespace +
-# binds ACLs to its codesign identity. Closes the agent-bypass gap
-# where an agent-written script could `security find-generic-password
-# ...` and exfiltrate raw OAuth tokens — bypassing the proxy's audit
+# single-binary + nous#20 side-quest "drop ad-hoc"):
+# `make nous-install` signs the unified `nous` binary with a
+# Developer ID Application cert so it identifies as the production
+# `charon` keychain namespace + binds ACLs to its cert-anchored
+# Designated Requirement. Closes the agent-bypass gap where an
+# agent-written script could `security find-generic-password ...`
+# and exfiltrate raw OAuth tokens — bypassing the proxy's audit
 # trail.
 #
-# Identity selection:
-#   NOUS_CODESIGN_IDENTITY="Developer ID Application: ..." — real
-#     identity; ACL binds to certificate leaf + identifier
-#     "com.charon.cli". Stable across rebuilds (DR is cert-anchored),
-#     so first-time "Always Allow" survives every subsequent install.
-#     Recommended.
-#   NOUS_CODESIGN_IDENTITY=- (default) — ad-hoc; codesign cannot
-#     anchor a DR to a cert chain it doesn't have, so it falls back
-#     to `cdhash H"..."`. Every rebuild produces a new cdhash → every
-#     keychain item re-prompts. Acceptable for one-off bring-up; for
-#     daily install loops, set a real identity.
-#
-# `make nous-dev` keeps producing unsigned binaries — those live in
-# the `charon-dev` namespace, isolated from production credentials.
-# The two namespaces are deliberately disjoint so dev iteration
-# can't corrupt prod state.
+# Two postures only:
+#   `make nous-dev`     — unsigned, `charon-dev` keychain namespace,
+#                          isolated from production credentials.
+#   `make nous-install` — Developer ID-signed, `charon` namespace,
+#                          hardened runtime enabled.
+# Ad-hoc as a third posture was a transitional artifact (operator
+# had no Developer ID); retired in nous#20.
 #
 # See atlas/nous/dev-vs-runtime-mode.md for the threat-model rationale.
 # nous-security is its own concern (signed + notarized .app bundle
@@ -139,18 +136,6 @@ nous-install:
 	@$(NOUS_INSTALL_PREFIX)/nous service install
 	@echo ""
 	@echo "==> Done. Verify with: nous service status"
-	@if [ "$(NOUS_CODESIGN_IDENTITY)" = "-" ]; then \
-		echo ""; \
-		echo "  [note] signed ad-hoc — codesign falls back to a"; \
-		echo "         cdhash-only Designated Requirement (no cert chain"; \
-		echo "         to anchor with). Every rebuild produces a new"; \
-		echo "         cdhash, so prior \"Always Allow\" grants on keychain"; \
-		echo "         items will re-prompt on next read. Acceptable for"; \
-		echo "         one-off bring-up; for daily install loops, use:"; \
-		echo "         make nous-install NOUS_CODESIGN_IDENTITY=\"Developer ID Application: ...\""; \
-		echo "         A real cert anchors the DR to identifier +"; \
-		echo "         cert-leaf, stable across rebuilds."; \
-	fi
 	@echo ""
 	@echo "  [note] this is a namespace flip: production credentials"
 	@echo "         live in keychain service=\"charon\" (was charon-dev"
