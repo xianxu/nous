@@ -102,6 +102,12 @@ define _tart_boot_and_ssh
 	                -i "$$pubkey" admin@$$ip; \
 	        fi; \
 	    fi; \
+	    if [ -f "$(CURDIR)/scripts/tart-vm-rc.zsh" ]; then \
+	        scp -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+	            "$(CURDIR)/scripts/tart-vm-rc.zsh" admin@$$ip:.tart-vm-rc.zsh; \
+	        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$$ip \
+	            'grep -q tart-vm-rc.zsh ~/.zshrc 2>/dev/null || echo "[ -f ~/.tart-vm-rc.zsh ] && source ~/.tart-vm-rc.zsh" >> ~/.zshrc'; \
+	    fi; \
 	    echo "==> ssh admin@$$ip"; \
 	    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
 	        -t admin@$$ip \
