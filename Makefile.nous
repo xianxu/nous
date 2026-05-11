@@ -13,23 +13,33 @@ NOUS_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 # machines; no sudo; survives Homebrew rebuilds.
 NOUS_INSTALL_PREFIX ?= $(HOME)/.local/bin
 
-# Codesigning posture (today): we don't sign nous / charon / brain-sync.
-# All install-flow binaries are unsigned; the runtime self-check in
-# lib/provider/vault/keychain/codesign_darwin.go therefore routes
-# keychain reads/writes into the "charon-dev" namespace. That's fine
-# for the engineer operator's daily use — credentials stored under
-# charon-dev are stable across rebuilds because the binaries stay
-# unsigned. Production / wider-deployment signing is future work
-# (homebrew bottle, packaged installer, etc.).
+# Codesign identity for `make nous-install`. See banner above for
+# the security rationale.
+NOUS_CODESIGN_IDENTITY ?= -
+
+# Codesigning posture (post nous#16 ACL realization): `make nous-install`
+# signs nous, charon, brain-sync so they identify as the production
+# `charon` keychain namespace + bind ACLs to the signed binary. Closes
+# the agent-bypass gap where an agent-written script could
+# `security find-generic-password ...` and exfiltrate raw OAuth
+# tokens — bypassing the proxy's audit trail.
 #
-# nous-security is the exception — its menubar / notification surface
-# needs a signed + notarized .app bundle to deliver notifications.
-# That's tracked separately and packaged differently. See nous#19.
+# Identity selection:
+#   NOUS_CODESIGN_IDENTITY="Developer ID Application: ..." — real
+#     identity; ACL binds to cert leaf + identifier. Strongest.
+#   NOUS_CODESIGN_IDENTITY=- (default) — ad-hoc; ACL binds to
+#     identifier "com.charon.cli" only. Sufficient for the
+#     agent-as-threat boundary: a different binary signed with
+#     a different identifier (or no signing) is denied.
 #
-# scripts/sign.sh remains in tree as a usable primitive for any
-# operator who wants to flip a single binary into ServiceProd
-# namespace by hand (e.g. for keychain-ACL testing). Not invoked by
-# the main install flow.
+# `make nous-dev` keeps producing unsigned binaries — those live in
+# the `charon-dev` namespace, isolated from production credentials.
+# The two namespaces are deliberately disjoint so dev iteration
+# can't corrupt prod state.
+#
+# See atlas/nous/dev-vs-runtime-mode.md for the threat-model rationale.
+# nous-security is its own concern (signed + notarized .app bundle
+# for Notifications.framework; see nous#19).
 
 build:
 	@for dir in cmd/*/; do \
@@ -98,21 +108,20 @@ nous-dev:
 	@echo ""
 	@exec ./bin/nous serve $(NOUS_DEV_ARGS)
 
-# make nous-install — stops dev foreground, builds unsigned, installs
-# binaries to $(NOUS_INSTALL_PREFIX), and registers + starts the
-# unified com.42shots.nous launchd service.
-#
-# Posture: dev-mode only. Binaries are unsigned; keychain reads/writes
-# land in the charon-dev namespace via the runtime self-check. Stable
-# across rebuilds (no per-rebuild ACL re-grant friction). Production
-# signing / wider-deployment packaging is future work (homebrew bottle,
-# nous-security .app per nous#19).
+# make nous-install — stops dev foreground, builds, signs nous +
+# charon + brain-sync (so they identify as the `charon` production
+# keychain namespace + ACL'd-only access), installs to
+# $(NOUS_INSTALL_PREFIX), and registers + starts the unified
+# com.42shots.nous launchd service.
 #
 # Lifecycle invariants this target maintains:
 #   - At most one nous serve process running (kills any dev foreground
 #     before installing; service install bounces the existing plist).
 #   - launchctl load auto-starts the service (plist has RunAtLoad=true).
 #   - Symmetric counterpart: make nous-uninstall stops + removes.
+#   - Signing happens BEFORE install copy so $(NOUS_INSTALL_PREFIX)
+#     always holds signed binaries. The runtime self-check resolves
+#     them into the `charon` keychain namespace.
 nous-install:
 	@echo "==> Stopping dev foreground process (best-effort)..."
 	@pkill -f '$(NOUS_DIR)bin/nous serve' 2>/dev/null || true
@@ -126,7 +135,11 @@ nous-install:
 		rm -f "bin/$$name"; \
 		go build -o "bin/$$name" "./$$dir"; \
 	done
-	@echo "==> Installing binaries to $(NOUS_INSTALL_PREFIX)/"
+	@echo "==> Signing prod binaries (identity=$(NOUS_CODESIGN_IDENTITY))..."
+	@NOUS_CODESIGN_IDENTITY=$(NOUS_CODESIGN_IDENTITY) scripts/sign.sh bin/nous
+	@NOUS_CODESIGN_IDENTITY=$(NOUS_CODESIGN_IDENTITY) scripts/sign.sh bin/charon
+	@NOUS_CODESIGN_IDENTITY=$(NOUS_CODESIGN_IDENTITY) scripts/sign.sh bin/brain-sync
+	@echo "==> Installing signed binaries to $(NOUS_INSTALL_PREFIX)/"
 	@mkdir -p $(NOUS_INSTALL_PREFIX)
 	@for name in nous charon brain-sync; do \
 		install -m 0755 bin/$$name $(NOUS_INSTALL_PREFIX)/$$name; \
@@ -136,8 +149,21 @@ nous-install:
 	@$(NOUS_INSTALL_PREFIX)/nous service install
 	@echo ""
 	@echo "==> Done. Verify with: nous service status"
-	@echo "    Dev-mode install (unsigned; charon-dev keychain namespace)."
-	@echo "    For nous-security menubar + notifications, see nous#19."
+	@if [ "$(NOUS_CODESIGN_IDENTITY)" = "-" ]; then \
+		echo ""; \
+		echo "  [note] signed ad-hoc — ACLs bind to identifier"; \
+		echo "         \"com.charon.cli\" only. Real Developer ID gives"; \
+		echo "         cert-leaf-bound ACLs (stronger; survives an"; \
+		echo "         attacker who can sign with the same identifier)."; \
+		echo "         Override: make nous-install NOUS_CODESIGN_IDENTITY=\"Developer ID Application: ...\""; \
+	fi
+	@echo ""
+	@echo "  [note] this is a namespace flip: production credentials"
+	@echo "         live in keychain service=\"charon\" (was charon-dev"
+	@echo "         when running unsigned via make nous-dev). Any OAuth"
+	@echo "         tokens previously stored under charon-dev are NOT"
+	@echo "         visible to the signed binary; re-auth as needed."
+	@echo "         For nous-security menubar + notifications, see nous#19."
 
 # make nous-uninstall — symmetric counterpart to nous-install. Stops
 # and removes the unified launchd service plus any legacy plists left

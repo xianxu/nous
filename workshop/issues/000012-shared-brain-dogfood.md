@@ -68,9 +68,12 @@ Keep a session log as you go (timestamps + observations + anything surprising). 
 ### Phase 0 — prereqs
 
 **Operator (this machine):**
-- [ ] `nous` binary built + on PATH. Smoke: `nous identity list` shows my fingerprint annotated `(self)`.
+- [ ] `nous` binary built + on PATH (signed if testing the agent-threat boundary; ad-hoc fine for a first pass). Smoke: `nous identity list` shows my fingerprint annotated `(self)`.
 - [ ] `gh auth status` is logged in to GitHub with `xianxu` (or whichever account owns shared-brain repos).
 - [ ] `nous service doctor` returns 9/9 green. Anything red blocks the rest.
+- [ ] **Decide install posture before Phase 7.** Two valid choices:
+  - **Dev-mode (`make nous-dev`)** — unsigned binaries, `charon-dev` keychain namespace, foreground process killed on Ctrl-C. Lower friction; good for iterating on nous itself.
+  - **Installed (`make nous-install`)** — ad-hoc signed (or Developer ID via `NOUS_CODESIGN_IDENTITY`), `charon` namespace with ACL'd entries, launchd-managed `com.42shots.nous` running in background. Required for the *agent-as-threat* boundary that the proxy was built to enforce (see `atlas/nous/dev-vs-runtime-mode.md`).
 
 **Wife's Mac (fresh-ish):**
 - [ ] Apple ID signed in, Xcode CLT installed (`xcode-select --install`), Homebrew installed.
@@ -80,7 +83,7 @@ Keep a session log as you go (timestamps + observations + anything surprising). 
 
 **Out-of-band channel:** decide before starting which channel we'll use to communicate her fingerprint's last 8 hex chars (voice call, FaceTime, in-person — NOT the same channel as the pubkey transfer). The verify-fingerprint ceremony only works if the channel is independent.
 
-**Calendar:** ~45 min for Phases 1–6. Keep her in the loop on what we're doing — this is meaningful time, not a sneak-it-in moment.
+**Calendar:** ~45 min for Phases 1–6. Phase 7 (install daemon) is another ~5 min. Keep her in the loop on what we're doing — this is meaningful time, not a sneak-it-in moment.
 
 ### Phase 1 — wife's machine: identity + export
 
@@ -89,16 +92,20 @@ Run on her Mac. She drives; I narrate.
 ```sh
 git clone https://github.com/xianxu/nous ~/workspace/nous
 cd ~/workspace/nous
-make nous-bootstrap          # installs deps, builds bin/nous, etc.
-./bin/nous identity init     # TTY-only; pinentry-mac will prompt for passphrase
-./bin/nous identity list     # confirm her fingerprint shows up, annotated (self)
-./bin/nous identity export > ~/Desktop/wife.pub
+make nous-bootstrap                       # one-time toolchain: Homebrew deps, gh auth, GPG config
+make build                                # build binaries to cmd/<name>/bin/<name>
+export PATH="$PWD/cmd/nous/bin:$PATH"     # transient; phase-only convenience
+nous identity init                        # TTY-only; pinentry-mac will prompt for passphrase
+nous identity list                        # confirm her fingerprint shows up, annotated (self)
+nous identity export > ~/Desktop/wife.pub
 ```
 
 **Expected:**
 - `identity init` opens a pinentry-mac dialog; she sets a passphrase she'll remember (or stash in 1Password). The passphrase is hers — I don't see it.
-- `identity list` shows one secret key with her name + email + fingerprint.
+- `identity list` shows one secret key with her name + email + fingerprint (the `(self)` annotation fires via the only-one-secret-key implicit-primary fallback; no need to run `nous identity primary` until she has multiple keys).
 - `wife.pub` is ~3 KB of `-----BEGIN PGP PUBLIC KEY BLOCK-----`.
+
+**Why `make build` and not `make nous-install`:** the install path registers a launchd service that runs `nous serve`. `nous serve` errors out if no shared brains exist yet (the brain-sync goroutine refuses an empty workspace), and launchd's `KeepAlive=true` will then retry-backoff-loop. Cleaner to defer the install until Phase 7, after `brain-shared-family` exists locally.
 
 **Watch for:**
 - pinentry-mac not launching (gpg-agent config issue). If so: `gpgconf --launch gpg-agent` then re-run.
@@ -229,19 +236,58 @@ cat data/life/travel/2026-08-01-paris.md         # should see her additions
 - Wall-clock for push/pull (gcrypt overhead). If pulls take >20s on Wi-Fi, that's friction worth logging.
 - Authorship in `git log` — should show her email on her commits, mine on mine.
 
-### Phase 7 — install brain-sync daemon on wife's machine
+### Phase 7 — install the unified nous daemon on wife's machine
+
+One target rebuilds, signs (ad-hoc by default), installs to
+`~/.local/bin/`, and registers + starts the `com.42shots.nous`
+launchd service (proxy + brain-sync as goroutines in one process):
 
 ```sh
 cd ~/workspace/nous
-./bin/nous service install        # plists for both charon + brain-sync
-./bin/nous service start
-./bin/nous service status         # verify both running
-./bin/nous service doctor         # green across the board
+make nous-install
 ```
 
+She should add `~/.local/bin` to her PATH if it isn't already
+(`echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc` then
+re-source).
+
+**Smoke after:**
+
+```sh
+nous service status               # com.42shots.nous: running (PID …)
+nous service doctor               # green across the board
+launchctl list | grep 42shots     # single line for com.42shots.nous
+tail ~/Library/Logs/nous.log      # proxy started + brainsync watching brain-shared-family
+```
+
+**Why `make nous-install` defers from Phase 1:** brain-shared-family
+needs to exist locally (Phase 5's clone) before `nous serve`'s
+brain-sync goroutine has anything to watch. Trying to install
+earlier triggers a launchd retry-backoff loop on "no shared
+brains."
+
+**Signing posture:**
+- Default is ad-hoc — the binary identifies as `com.charon.cli` and
+  the keychain namespace flips to `charon` (production) with ACLs
+  bound to that identifier. Sufficient for the agent-as-threat
+  bypass-prevention boundary that the proxy was built to enforce
+  (a different binary, even one signed by her or by an agent-
+  written script, can't read the ACL'd entries).
+- For cert-leaf-bound ACLs (strongest), run with
+  `NOUS_CODESIGN_IDENTITY="Developer ID Application: …"` once a
+  real identity is set up. Not blocking for the M1 dogfood — the
+  ad-hoc boundary is meaningful by itself.
+- Note: the signed binary uses the `charon` keychain namespace.
+  Any provider OAuth tokens stored before signing (via `make
+  nous-dev` runs in `charon-dev`) are not visible to the signed
+  binary; she'll need to re-auth providers if she'd been testing
+  any.
+
 **Watch for:**
-- Whether brain-sync auto-discovers `brain-shared-family` (it should — `WORKSPACE_ROOT` resolution + multi-recipient = shared).
-- charon may be irrelevant on her machine if she's not using AI agents through it. Note for later — possibly the install should be split (`nous service install --brain-only`).
+- Whether brain-sync auto-discovers `brain-shared-family` (it should — `lib/workspace.Root()` resolution + multi-recipient = shared).
+- launchd respawn loop on first install if no shared brains were present (shouldn't fire after Phase 5; flag if it does).
+- pinentry-mac prompting from the launchd-spawned process. The unified plist sets PATH including `/opt/homebrew/bin` so gpg-agent should hand off cleanly; if it doesn't, the brain-sync goroutine will block waiting for the passphrase. Workaround: `nous identity agent prewarm` (caches passphrase in agent for the session).
+- Whether the proxy listens on `127.0.0.1:8230` (default). She doesn't need to drive the proxy yet — it's idle on her machine until an agent is wired through it.
 
 ### Phase 8 — conflict exercise (when natural conflict shows up)
 

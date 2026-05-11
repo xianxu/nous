@@ -112,10 +112,32 @@ This is **separate from** nous#16's daemon install flow:
 
 ## Log
 
+### 2026-05-10 — daemon-signing scope moved to nous#16
+
+`make nous-install` (nous#16 M5 follow-up) now signs nous + charon +
+brain-sync with `scripts/sign.sh`, defaulting to ad-hoc — that closes
+the agent-as-threat bypass (raw OAuth tokens were exfiltrable via
+`security find-generic-password` against the ACL-less charon-dev
+namespace). The threat-model rationale lives in
+`atlas/nous/dev-vs-runtime-mode.md`.
+
+What remains here in nous#19: the `.app` bundle packaging for the
+menubar + Notifications.framework surface. That's a separate
+concern with its own toolchain (Info.plist, entitlements, xcrun
+notarytool, stapling, bundle layout) and a separate identifier
+(probably `com.42shots.security`, distinct from `com.charon.cli`
+which is the daemon-binary identifier).
+
+The daemon ACL boundary works ad-hoc; the nous-security .app needs
+a real Developer ID for notarization (Gatekeeper refuses ad-hoc on
+recent macOS for distributed apps). So nous#19 still needs the
+Developer ID recovery from archived xianxu/charon or a fresh setup
+— that part of the open-questions section is unchanged.
+
 ### 2026-05-10 — created
 Surfaced from operator feedback on nous#16 M4: "for now I can just
 do the dev mode only. though we do need signing on mac so that we
-can send notification etc." Splitting the daemon-install (no
-signing needed, dev mode) from the menubar-packaging (signing +
-notarization needed for Notifications.framework) lets each ship at
-its own pace.
+can send notification etc." Splitting the daemon-install (initially
+no signing; now signed via ad-hoc per the M5 follow-up) from the
+menubar-packaging (signing + notarization required) lets each ship
+at its own pace.

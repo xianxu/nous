@@ -236,9 +236,17 @@ real failures surface.`,
 func serviceStartCmdImpl() *cobra.Command {
 	return &cobra.Command{
 		Use:   "start",
-		Short: "Start (or restart) brain-sync + charon proxy services",
+		Short: "Start the com.42shots.nous launchd service",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return forEachManager(cmd.OutOrStdout(), "start", func(m manager) error { return m.Start() })
+			mgr, err := service.NewUnified()
+			if err != nil {
+				return err
+			}
+			if err := mgr.Start(); err != nil {
+				return fmt.Errorf("start com.42shots.nous: %w", err)
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "  [ok] com.42shots.nous started")
+			return nil
 		},
 	}
 }
@@ -246,9 +254,17 @@ func serviceStartCmdImpl() *cobra.Command {
 func serviceStopCmdImpl() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop",
-		Short: "Stop brain-sync + charon proxy services",
+		Short: "Stop the com.42shots.nous launchd service",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return forEachManager(cmd.OutOrStdout(), "stop", func(m manager) error { return m.Stop() })
+			mgr, err := service.NewUnified()
+			if err != nil {
+				return err
+			}
+			if err := mgr.Stop(); err != nil {
+				return fmt.Errorf("stop com.42shots.nous: %w", err)
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "  [ok] com.42shots.nous stopped")
+			return nil
 		},
 	}
 }
@@ -256,28 +272,52 @@ func serviceStopCmdImpl() *cobra.Command {
 func serviceStatusCmdImpl() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
-		Short: "Show installed-and-running state for brain-sync + charon proxy",
+		Short: "Show installed-and-running state for com.42shots.nous (+ any legacy plists found)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := cmd.OutOrStdout()
 
-			charonMgr, err := service.New()
+			// Unified — the canonical service.
+			unifiedMgr, err := service.NewUnified()
 			if err != nil {
 				return err
 			}
-			charonStatus, charonErr := charonMgr.Status()
-			fmt.Fprintf(out, "charon proxy:\n  %s\n", indent(charonStatus, "  "))
-			if charonErr != nil {
-				fmt.Fprintf(out, "  (status query error: %v)\n", charonErr)
+			unifiedStatus, unifiedErr := unifiedMgr.Status()
+			fmt.Fprintf(out, "com.42shots.nous:\n  %s\n", indent(unifiedStatus, "  "))
+			if unifiedErr != nil {
+				fmt.Fprintf(out, "  (status query error: %v)\n", unifiedErr)
 			}
 
-			brainSyncMgr, err := brainsync.NewServiceManager()
-			if err != nil {
-				return err
+			// Legacy plists — only print if actually installed, so a
+			// clean unified-only machine sees one line.
+			legacy := []struct {
+				label string
+				make  func() (service.Manager, error)
+			}{
+				{"com.charon.proxy (legacy)", service.New},
+				{"com.xianxu.nous (pre-rename)", func() (service.Manager, error) {
+					return service.NewLabeled("com.xianxu.nous", "nous.log", "")
+				}},
 			}
-			brainSyncStatus, brainSyncErr := brainSyncMgr.Status()
-			fmt.Fprintf(out, "brain-sync:\n  %s\n", indent(brainSyncStatus, "  "))
-			if brainSyncErr != nil {
-				fmt.Fprintf(out, "  (status query error: %v)\n", brainSyncErr)
+			for _, l := range legacy {
+				mgr, err := l.make()
+				if err != nil {
+					continue
+				}
+				status, _ := mgr.Status()
+				if status == "not installed" || status == "" {
+					continue
+				}
+				fmt.Fprintf(out, "%s:\n  %s\n", l.label, indent(status, "  "))
+				fmt.Fprintln(out, "  (run `nous service install` to migrate, or `nous service uninstall` to remove)")
+			}
+			// brain-sync legacy uses a different manager interface;
+			// handle separately.
+			if brainSyncMgr, err := brainsync.NewServiceManager(); err == nil {
+				status, _ := brainSyncMgr.Status()
+				if status != "not installed" && status != "" {
+					fmt.Fprintf(out, "com.xianxu.brain-sync (legacy):\n  %s\n", indent(status, "  "))
+					fmt.Fprintln(out, "  (run `nous service install` to migrate, or `nous service uninstall` to remove)")
+				}
 			}
 
 			return nil
@@ -286,15 +326,15 @@ func serviceStatusCmdImpl() *cobra.Command {
 }
 
 // manager is the common subset of lib/service.Manager and lib/brainsync.ServiceManager
-// (both expose Start/Stop). Used for shared start/stop dispatch helpers.
+// (both expose Start/Stop). Retained for any future helper that needs to operate
+// across both interface types.
 type manager interface {
 	Start() error
 	Stop() error
 }
 
-// forEachManager runs op against both managers, aggregating output. Returns
-// the first error encountered (after running both, so partial success is
-// reported).
+// forEachManager retained for now in case future migrations want it.
+// Unused after M5; can be deleted once we're confident nothing else needs it.
 func forEachManager(out interface{ Write([]byte) (int, error) }, verb string, op func(manager) error) error {
 	var firstErr error
 

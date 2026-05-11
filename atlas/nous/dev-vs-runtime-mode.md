@@ -64,13 +64,46 @@ Aimed predominantly at **dev mode**. Specifically:
    `/Applications/`). Mixing them produces a flow that's neither
    convenient for dev nor solid enough for daily use.
 
-2. **Keychain namespace stays dormant for now.** The runtime check
-   in `keychain/service.go` (`ServiceProd` vs `ServiceDev`) is
-   coded for the future where some binaries are signed and some
-   aren't. Today every install-flow binary lands in `ServiceDev`,
-   so the namespace split is effectively a no-op. Keep the
-   machinery — it's the cheap stub for runtime-mode arrival —
-   but don't pretend it's load-bearing.
+2. **Keychain namespace + ACL is load-bearing once agents touch
+   the proxy.** Initial framing here undersold this — corrected:
+
+   nous's threat model assumes *agent-as-untrusted* (the whole
+   reason the proxy exists is so the operator's OAuth tokens
+   never reach the agent's address space; the agent gets
+   HTTPS-injected requests, the proxy logs every CONNECT). That
+   guarantee only holds if the agent can't *bypass* the proxy
+   and read the raw tokens from the keychain directly.
+
+   Today (unsigned binary, ACL-less `charon-dev` namespace),
+   the bypass is wide open: any process running as the operator
+   — including a Python script the agent writes — can
+   `security find-generic-password -s charon-dev -a foo` and
+   exfiltrate the token. The audit trail captures the
+   proxy-mediated path; raw-keychain reads slip past silently.
+
+   Signed binary + ACL'd entries in the `charon` namespace
+   close that bypass: the kernel evaluates each reader's
+   codesign-DR against the entry's ACL, and only the signed
+   `nous` binary (matching identifier + cert leaf) is allowed.
+   The agent can still invoke `nous` itself — which is the
+   sanctioned, mediated, audited path — but a side-channel
+   `security` command from agent-written code is denied.
+
+   This is why `make nous-install` (post-nous#16 update) now
+   signs the daemon binaries via `scripts/sign.sh`, defaulting
+   to ad-hoc (identifier-binding only) and accepting
+   `NOUS_CODESIGN_IDENTITY` for real Developer ID (cert-binding
+   too). Ad-hoc is a meaningful first cut: identifier-bound
+   ACLs deny a different binary even if it's signed by the
+   same machine, because the agent's script would have a
+   different identifier (or no signing at all).
+
+   The threshold for "this matters in practice" is the first
+   time an agent talks to the proxy with real credentials at
+   stake. For the engineer-operator daily case that's already
+   happening; for the wife/runtime-user case, it lands when
+   she starts using nous to fetch her Gmail / calendar / etc.
+   through the proxy.
 
 3. **Runtime-mode packaging is its own scope.** When the operator
    says "the wife is using this daily to plan our trip," the
