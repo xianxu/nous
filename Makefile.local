@@ -88,7 +88,21 @@ define _tart_boot_and_ssh
 	        echo "==> SSH never came up at $$ip (boot log: /tmp/tart-$(TART_VM).log)"; \
 	        exit 1; \
 	    fi; \
-	    echo "==> ssh admin@$$ip (password: admin)"; \
+	    pubkey=$$(ls ~/.ssh/id_ed25519.pub ~/.ssh/id_rsa.pub 2>/dev/null | head -1); \
+	    if [ -n "$$pubkey" ] && ! ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+	            -o BatchMode=yes -o ConnectTimeout=3 admin@$$ip true 2>/dev/null; then \
+	        echo "==> Installing $$pubkey for passwordless ssh (one-time per VM)..."; \
+	        if command -v sshpass >/dev/null; then \
+	            sshpass -p admin ssh-copy-id -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+	                -i "$$pubkey" admin@$$ip >/dev/null 2>&1; \
+	        else \
+	            echo "    (sshpass not installed → interactive prompt; install with"; \
+	            echo "     'brew install hudochenkov/sshpass/sshpass' to make this silent)"; \
+	            ssh-copy-id -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+	                -i "$$pubkey" admin@$$ip; \
+	        fi; \
+	    fi; \
+	    echo "==> ssh admin@$$ip"; \
 	    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
 	        -t admin@$$ip \
 	        'export TERM=xterm-256color; stty erase "^?"; M="/Volumes/My Shared Files/nous"; if [ -d "$$M" ]; then ln -sfn "$$M" "$$HOME/repo"; elif [ -L "$$HOME/repo" ]; then rm "$$HOME/repo"; fi; exec $$SHELL -l' \
