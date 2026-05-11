@@ -1,13 +1,16 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
 
 	"github.com/xianxu/nous/lib/brain"
+	"github.com/xianxu/nous/lib/brainsync"
 )
 
 // nous brain list — read-only enumeration of brains under the workspace
@@ -59,25 +62,74 @@ func defaultStr(s, fallback string) string {
 
 // nous brain resolve — mechanical conflict-find for /nous-resolve.
 //
-// For now this is a thin shim that exits 0 with a "not yet wired"
-// message. The real implementation routes through lib/brainsync's
-// existing conflict-finding code, but extracting that as a clean public
-// surface needs a small refactor we'll do alongside the /nous-resolve
-// skill rewrite. Tracked in nous#5 follow-up.
+// Audience: (a). Scriptable; agent-facing. The semantic merge happens
+// in the /nous-resolve Claude Code skill — this command does only
+// the list step. Default output is tab-separated tabular; --json
+// emits a stable structured form for downstream parsing.
+//
+// Exit codes: 0 on success regardless of whether conflicts were
+// found (empty list is a valid clean-brain state). Non-zero on
+// invalid brain path / read errors.
 func newBrainResolveCmd() *cobra.Command {
-	return &cobra.Command{
+	var jsonOut bool
+	cmd := &cobra.Command{
 		Use:   "resolve BRAIN-PATH",
-		Short: "Mechanical conflict-find (called by /nous-resolve skill)",
-		Long: `Find unresolved files under a brain that need conflict resolution.
-Used by the /nous-resolve Claude Code skill for the mechanical
-list-and-preserve step; the agent-driven semantic merge happens
-elsewhere.
+		Short: "List unresolved conflict files in a brain (called by /nous-resolve skill) (a)",
+		Long: `Walk BRAIN-PATH and emit every file matching the brainsync
+conflict convention: ` + "`<stem>.conflict-<peer>-<YYYYMMDDTHHMMSSZ>.<ext>`" + `.
+Each row: canonical path, conflict-file path, peer, ISO-8601 UTC.
 
-Today: stubbed pending lib/brainsync surface refactor (nous#5
-follow-up). The skill continues to call lib/brainsync directly.`,
+Default output is tab-separated; pass --json for structured output
+that won't break if a future column is added.
+
+The semantic merge (AI-prose reconciliation, snapshot, commit) is
+the /nous-resolve Claude Code skill's job; this command exposes
+only the mechanical list step so the skill can call a stable CLI
+shape instead of grepping ` + "`find`" + `.
+
+Audience: (a). Scriptable; safe to call from automation.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("nous brain resolve is stubbed pending lib/brainsync refactor; /nous-resolve continues to call lib/brainsync directly. Tracked as a nous#5 follow-up")
+			return runBrainResolve(cmd.OutOrStdout(), args[0], jsonOut)
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit JSON instead of tab-separated text")
+	return cmd
+}
+
+func runBrainResolve(w io.Writer, brainPath string, jsonOut bool) error {
+	if _, err := os.Stat(filepath.Join(brainPath, ".brain", "config.md")); err != nil {
+		return fmt.Errorf("%s is not a brain (missing .brain/config.md)", brainPath)
+	}
+	conflicts, err := brainsync.ConflictFiles(brainPath)
+	if err != nil {
+		return err
+	}
+	if jsonOut {
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		// Always emit an array (possibly empty) — agents can rely on
+		// `len(parse(stdout))` without special-casing "no output".
+		if conflicts == nil {
+			conflicts = []brainsync.Conflict{}
+		}
+		return enc.Encode(conflicts)
+	}
+	// Text mode emits the shape the existing find-conflicts.sh / SKILL.md
+	// pipeline expects: absolute paths + compact UTC timestamp
+	// (YYYYMMDDTHHMMSSZ — matches what's embedded in the filename).
+	// JSON mode is the structured surface for agents wanting relative
+	// paths + RFC3339 timestamps.
+	absRoot, err := filepath.Abs(brainPath)
+	if err != nil {
+		return err
+	}
+	for _, c := range conflicts {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+			filepath.Join(absRoot, c.Canonical),
+			filepath.Join(absRoot, c.ConflictFile),
+			c.Peer,
+			c.At.UTC().Format("20060102T150405Z"))
+	}
+	return nil
 }

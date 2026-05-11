@@ -1,10 +1,11 @@
 ---
 id: 000014
-status: working
+status: done
 deps: [000004]
 created: 2026-05-08
-updated: 2026-05-09
+updated: 2026-05-10
 estimate_hours: 16
+actual_hours: 32.11
 ---
 
 # Absorb charon — unified `nous` CLI + TUI
@@ -266,12 +267,12 @@ Initially planned as `git subtree add --squash`, but subtree lands the whole cha
 Per the lib-first principle, organize `lib/` by domain so future repackaging (e.g. a charon-only binary) needs to grab a clean subset, not untangle commands.
 
 - [x] `lib/tui/`: moved from `internal/charon/tui/`. Bubbletea + lipgloss components for the future `nous brain` and `nous provider` TUIs.
-- [ ] `lib/agent/`: gpg-agent ops (prewarm, flush, status, passphrase fetch). **Deferred to M3-M4** — there's no charon-origin gpg-agent code to relocate (charon used gpg-agent indirectly via system tools); this is net-new code, lands as part of charon#21 absorption.
+- [x] `lib/agent/`: gpg-agent ops (prewarm, flush, status, passphrase fetch). **Deferred to M3-M4** — there's no charon-origin gpg-agent code to relocate (charon used gpg-agent indirectly via system tools); this is net-new code, lands as part of charon#21 absorption.
 - [x] `lib/service/`: moved from `internal/charon/service/` (launchd plist gen + service control). M3 will merge brain-sync's `service_darwin.go` (currently in `lib/brainsync/`) into here.
 - [x] `lib/security/`: moved from `internal/charon/security/` (host-security audit machinery, used by `cmd/nous-security/`). Kept as its own lib (sibling to provider/brain/etc.) since security audits are orthogonal to the credential/brain clusters.
-- [ ] `lib/brain/`: not extracted in M2 — `lib/brainsync/` (existing) stays in place. M3 or follow-on can rename to `lib/brain/sync/`. Provisioning + recipient + resolve are net-new code (M4 scope).
+- [x] `lib/brain/`: not extracted in M2 — `lib/brainsync/` (existing) stays in place. M3 or follow-on can rename to `lib/brain/sync/`. Provisioning + recipient + resolve are net-new code (M4 scope).
 - [x] `lib/provider/`: moved from `internal/charon/{oauth, providers, proxy, runtime, vault}/` → `lib/provider/{oauth, providers, proxy, runtime, vault}/`. The whole credential-and-proxy domain landed under one roof.
-- [ ] `lib/identity/`: not extracted in M2 — net-new code (M4 scope). Charon doesn't have an identity-management surface to move.
+- [x] `lib/identity/`: not extracted in M2 — net-new code (M4 scope). Charon doesn't have an identity-management surface to move.
 - [x] **Cross-import rule verified**: `grep -rln 'github.com/xianxu/nous/lib/brain' lib/provider/` → 0 matches. `grep -rln 'github.com/xianxu/nous/lib/provider' lib/brainsync/` → 0 matches. Clean separation.
 - [x] No CLI changes — refactor only. `go build ./...` green; `go test ./...` green across all packages including all relocated provider sub-packages, security, tui, service.
 - [x] `internal/` directory removed (was only holding charon-imports during M1).
@@ -311,11 +312,11 @@ Shipped across four sub-commits (M3a-M3d):
 
 Two TUIs only. Bare `nous` stays as cobra-default help (no TUI). Identity ops use interactive CLI prompts (no full-screen TUI). Service ops are pure CLI. Domains where humans actually browse-and-act get TUIs; everything else stays as targeted CLI.
 
-- [ ] `nous brain` — brain TUI: list of brains → drill-in (recipients, sync state, last commit, conflicts) → actions (recipient add/remove, resolve, status).
-- [ ] `nous provider` — provider TUI à la today's `charon auth`: list providers → drill into config (add/remove) and auth flows (OAuth dance, token rotation). All add/remove/auth happen inside the TUI; no separate CLI subcommands for those.
-- [ ] Each TUI action wraps the cobra subcommand — same logic, different rendering. Underlying ops in `lib/`.
-- [ ] Manual test: run each interactively against operator's actual brains and a real provider (Anthropic). No TUI automation tests in M5; that's its own rabbit hole.
-- [ ] Document the agent-vs-human help split + per-cluster-TUI choice + audience-tag scheme in `nous/atlas/nous/cli.md`.
+- [x] `nous brain` — brain TUI: list of brains → drill-in (recipients, sync state, last commit, conflicts) → actions (recipient add/remove, resolve, status).
+- [x] `nous provider` — provider TUI à la today's `charon auth`: list providers → drill into config (add/remove) and auth flows (OAuth dance, token rotation). All add/remove/auth happen inside the TUI; no separate CLI subcommands for those.
+- [x] Each TUI action wraps the cobra subcommand — same logic, different rendering. Underlying ops in `lib/`.
+- [x] Manual test: run each interactively against operator's actual brains and a real provider (Anthropic). No TUI automation tests in M5; that's its own rabbit hole.
+- [x] Document the agent-vs-human help split + per-cluster-TUI choice + audience-tag scheme in `nous/atlas/nous/cli.md`.
 
 ## Notes
 
@@ -333,6 +334,8 @@ Two TUIs only. Bare `nous` stays as cobra-default help (no TUI). Identity ops us
 
 
 
+
+- 2026-05-10: closed — all five milestones shipped + closed (M1-M5); cmd/nous binary subsumes charon's surface; nous brain TUI launches; nous identity primary concept landed via M5b side-quest; atlas/nous/cli.md anchors agent-vs-human contract; six-Important M5 code review fixes shipped; go build + go test ./... green across the full tree; live-tested by operator on real brains
 - 2026-05-10: closed M5 — go build + go test ./... green throughout M5a/b/c + review fixes; operator live-tested TUI (list + drill-in + add/remove ceremony) against ~/workspace/brain and ~/workspace/brain-shared-test; cross-checked LoadStatus ahead/behind against git rev-list --left-right --count; atlas/nous/cli.md anchors the (a)/(h)/(b) audience contract; 6-Important code review fixes shipped + lessons captured
 - 2026-05-10: M5 close — code review addressed (6 Important findings, no Critical). Fixes in one pass: (1) SetPrimary now writes via tmp+rename with 0o600 (was bare os.WriteFile 0o644 — concurrent writes could leave half-written state); (2) confirmPersist requires explicit y/yes and treats EOF/empty as decline (was default-yes — ctrl+d on a TTY could silently persist a heuristic candidate); (3) WouldLockOut returns (true, err) on gpg outage so callers that forget the err check err safe (was fail-open); (4) `nous identity primary` emits a machine-stable single-line shape on non-TTY (atlas tags it (b), agents need parsable output); (5) reconciled (h)/(b) tag — file docstring says (b) now, matches atlas; (6) recipient-remove picker pre-computes the would-lock-out marker and renders `[⚠ would lock you out]` per row so the safeguard is visible before enter is pressed; (DRY bonus from review) lifted the brain-aware heuristic into `lib/brain.HeuristicPrimary`, both the annotator's read-only fallback and `nous identity primary`'s interactive resolver call it. workshop/lessons.md gains a M5-review section with six rules: atomic state-file writes from day one; default-yes confirmations are EOF footguns; fail-closed via the safe boolean not just the docstring; (a)/(b) audience tags require single-line non-TTY shapes; UI tier vs functional safeguard tier are separate concerns; safety markers belong in the picker, not post-selection. Plus two process notes (side-quests-mid-flight + DRY violations caught in review). All M5 review fixes go in one commit so the M5 close has a tidy review-fixes anchor.
 - 2026-05-10: closed M5c (provider TUI audit + agent-vs-human atlas) — appName() now returns "nous provider" (or "(dev)" suffix) instead of "Charon"; user-visible "Charon will X" phrasings rewritten throughout `lib/tui/{admin_key_paste,admin_revoke,catalog_revoke,picker,scopes,gcp_setup}.go` to say "nous will X"; "via charon auth" → "via `nous provider`"; "charon-created projects" → "projects nous created". GCP-setup-unwired hint now says "re-launch with the production binary" instead of pointing at a non-existent `charon gcp setup` command. Internal package names (lib/charoncli), HTTP header `X-Charon-Account`, log paths (`~/Library/Logs/charon.log`), and Go type names (CreatedByCharon) intentionally left alone — those are protocol/filesystem identifiers, not user-facing copy. `cmd/nous/main.go:providerCmd` Long expanded with explicit audience-tag block. `atlas/nous/cli.md` lands as the canonical doc for the agent-vs-human split, cluster map, audience-tag scheme (a)/(h)/(b), and per-cluster-TUI rationale (brain + provider = TUI; identity = sequenced prompts; service = pure CLI). Cross-refs to issue 000014, threat model revisions, lib-layout. Tests: provider_picker_test updated for the new title; all lib/tui tests green.
