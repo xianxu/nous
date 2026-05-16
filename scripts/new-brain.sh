@@ -10,8 +10,9 @@
 #   1. Validate deps (git, gh, gh auth, jq, gpg, git-remote-gcrypt).
 #   2. Resolve target local path (from $1 or interactive prompt).
 #   3. Resolve GitHub owner (default: gh authenticated user) and repo name
-#      (default: basename of target). Create the GH repo (private) or confirm
-#      force-push if it exists.
+#      (default: basename of target). Create the GH repo (private). If it
+#      already exists with content, offer to delete + recreate (force-push
+#      can't recover from gcrypt state encrypted to a key we don't hold).
 #   4. Select a GPG identity (single → auto; multiple → prompt; zero → bail).
 #   5. mkdir target; git init; set branch main; set git user identity.
 #   6. Pre-create go.mod with right module path (so setup.sh doesn't infer
@@ -75,21 +76,55 @@ else
 fi
 GH_FULL="$GH_OWNER/$GH_NAME"
 
-# ── 3. Create or confirm the GH repo ─────────────────────────────────────────
+# ── 3. Create or recreate the GH repo ────────────────────────────────────────
+# A pre-existing repo with content is the failure mode that bit us: gcrypt
+# always reads the existing manifest before push to chain protocol state, so a
+# manifest encrypted to a previous identity fails with "Wrong secret key used"
+# *before* `git push --force` semantics ever apply. The honest recovery is
+# delete + recreate, not force-push.
+create_repo() {
+    gh repo create "$GH_FULL" --private \
+        --description "gcrypt-encrypted brain (bootstrapped by make new-brain)" \
+        --disable-issues --disable-wiki >/dev/null
+}
+
 if gh repo view "$GH_FULL" >/dev/null 2>&1; then
-    warn "GitHub repo $GH_FULL already exists."
-    if [ -t 0 ]; then
-        read -rp "Force-push to replace its contents? [y/N] " ans
-        [[ "$ans" =~ ^[Yy] ]] || die "Aborted."
-        ok "Will force-push to existing $GH_FULL"
+    BRANCH_COUNT=$(gh api "repos/$GH_FULL/branches" --jq 'length' 2>/dev/null || echo 0)
+    if [ "${BRANCH_COUNT:-0}" -eq 0 ]; then
+        ok "$GH_FULL exists but is empty — using it."
     else
-        die "$GH_FULL exists and stdin is not a TTY (cannot prompt for force confirmation)."
+        warn "GitHub repo $GH_FULL already exists with content ($BRANCH_COUNT branch(es))."
+        warn "If that content is gcrypt state from a different GPG key, push will"
+        warn "fail at manifest decrypt — force-push can't recover. The only safe"
+        warn "path is to delete the repo and recreate it fresh."
+        # delete_repo scope is sensitive and NOT granted by default — neither
+        # `gh auth login --web` nor most PATs include it. Surface that upfront
+        # so the user can add the scope (or delete manually via web) before
+        # answering the prompt, rather than discovering it post-confirmation.
+        TOKEN_SCOPES=$(gh auth status 2>&1 | sed -n "s/.*Token scopes: //p" | tr -d "'" || true)
+        if ! echo "$TOKEN_SCOPES" | grep -qw delete_repo; then
+            warn ""
+            warn "  Note: deleting a repo via gh requires the 'delete_repo' scope."
+            warn "  Your current scopes: ${TOKEN_SCOPES:-(unknown)}"
+            warn "  To add it:           gh auth refresh -h github.com -s delete_repo"
+            warn "  Or delete manually:  https://github.com/$GH_FULL/settings → 'Delete this repository'"
+            warn ""
+        fi
+        [ -t 0 ] || die "$GH_FULL has content and stdin is not a TTY (cannot prompt)."
+        read -rp "Delete $GH_FULL on GitHub and recreate it empty? [y/N] " ans
+        [[ "$ans" =~ ^[Yy] ]] || die "Aborted. Pick a different repo name, or delete it manually first."
+        info "Deleting $GH_FULL ..."
+        if ! gh repo delete "$GH_FULL" --yes >/dev/null 2>&1; then
+            die "gh repo delete failed — most likely missing 'delete_repo' scope. Run: gh auth refresh -h github.com -s delete_repo  (or delete manually at https://github.com/$GH_FULL/settings)"
+        fi
+        ok "Deleted https://github.com/$GH_FULL"
+        info "Recreating $GH_FULL (private)..."
+        create_repo
+        ok "Recreated https://github.com/$GH_FULL"
     fi
 else
     info "Creating GitHub repo $GH_FULL (private, no issues, no wiki)..."
-    gh repo create "$GH_FULL" --private \
-        --description "gcrypt-encrypted brain (bootstrapped by make bootstrap)" \
-        --disable-issues --disable-wiki >/dev/null
+    create_repo
     ok "Created https://github.com/$GH_FULL"
 fi
 

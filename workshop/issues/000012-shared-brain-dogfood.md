@@ -353,3 +353,21 @@ That marks the M1+M2 milestones as substantively walked. M3 (≥2 weeks dogfood)
 
 ### 2026-05-08 — created
 Carved out of `nous#4 M4` after recognizing the dogfood is a portfolio milestone with its own provisioning + onboarding + multi-week-window structure, distinct from #4's daemon-ships scope. Tracking it here lets `nous#4` close cleanly on M1–M3 (substrate + daemon + convention + manual resolve) while the dogfood is the standalone validation gate for the project's `done_when`.
+
+### 2026-05-15 — side-quest: `make new-brain` UX against pre-existing remote with stale gcrypt state
+
+Dry-run from a fresh tart VM (`make tart` → `make nous-bootstrap` → `make identity` → `make new-brain ../brain`) failed on the push:
+
+```
+gcrypt: Decrypting manifest
+gpg: public key decryption failed: Wrong secret key used
+gcrypt: Failed to decrypt manifest!
+```
+
+Root cause: `emmatest42/brain` on GitHub already had gcrypt refs from a prior run encrypted to a different identity (earlier VM iteration with a different GPG key). gcrypt always reads the existing manifest before push to chain protocol state. Manifest is encrypted to the *previous* recipient set; new VM's key can't decrypt; abort happens *before* any Git push, so the `git push --force` semantics never come into play.
+
+UX bug in `scripts/new-brain.sh:79-94`: when the GH repo already exists, the prompt offers "Force-push to replace its contents? [y/N]" — misleading because force-push can't reach the failure point. Same bug in `scripts/cloneto.sh:71-77`.
+
+Fix shape: when the existing repo has any branches, prompt instead "Delete `$GH_FULL` and recreate it fresh? [y/N]" → on yes, `gh repo delete --yes` + `gh repo create`. Empty placeholder repos pass through unchanged. Matches the actual recovery path; surfaces the destructive intent honestly.
+
+Implemented in this session: `scripts/new-brain.sh` + `scripts/cloneto.sh`, plus docstring touch-ups. No new tests — script is interactive + side-effectful at the GitHub API layer, covered by the M1 walkthrough re-run.

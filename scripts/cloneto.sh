@@ -4,7 +4,9 @@
 # Brain-specific wrapper around moveto.sh. Handles:
 #   - Prompting for target path if not provided
 #   - Discovering the source's GitHub owner; constructing the target's GitHub repo path
-#   - Creating the target GitHub repo if missing, or confirming force-push if it exists
+#   - Creating the target GitHub repo if missing; if it exists with content, offering
+#     to delete + recreate (force-push can't recover from gcrypt state encrypted
+#     to a key we don't hold — manifest decrypt happens before push semantics)
 #   - Selecting a GPG identity from the local keyring (prompts if multiple)
 #   - Local clone (delegated to moveto.sh)
 #   - Configuring the gcrypt remote with the selected identity as recipient
@@ -66,21 +68,52 @@ if [ -e "$TARGET" ]; then
     fi
 fi
 
-# ── 3. Target GitHub repo: create or confirm overwrite ───────────────────────
-if gh repo view "$TARGET_GITHUB" >/dev/null 2>&1; then
-    warn "GitHub repo $TARGET_GITHUB already exists."
-    if [ -t 0 ]; then
-        read -rp "Force-push to replace its contents? [y/N] " ans
-        [[ "$ans" =~ ^[Yy] ]] || die "Aborted."
-        ok "Will force-push to existing $TARGET_GITHUB"
-    else
-        die "$TARGET_GITHUB exists and stdin is not a TTY (cannot prompt for force confirmation)."
-    fi
-else
-    info "GitHub repo $TARGET_GITHUB doesn't exist; creating it (private, no issues, no wiki)..."
+# ── 3. Target GitHub repo: create, recreate, or use empty placeholder ────────
+# Pre-existing repos with content fail at gcrypt manifest decrypt, not at push
+# semantics — force-push can't recover. Honest recovery is delete + recreate.
+create_target_repo() {
     gh repo create "$TARGET_GITHUB" --private \
         --description "gcrypt-encrypted brain (created by make cloneto)" \
         --disable-issues --disable-wiki >/dev/null
+}
+
+if gh repo view "$TARGET_GITHUB" >/dev/null 2>&1; then
+    BRANCH_COUNT=$(gh api "repos/$TARGET_GITHUB/branches" --jq 'length' 2>/dev/null || echo 0)
+    if [ "${BRANCH_COUNT:-0}" -eq 0 ]; then
+        ok "$TARGET_GITHUB exists but is empty — using it."
+    else
+        warn "GitHub repo $TARGET_GITHUB already exists with content ($BRANCH_COUNT branch(es))."
+        warn "If that content is gcrypt state from a different GPG key, push will"
+        warn "fail at manifest decrypt — force-push can't recover. The only safe"
+        warn "path is to delete the repo and recreate it fresh."
+        # delete_repo scope is sensitive and NOT granted by default — neither
+        # `gh auth login --web` nor most PATs include it. Surface that upfront
+        # so the user can add the scope (or delete manually via web) before
+        # answering the prompt, rather than discovering it post-confirmation.
+        TOKEN_SCOPES=$(gh auth status 2>&1 | sed -n "s/.*Token scopes: //p" | tr -d "'" || true)
+        if ! echo "$TOKEN_SCOPES" | grep -qw delete_repo; then
+            warn ""
+            warn "  Note: deleting a repo via gh requires the 'delete_repo' scope."
+            warn "  Your current scopes: ${TOKEN_SCOPES:-(unknown)}"
+            warn "  To add it:           gh auth refresh -h github.com -s delete_repo"
+            warn "  Or delete manually:  https://github.com/$TARGET_GITHUB/settings → 'Delete this repository'"
+            warn ""
+        fi
+        [ -t 0 ] || die "$TARGET_GITHUB has content and stdin is not a TTY (cannot prompt)."
+        read -rp "Delete $TARGET_GITHUB on GitHub and recreate it empty? [y/N] " ans
+        [[ "$ans" =~ ^[Yy] ]] || die "Aborted. Pick a different repo name, or delete it manually first."
+        info "Deleting $TARGET_GITHUB ..."
+        if ! gh repo delete "$TARGET_GITHUB" --yes >/dev/null 2>&1; then
+            die "gh repo delete failed — most likely missing 'delete_repo' scope. Run: gh auth refresh -h github.com -s delete_repo  (or delete manually at https://github.com/$TARGET_GITHUB/settings)"
+        fi
+        ok "Deleted https://github.com/$TARGET_GITHUB"
+        info "Recreating $TARGET_GITHUB (private)..."
+        create_target_repo
+        ok "Recreated https://github.com/$TARGET_GITHUB"
+    fi
+else
+    info "GitHub repo $TARGET_GITHUB doesn't exist; creating it (private, no issues, no wiki)..."
+    create_target_repo
     ok "Created https://github.com/$TARGET_GITHUB"
 fi
 
