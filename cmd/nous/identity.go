@@ -23,6 +23,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -106,8 +107,23 @@ func runIdentityList(w io.Writer) error {
 	if len(pub) == 0 {
 		fmt.Fprintln(w, "  (none — peer pubkeys appear here after `nous identity import`)")
 	}
+	// Build fp → github-user map once; cheaper than re-loading per peer.
+	// Errors loading the peer store aren't fatal for listing — fall
+	// through with an empty map and print peers without the github tag.
+	githubByFP := map[string]string{}
+	if metas, err := identity.ListPeerMeta(); err == nil {
+		for _, m := range metas {
+			if m.GithubUser != "" {
+				githubByFP[strings.ToUpper(m.Fingerprint)] = m.GithubUser
+			}
+		}
+	}
 	for _, k := range pub {
-		fmt.Fprintf(w, "  %s  %s  %s\n", k.Last8(), keyBrains(k, brains), displayUID(k))
+		gh := ""
+		if u := githubByFP[strings.ToUpper(k.Fingerprint)]; u != "" {
+			gh = fmt.Sprintf(" (github:%s)", u)
+		}
+		fmt.Fprintf(w, "  %s  %s  %s%s\n", k.Last8(), keyBrains(k, brains), displayUID(k), gh)
 	}
 	return nil
 }
@@ -193,11 +209,18 @@ Or save and sneakernet:
 
 func newIdentityImportCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "import FILE",
+		Use:   "import [FILE]",
 		Short: "Admit a peer's public key (TTY-only; verify-fingerprint ceremony)",
 		Long: `Read an armored public key, show its fingerprint and UID, prompt
 the operator to type the last 8 hex chars of the fingerprint for
-confirmation, then commit it to the local keyring.
+confirmation, prompt for the peer's GitHub username (required — used
+by 'nous brain share' to add them as a collaborator on the brain's
+gcrypt remote), then commit the pubkey to the local keyring and the
+peer metadata to ~/.config/nous/peers/<fp>.json.
+
+If FILE is omitted, scan the current directory for *.pub files: with
+exactly one, use it; with multiple, prompt the operator to pick; with
+none, prompt for the path.
 
 The verify-fingerprint ceremony catches a class of attacks where an
 attacker substitutes their own pubkey before the import — the operator
@@ -210,13 +233,27 @@ silently expand their own access by importing peer keys (see
 brain/atlas/threat-model-shared-brain.md).
 
   nous identity import wife.pub
+  nous identity import              # auto-detect *.pub in current dir
   nous identity import -            # read from stdin (still requires TTY for the prompt)`,
-		Args: cobra.ExactArgs(1),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !term.IsTerminal(int(os.Stdin.Fd())) {
 				return fmt.Errorf("nous identity import requires an interactive terminal (TTY-only safeguard)")
 			}
-			path := args[0]
+			out := cmd.OutOrStdout()
+			in := cmd.InOrStdin()
+
+			path := ""
+			if len(args) == 1 {
+				path = args[0]
+			} else {
+				resolved, err := resolvePubFile(in, out)
+				if err != nil {
+					return err
+				}
+				path = resolved
+			}
+
 			var data []byte
 			var err error
 			if path == "-" {
@@ -234,7 +271,6 @@ brain/atlas/threat-model-shared-brain.md).
 			if err != nil {
 				return err
 			}
-			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "Pubkey to admit:\n")
 			fmt.Fprintf(out, "  fingerprint: %s\n", peer.Fingerprint)
 			fmt.Fprintf(out, "  last-8:      %s\n", peer.Last8())
@@ -245,17 +281,145 @@ brain/atlas/threat-model-shared-brain.md).
 			fmt.Fprintln(out)
 
 			expected := peer.Last8()
-			if err := promptVerify(cmd.InOrStdin(), out, expected); err != nil {
+			if err := promptVerify(in, out, expected); err != nil {
+				return err
+			}
+
+			// GitHub username is required: every brain-recipient also
+			// needs to be added as a collaborator on the brain's GitHub
+			// repo (the gcrypt transit layer uses GitHub's identity
+			// system, not GPG's). Capture it now so 'nous brain share'
+			// has both halves without a second prompt.
+			githubUser, err := promptGithubUser(in, out)
+			if err != nil {
 				return err
 			}
 
 			if _, err := identity.Import(armor); err != nil {
 				return err
 			}
-			fmt.Fprintf(out, "Imported %s.\n", peer.Last8())
+			if err := identity.SavePeerMeta(identity.PeerMeta{
+				Fingerprint: peer.Fingerprint,
+				GithubUser:  githubUser,
+				ImportedAt:  time.Now().UTC(),
+			}); err != nil {
+				// Pubkey landed in keyring but sidecar write failed —
+				// surface the partial state so the operator can re-run
+				// `nous identity peer set` (or the upcoming `share`) to
+				// backfill rather than silently dropping the github user.
+				fmt.Fprintf(out, "Imported %s (pubkey in keyring), but failed to save peer metadata: %v\n", peer.Last8(), err)
+				return err
+			}
+			fmt.Fprintf(out, "Imported %s with github user %q.\n", peer.Last8(), githubUser)
 			return nil
 		},
 	}
+}
+
+// resolvePubFile picks a pubkey file path interactively when the
+// operator didn't pass one. Scans CWD for *.pub:
+//   - 0 matches → prompt for the path
+//   - 1 match   → use it (with confirmation)
+//   - N matches → present numbered list, prompt for selection
+func resolvePubFile(in io.Reader, out io.Writer) (string, error) {
+	matches, err := filepath.Glob("*.pub")
+	if err != nil {
+		return "", fmt.Errorf("scan current directory: %w", err)
+	}
+	r := bufio.NewReader(in)
+	switch len(matches) {
+	case 0:
+		fmt.Fprintln(out, "No .pub files found in current directory.")
+		fmt.Fprint(out, "Pubkey file path: ")
+		line, err := r.ReadString('\n')
+		if err != nil {
+			return "", fmt.Errorf("read pubkey path: %w", err)
+		}
+		path := strings.TrimSpace(line)
+		if path == "" {
+			return "", fmt.Errorf("no pubkey file provided")
+		}
+		return path, nil
+	case 1:
+		fmt.Fprintf(out, "Found %s in current directory. Use it? [Y/n]: ", matches[0])
+		line, err := r.ReadString('\n')
+		if err != nil {
+			return "", fmt.Errorf("read confirmation: %w", err)
+		}
+		ans := strings.ToLower(strings.TrimSpace(line))
+		if ans == "" || ans == "y" || ans == "yes" {
+			return matches[0], nil
+		}
+		return "", fmt.Errorf("aborted; pass the pubkey file path explicitly")
+	default:
+		fmt.Fprintln(out, "Found multiple .pub files in current directory:")
+		for i, m := range matches {
+			fmt.Fprintf(out, "  [%d] %s\n", i+1, m)
+		}
+		fmt.Fprintf(out, "Select [1-%d]: ", len(matches))
+		line, err := r.ReadString('\n')
+		if err != nil {
+			return "", fmt.Errorf("read selection: %w", err)
+		}
+		var idx int
+		if _, err := fmt.Sscanf(strings.TrimSpace(line), "%d", &idx); err != nil {
+			return "", fmt.Errorf("invalid selection %q", strings.TrimSpace(line))
+		}
+		if idx < 1 || idx > len(matches) {
+			return "", fmt.Errorf("selection %d out of range [1-%d]", idx, len(matches))
+		}
+		return matches[idx-1], nil
+	}
+}
+
+// promptGithubUser reads a GitHub username with up to 3 attempts at
+// passing basic format validation (non-empty, GitHub's character + length
+// rules). Doesn't verify the user exists on GitHub — that'd require a
+// network call; let `nous brain share` catch typos when it tries to add
+// the collaborator.
+func promptGithubUser(in io.Reader, out io.Writer) (string, error) {
+	r := bufio.NewReader(in)
+	for attempt := 1; attempt <= 3; attempt++ {
+		fmt.Fprint(out, "GitHub username for this peer (used by 'nous brain share'): ")
+		line, err := r.ReadString('\n')
+		if err != nil {
+			return "", fmt.Errorf("read github username: %w", err)
+		}
+		user := strings.TrimSpace(line)
+		if err := validateGithubUser(user); err == nil {
+			return user, nil
+		} else {
+			fmt.Fprintf(out, "  %v — try again, or Ctrl-C to abort.\n", err)
+		}
+	}
+	return "", fmt.Errorf("github username invalid after 3 attempts; aborting import")
+}
+
+// validateGithubUser applies GitHub's documented username rules:
+// 1-39 chars, alphanumeric + single hyphens, no leading/trailing
+// hyphen, no consecutive hyphens. Permissive enough that legitimate
+// usernames pass; strict enough that obvious typos / pasted lines /
+// emails get caught at prompt time rather than at gh-api time.
+func validateGithubUser(s string) error {
+	if s == "" {
+		return fmt.Errorf("empty")
+	}
+	if len(s) > 39 {
+		return fmt.Errorf("too long (max 39 chars)")
+	}
+	if s[0] == '-' || s[len(s)-1] == '-' {
+		return fmt.Errorf("cannot start or end with hyphen")
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c == '-' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+			return fmt.Errorf("contains invalid character %q (only alphanumeric and hyphens allowed)", c)
+		}
+		if c == '-' && i+1 < len(s) && s[i+1] == '-' {
+			return fmt.Errorf("consecutive hyphens not allowed")
+		}
+	}
+	return nil
 }
 
 // promptVerify reads up to 3 attempts at the last-8 fingerprint. Match

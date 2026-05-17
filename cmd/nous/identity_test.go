@@ -53,6 +53,73 @@ func TestPromptVerify_AcceptsOnSecondAttempt(t *testing.T) {
 	}
 }
 
+func TestValidateGithubUser(t *testing.T) {
+	// Cases lifted from GitHub's documented username rules:
+	// 1-39 chars, alphanumeric + single hyphens, no leading/trailing
+	// hyphen, no consecutive hyphens.
+	cases := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"simple", "emmatest42", false},
+		{"hyphenated", "emma-test", false},
+		{"single-char", "x", false},
+		{"max-length", strings.Repeat("a", 39), false},
+		{"empty", "", true},
+		{"too-long", strings.Repeat("a", 40), true},
+		{"leading-hyphen", "-emma", true},
+		{"trailing-hyphen", "emma-", true},
+		{"consecutive-hyphens", "em--ma", true},
+		{"with-space", "emma test", true},
+		{"with-email", "emma@test.local", true},
+		{"with-dot", "emma.test", true},
+		{"with-slash", "emma/test", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := validateGithubUser(c.input)
+			gotErr := err != nil
+			if gotErr != c.wantErr {
+				t.Errorf("validateGithubUser(%q): wantErr=%v, got %v", c.input, c.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestPromptGithubUser_AcceptsValid(t *testing.T) {
+	in := strings.NewReader("emmatest42\n")
+	var out bytes.Buffer
+	got, err := promptGithubUser(in, &out)
+	if err != nil {
+		t.Fatalf("promptGithubUser: %v", err)
+	}
+	if got != "emmatest42" {
+		t.Errorf("got %q, want %q", got, "emmatest42")
+	}
+}
+
+func TestPromptGithubUser_RejectsAfter3Invalid(t *testing.T) {
+	in := strings.NewReader("\n--bad--\nemma test\n")
+	var out bytes.Buffer
+	_, err := promptGithubUser(in, &out)
+	if err == nil {
+		t.Errorf("expected failure after 3 invalid inputs")
+	}
+}
+
+func TestPromptGithubUser_AcceptsAfterInvalid(t *testing.T) {
+	in := strings.NewReader("emma test\nemmatest42\n")
+	var out bytes.Buffer
+	got, err := promptGithubUser(in, &out)
+	if err != nil {
+		t.Fatalf("promptGithubUser: %v", err)
+	}
+	if got != "emmatest42" {
+		t.Errorf("got %q, want %q", got, "emmatest42")
+	}
+}
+
 func TestKeyBrains_FormatsAssignments(t *testing.T) {
 	brains := []brain.Manifest{
 		{Path: "/x/personal", Name: "personal", Recipients: []string{"FP1"}},
