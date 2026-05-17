@@ -44,12 +44,14 @@ NOUS_CODESIGN_IDENTITY ?=
 # for Notifications.framework; see nous#19).
 
 build:
+	@mkdir -p bin
 	@for dir in cmd/*/; do \
 		[ -f "$$dir/main.go" ] || continue; \
 		name=$$(basename "$$dir"); \
 		mkdir -p "$$dir/bin"; \
 		echo "building cmd/$$name/bin/$$name"; \
 		go build -o "$$dir/bin/$$name" "./$$dir"; \
+		ln -sf "../cmd/$$name/bin/$$name" "bin/$$name"; \
 	done
 
 # Build every cmd/<name>/ binary unsigned to top-level bin/ for
