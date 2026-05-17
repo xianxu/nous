@@ -4,6 +4,7 @@
 # Scope rationale: workshop/issues/000011-nous-bootstrap.md.
 
 tap "mutagen-io/mutagen"
+tap "xianxu/pair"
 
 # ── Core (nous-required) ─────────────────────────────────────────────────────
 brew "go"
@@ -13,6 +14,7 @@ brew "pinentry-mac"   # GUI dialog with macOS Keychain integration (default for 
 brew "pinentry"       # curses/tty variants for SSH/headless contexts
 brew "git-remote-gcrypt"
 brew "mutagen-io/mutagen/mutagen"
+brew "xianxu/pair/pair"
 
 # ── Dev runtimes ─────────────────────────────────────────────────────────────
 brew "deno"
@@ -30,5 +32,5 @@ brew "watch"
 brew "glow"
 
 # ── Casks ────────────────────────────────────────────────────────────────────
-cask "claude"
+cask "claude-code"
 cask "font-hack-nerd-font"
