@@ -25,6 +25,94 @@ die()  { printf "%serror:%s %s\n" "$RED" "$RESET" "$*" >&2; exit 1; }
 NOUS_DIR=$(cd "$(dirname "$0")/.." && pwd)
 BREWFILE="$NOUS_DIR/Brewfile"
 
+# ── Splash ───────────────────────────────────────────────────────────────────
+# Tells a first-time operator (e.g. a non-default user like a family member)
+# what's about to happen, what passphrases they'll be asked for, and which
+# remote actors (nous / brain / GitHub) hold which secrets. Suppress via
+# NOUS_QUIET=1 for CI / re-runs.
+splash() {
+    # Soft anatomical / Apple-emoji brain-pink via truecolor (#F4ACB7).
+    # Falls back to a 256-color magenta on terminals without truecolor.
+    local pink=$'\033[1;38;2;244;172;183m' bold=$'\033[1m'
+    printf "\n" >&2
+    while IFS= read -r line; do
+        printf "          %s%s%s\n" "$pink" "$line" "$RESET" >&2
+    done <<'ART'
+                          :%#***. ...
+              +:::*:*:*#=*::=%%=*+:..:.%%*:.--
+         -+%##%######%*##*++:+#%%*:=#%=*::::::..
+       +%####%%###%%%=.%%%*: =#%#+==+%%**+:.:..:-
+    :=#%####%####%%%=*%#%=+:=###=:%##==%==***%....:-
+  .=##%%######%*###=:###++:%###::####*-#=%%%=:::::.+-
+  #######%:##%*%%%##%####-:#####:####+.%=%+.=#%*-+-:: .
+ ####*#####+:%#####%:=###%*%####=###%=###%%=.##%=:-.--.:
+*########%*=%####=###:#######%##%#%=*====##*+:%=+++*:.:-..-
+ =#=%###########%*=#####%++=*::=**:-.-%%##%=***+.*+::*::..
+ %########***%%%*+-==*=*+- %#++=#%%%%=+%#==%==*-#==+.#=:   -
+  :==%==###%==*::*=%%%%%%==#####=%##%%*%%#%=*%=#=+.=+==: .
+    -.+==***:+%##############%=:===+:*+=*:*=#%%*+:%*:.=+-:.-
+            +###%%####%*:=++-:#%###%=*###%=#=*+.=*+-: =- --
+            .=%##=+=%==#########%%=*****=*++**.:+::=+:. -.
+              .%=*%%%#%==:%%%%%%%=#=*=*%##=:::.:+::.--
+                   %##%=+*===++:----####++*#==+*+:.:
+                                -:%#####=%=+++.::--
+                                  -.#%#%%%=+..- -
+                                     %#*
+ART
+    cat >&2 <<EOF
+
+${bold}make nous-bootstrap${RESET} — one-time setup of this machine for nous.
+
+${CYAN}What this does${RESET}
+  • install the toolchain (Homebrew, Go, GPG, gh, pinentry, claude-code, …)
+  • create your GPG keypair → asks you to set a ${bold}GPG passphrase${RESET}
+  • connect to your GitHub as storage for your brain extension
+      • register an SSH key with GitHub → asks you to set an ${bold}SSH passphrase${RESET}
+      • authenticate the GitHub CLI
+
+${CYAN}You'll set two passphrases${RESET}
+  Pick ones you can remember — losing them means losing access. Store in a
+  password manager (Bitwarden / 1Password / Apple Passwords / Keychain).
+
+  ${bold}GPG passphrase${RESET}  unlocks your GPG private key for encrypting and
+                  decrypting brain content. gpg-agent caches it after
+                  first use; the cache flushes on idle timeout or when
+                  you ${bold}disarm${RESET} — your off-switch against any agent on this
+                  machine misusing your key. See atlas/threat-model.
+
+  ${bold}SSH passphrase${RESET}  unlocks your SSH private key for ${bold}git push/pull${RESET} to
+                  GitHub. Cached in ssh-agent for the login session.
+
+  ${bold}Tip:${RESET} both passphrases are local-only locks on this machine — using
+       the ${bold}same passphrase${RESET} for both is fine and recommended. One thing
+       to remember, no security loss vs. picking two.
+
+${CYAN}Three actors you'll work with${RESET}
+  ${bold}Nous${RESET}    this toolchain — one install per machine.
+  ${bold}Brain${RESET}   your encrypted git repo(s) — created later via 'make new-brain'.
+          Locally a plaintext working tree; on GitHub, gcrypt ciphertext only.
+  ${bold}GitHub${RESET}  remote storage. Sees only gcrypt blobs — your GPG key is what
+          unlocks them, and GitHub never holds your key.
+
+${CYAN}Keys involved${RESET}
+  • ${bold}GPG keypair${RESET}  encryption — your private key unlocks brain content;
+                 your public key is what others on a shared brain encrypt to.
+  • ${bold}SSH keypair${RESET}  transit — authenticates you to GitHub for git operations.
+                 Independent of the GPG key; GitHub only sees this one.
+
+EOF
+}
+[ "${NOUS_QUIET:-0}" = 1 ] || splash
+
+# Pause for explicit operator consent before touching the machine. Skipped
+# under NOUS_QUIET=1 (CI / scripted re-runs) and when stdin isn't a TTY
+# (piped invocations — proceed silently).
+if [ "${NOUS_QUIET:-0}" != 1 ] && [ -t 0 ]; then
+    printf "%sPress any key to continue (Ctrl-C to abort)...%s " "$CYAN" "$RESET" >&2
+    read -n 1 -s
+    printf "\n\n" >&2
+fi
+
 # ── 1. Xcode Command Line Tools ──────────────────────────────────────────────
 info "Checking Xcode Command Line Tools..."
 if xcode-select -p >/dev/null 2>&1; then

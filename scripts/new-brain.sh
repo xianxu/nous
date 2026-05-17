@@ -36,6 +36,65 @@ ok()   { printf "%s  [ok]%s %s\n" "$GREEN" "$RESET" "$*" >&2; }
 warn() { printf "%s  [!]%s %s\n" "$YELLOW" "$RESET" "$*" >&2; }
 die()  { printf "%serror:%s %s\n" "$RED" "$RESET" "$*" >&2; exit 1; }
 
+# ── Splash ───────────────────────────────────────────────────────────────────
+# Tells a first-time operator what 'make new-brain' is about to do, which
+# passphrases will be asked for, and that only ciphertext touches GitHub.
+# Suppress via NOUS_QUIET=1 for CI / scripted re-runs.
+splash() {
+    # Soft anatomical / Apple-emoji brain-pink via truecolor (#F4ACB7).
+    # Falls back to a 256-color magenta on terminals without truecolor.
+    local pink=$'\033[1;38;2;244;172;183m' bold=$'\033[1m'
+    printf "\n" >&2
+    while IFS= read -r line; do
+        printf "          %s%s%s\n" "$pink" "$line" "$RESET" >&2
+    done <<'ART'
+                          :%#***. ...
+              +:::*:*:*#=*::=%%=*+:..:.%%*:.--
+         -+%##%######%*##*++:+#%%*:=#%=*::::::..
+       +%####%%###%%%=.%%%*: =#%#+==+%%**+:.:..:-
+    :=#%####%####%%%=*%#%=+:=###=:%##==%==***%....:-
+  .=##%%######%*###=:###++:%###::####*-#=%%%=:::::.+-
+  #######%:##%*%%%##%####-:#####:####+.%=%+.=#%*-+-:: .
+ ####*#####+:%#####%:=###%*%####=###%=###%%=.##%=:-.--.:
+*########%*=%####=###:#######%##%#%=*====##*+:%=+++*:.:-..-
+ =#=%###########%*=#####%++=*::=**:-.-%%##%=***+.*+::*::..
+ %########***%%%*+-==*=*+- %#++=#%%%%=+%#==%==*-#==+.#=:   -
+  :==%==###%==*::*=%%%%%%==#####=%##%%*%%#%=*%=#=+.=+==: .
+    -.+==***:+%##############%=:===+:*+=*:*=#%%*+:%*:.=+-:.-
+            +###%%####%*:=++-:#%###%=*###%=#=*+.=*+-: =- --
+            .=%##=+=%==#########%%=*****=*++**.:+::=+:. -.
+              .%=*%%%#%==:%%%%%%%=#=*=*%##=:::.:+::.--
+                   %##%=+*===++:----####++*#==+*+:.:
+                                -:%#####=%=+++.::--
+                                  -.#%#%%%=+..- -
+                                     %#*
+ART
+    cat >&2 <<EOF
+
+${bold}make new-brain${RESET} — provisioning a fresh encrypted brain.
+
+${CYAN}What this does${RESET}
+  1. create a local git repo at <path> (plaintext working tree)
+  2. create a GitHub repo to host the encrypted form
+  3. wire up the gcrypt remote, encrypted to your GPG public key
+  4. seed .brain/config.md (the brain manifest)
+  5. initial commit + push — only gcrypt ciphertext touches GitHub
+
+${CYAN}You'll be prompted for${RESET}
+  ${bold}GPG passphrase${RESET}  to sign and encrypt the initial push (set during
+                  'make nous-bootstrap'). gpg-agent caches it after first
+                  use; flush via idle timeout or by ${bold}disarming${RESET}.
+  ${bold}SSH passphrase${RESET}  to authenticate the push to GitHub (also set during
+                  'make nous-bootstrap'). Cached in ssh-agent for the
+                  current login session.
+
+If you haven't run ${bold}make nous-bootstrap${RESET} on this machine, ^C now and do
+that first — it generates the GPG keypair and SSH key this script expects.
+
+EOF
+}
+[ "${NOUS_QUIET:-0}" = 1 ] || splash
+
 # ── 0. Validate environment ──────────────────────────────────────────────────
 command -v git >/dev/null 2>&1 || die "git not installed."
 command -v gh  >/dev/null 2>&1 || die "GitHub CLI 'gh' not installed. brew install gh"
