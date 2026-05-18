@@ -250,6 +250,20 @@ if [[ "$NOUS_DIR" == "$TARGET_DIR" ]]; then
         name=$(basename "$skill_dir")
         create_symlink "${skill_dir%/}" "$TARGET_DIR/.claude/skills/$name"
     done
+
+    # Apply base-layer .gitignore entries — the rest of construct/setup.sh's
+    # consumer flow is skipped in self-mode, but the base layer still owns
+    # the .gitignore list (`.DS_Store`, `.openshell/.bootstrap/`, etc.).
+    # Without this, nous's .gitignore drifts behind every consumer.
+    APPLY_GITIGNORE="$TARGET_DIR/construct/scripts/apply-gitignore-entries.sh"
+    if [[ ! -f "$APPLY_GITIGNORE" ]] && [[ -d "$ARIADNE_DIR/construct" ]]; then
+        APPLY_GITIGNORE="$ARIADNE_DIR/construct/scripts/apply-gitignore-entries.sh"
+    fi
+    if [[ -f "$APPLY_GITIGNORE" ]]; then
+        printf "\n  ${CYAN}[gitignore]${RESET}\n"
+        bash "$APPLY_GITIGNORE" "$TARGET_DIR" || true
+    fi
+
     printf "\n${GREEN}Done.${RESET}\n"
     exit 0
 fi

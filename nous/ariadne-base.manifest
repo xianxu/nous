@@ -49,6 +49,7 @@ symlink   scripts/close-issue.py
 # ── Construct system ──────────────────────────────────────────────────────────
 symlink   construct/scripts/sync-local-skills.sh
 symlink   construct/scripts/merge-settings.sh
+symlink   construct/scripts/apply-gitignore-entries.sh
 symlink   construct/local
 symlink   construct/adapted
 copy      construct/config.json
