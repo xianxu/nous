@@ -4,3 +4,4 @@
 .openshell/.base-image-digest
 cmd/*/bin/
 bin/
+.DS_Store
