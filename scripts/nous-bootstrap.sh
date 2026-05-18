@@ -74,31 +74,32 @@ ${CYAN}You'll set two passphrases${RESET}
   Pick ones you can remember — losing them means losing access. Store in a
   password manager (Bitwarden / 1Password / Apple Passwords / Keychain).
 
-  ${bold}GPG passphrase${RESET}  unlocks your GPG private key for encrypting and
-                  decrypting brain content. gpg-agent caches it after
-                  first use; the cache flushes on idle timeout or when
+  ${bold}GPG passphrase${RESET}  protects your ${bold}GPG keypair${RESET} — the private half unlocks
+                  brain content for reading/writing; the public half is what
+                  others on a shared brain encrypt to. gpg-agent caches it
+                  after first use; the cache flushes on idle timeout or when
                   you ${bold}disarm${RESET} — your off-switch against any agent on this
                   machine misusing your key. See atlas/threat-model.
 
-  ${bold}SSH passphrase${RESET}  unlocks your SSH private key for ${bold}git push/pull${RESET} to
-                  GitHub. Cached in ssh-agent for the login session.
+  ${bold}SSH passphrase${RESET}  protects your ${bold}SSH keypair${RESET} — used to authenticate ${bold}git
+                  push/pull${RESET} to GitHub. Independent of the GPG key (GitHub
+                  only sees this one). Cached in ssh-agent for the login
+                  session.
 
   ${bold}Tip:${RESET} both passphrases are local-only locks on this machine — using
        the ${bold}same passphrase${RESET} for both is fine and recommended. One thing
        to remember, no security loss vs. picking two.
 
 ${CYAN}Three actors you'll work with${RESET}
-  ${bold}Nous${RESET}    this toolchain — one install per machine.
-  ${bold}Brain${RESET}   your encrypted git repo(s) — created later via 'make new-brain'.
-          Locally a plaintext working tree; on GitHub, gcrypt ciphertext only.
-  ${bold}GitHub${RESET}  remote storage. Sees only gcrypt blobs — your GPG key is what
-          unlocks them, and GitHub never holds your key.
-
-${CYAN}Keys involved${RESET}
-  • ${bold}GPG keypair${RESET}  encryption — your private key unlocks brain content;
-                 your public key is what others on a shared brain encrypt to.
-  • ${bold}SSH keypair${RESET}  transit — authenticates you to GitHub for git operations.
-                 Independent of the GPG key; GitHub only sees this one.
+  ${bold}Brain${RESET}   where you live day-to-day — your encrypted git repo(s),
+          edited as a plaintext working tree on this machine. Created
+          via 'make new-brain' after this bootstrap completes.
+  ${bold}Nous${RESET}    the toolchain you invoke (the 'nous' command + 'make new-brain').
+          One install per machine; you reach for it occasionally, not daily.
+  ${bold}GitHub${RESET}  the base layer holding ciphertext copies. You'll mostly
+          forget it's there; it surfaces only when transit errors out
+          (push/pull). Sees only gcrypt blobs — your GPG key never leaves
+          this machine.
 
 EOF
 }
