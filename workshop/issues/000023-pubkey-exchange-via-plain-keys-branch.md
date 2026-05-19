@@ -445,7 +445,7 @@ Share with peers
       one tick (≤60s) without operator action. Log new pubkeys at
       Info; silent on no-change.
 
-- [ ] M7: **`nous brain recipient verify <brain> <fp>`** verb.
+- [x] M7: **`nous brain recipient verify <brain> <fp>`** verb.
       Read pubkey from keyring, render fingerprint side-by-side
       against OOB-provided value. No state change. The opt-in
       ceremony that replaces the mandatory verify-fingerprint at
@@ -504,6 +504,35 @@ they already have. WhatsApp's "verify on suspicion" UX model is
 the right fit.
 
 ## Log
+
+### 2026-05-19 — M7 landed
+New verb: `nous brain recipient verify BRAIN-PATH FINGERPRINT`.
+
+Pure ceremony — no state change. Reads the pubkey from the local
+keyring, refuses if it isn't a recipient of the named brain
+(refusing protects against typos that would otherwise let an
+unrelated key pass), renders fingerprint + last-8 + UID, prompts
+for the OOB-provided last-8, compares.
+
+Mismatch handling is explicit: prints three possible causes
+(typed wrong / keys branch tampered / pubkey delivered through
+compromised channel) so the operator has a triage starting point
+rather than a generic "mismatch" error.
+
+Reuses `promptVerify` (the same 3-attempt last-8 confirmation
+helper that powers `nous identity import` and `nous brain
+recipient add`). Reuses `lookupKey` for full-or-short fingerprint
+resolution.
+
+Closes the design loop: M3-M6 make pubkey distribution convenient
+by default (operator action → all peers auto-update); M7 is the
+opt-in escape hatch for paranoid users to confirm any specific
+pubkey matches its claimed owner via OOB comparison. Matches
+WhatsApp's "verify on suspicion" model precisely.
+
+Smoke-tested via `--help`; renders correctly. The actual ceremony
+requires a real recipient on a real brain to exercise — covered
+end-to-end by the #12 dogfood once #23 lands.
 
 ### 2026-05-19 — M6 landed
 Brain-sync watcher's periodic tick now calls

@@ -26,6 +26,7 @@ func newBrainRecipientCmd() *cobra.Command {
 		newBrainRecipientListCmd(),
 		newBrainRecipientAddCmd(),
 		newBrainRecipientRemoveCmd(),
+		newBrainRecipientVerifyCmd(),
 	)
 	return cmd
 }
@@ -463,6 +464,84 @@ func promptYes(in io.Reader, out io.Writer, prompt string) error {
 		return nil
 	}
 	return fmt.Errorf("aborted")
+}
+
+// ─── verify (opt-in ceremony for paranoid users) ──────────────────────
+
+func newBrainRecipientVerifyCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "verify BRAIN-PATH FINGERPRINT",
+		Short: "Confirm a recipient's pubkey matches an out-of-band fingerprint (opt-in)",
+		Long: `Verify-fingerprint ceremony for a recipient already on the brain.
+Use when you want to confirm — out-of-band — that the pubkey in
+your local keyring (auto-imported via the keys branch in nous#23,
+or sneakernet'd in the legacy flow) really belongs to the peer
+who claims to own it.
+
+Renders the pubkey's full fingerprint + last-8 + UID, then prompts
+you to type the last-8 the peer sent you via an out-of-band
+channel (phone, in-person, signed message — NOT the same channel
+that delivered the pubkey itself). A match prints ✓; a mismatch
+surfaces the discrepancy and exits non-zero.
+
+This is purely a verification step — no state changes. It's the
+opt-in counterpart to nous#23's auto-import: the auto-import
+makes pubkey distribution convenient by default; this verb is the
+escape hatch when you want to confirm the substrate hasn't been
+tampered with.
+
+Args:
+  BRAIN-PATH    Path to the brain (relative or absolute).
+  FINGERPRINT   The recipient's fingerprint to verify. Full
+                40-hex or last-8 — looked up in the local keyring.`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			brainPath := args[0]
+			fpArg := args[1]
+			out := cmd.OutOrStdout()
+			in := cmd.InOrStdin()
+
+			// Resolve the fingerprint (full or short) to a Key.
+			key, err := lookupKey(fpArg)
+			if err != nil {
+				return fmt.Errorf("lookup %s: %w", fpArg, err)
+			}
+
+			// Confirm this key is actually a recipient of the named
+			// brain — verifying a random key in the keyring isn't
+			// useful, and refusing here protects against typos that
+			// would let an unrelated key pass the ceremony.
+			m, err := brain.Read(brainPath)
+			if err != nil {
+				return fmt.Errorf("read brain %s: %w", brainPath, err)
+			}
+			if !brain.ContainsRecipient(m.Recipients, key.Fingerprint) {
+				return fmt.Errorf("%s is not a recipient of %s", key.Last8(), brainPath)
+			}
+
+			fmt.Fprintln(out, "Pubkey to verify:")
+			fmt.Fprintf(out, "  fingerprint: %s\n", key.Fingerprint)
+			fmt.Fprintf(out, "  last-8:      %s\n", key.Last8())
+			fmt.Fprintf(out, "  uid:         %s\n", displayUID(key))
+			fmt.Fprintln(out)
+			fmt.Fprintln(out, "Type the last-8 the peer sent you OUT OF BAND")
+			fmt.Fprintln(out, "(phone, in-person, signed message — NOT the same channel as the pubkey).")
+			fmt.Fprintln(out)
+
+			if err := promptVerify(in, out, key.Last8()); err != nil {
+				fmt.Fprintln(out)
+				fmt.Fprintln(out, "✗ Mismatch — the pubkey in your keyring does NOT match what you typed.")
+				fmt.Fprintln(out, "  Possible causes:")
+				fmt.Fprintln(out, "    (a) you typed the wrong value (re-check OOB)")
+				fmt.Fprintln(out, "    (b) the keys branch was tampered with by someone with push access")
+				fmt.Fprintln(out, "    (c) the pubkey was delivered through a compromised channel")
+				return err
+			}
+			fmt.Fprintln(out)
+			fmt.Fprintln(out, "✓ Match. The pubkey in your keyring is what the peer claims it is.")
+			return nil
+		},
+	}
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────
