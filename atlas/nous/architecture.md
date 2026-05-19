@@ -52,7 +52,7 @@ The `nous-tools` meta-skill (in `nous/skills/`) tells Claude to discover tools b
 ## Go Tooling
 
 - `go.mod` at repo root (`github.com/xianxu/nous`)
-- `make build` — compiles all binaries to `cmd/<name>/bin/<name>`
+- `make nous-build` — compiles all binaries to `cmd/<name>/bin/<name>` (with `bin/<name>` symlinks). Pure go build; no codesign. `make nous-sign` adds Developer ID signing to `bin/nous` on top; `make nous-notarize` adds Apple notary submission on top of that. Iterate at the level you need; the notary roundtrip stays off the daily path.
 - `make test` — runs all Go tests
 - `make clean` — removes build artifacts
 - All tools run through Charon proxy for credential isolation

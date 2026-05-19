@@ -39,7 +39,7 @@ calendar). They:
 
 Aimed predominantly at **dev mode**. Specifically:
 
-- `make build`, `make nous-dev`, `make nous-install` all produce
+- `make nous-build`, `make nous-dev`, `make nous-install` all produce
   unsigned binaries. The codesigning self-check in
   `keychain/codesign_darwin.go` exists in the code but routes
   every dev binary into `charon-dev`.
