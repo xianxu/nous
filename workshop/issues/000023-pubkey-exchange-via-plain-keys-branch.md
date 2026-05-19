@@ -434,7 +434,7 @@ Share with peers
       peerkeys.RevokePubkey. Existing dogfood tests adapted to
       assert the keys branch sees the change.
 
-- [ ] M5: **`nous brain clone <gcrypt-url>`** subcommand. Resolves
+- [x] M5: **`nous brain clone <gcrypt-url>`** subcommand. Resolves
       plain URL, uses filestore to fetch + import all peer pubkeys,
       then `git clone gcrypt::...`. Familiar shape for operators
       who know git.
@@ -504,6 +504,43 @@ they already have. WhatsApp's "verify on suspicion" UX model is
 the right fit.
 
 ## Log
+
+### 2026-05-19 — M5 landed
+New verb: `nous brain clone <gcrypt-url> [target-dir]`.
+
+Mechanics: two-step. (1) `brain.BootstrapPubkeys(ctx, gcryptURL)`
+strips the `gcrypt::` prefix, shallow-clones the `keys` branch to
+a tempdir, gpg-imports every .asc file, cleans up. (2) Then a
+plain `git clone <gcrypt-url> [target-dir]` runs against the
+operator's terminal (stdout/stderr streamed live).
+
+Bootstrap variant lives in lib/brain/peerkeys.go alongside the
+existing PublishPubkey/RevokePubkey/ImportAllPubkeys helpers. It
+differs from ImportAllPubkeys because the brain doesn't have a
+local clone yet (no `brainRoot`, so filestore.Open's path
+doesn't apply) — it does its own temp-clone + tempdir cleanup
+inline. Could be argued for living in filestore as a side-car
+helper; chose peerkeys to keep the peerkeys-vocabulary
+boundary (callers see "bootstrap pubkeys", not "fetch a branch
+to a tempdir").
+
+Graceful degradation:
+  - Keys branch missing on the remote (older brain): silent
+    no-op, returns (0, nil, nil). The clone still runs; the
+    operator falls back to pre-#23 sneakernet pubkey hand-off.
+  - Per-file import error: collected in errs[], doesn't abort.
+  - Top-level git error (e.g., remote unreachable): warning
+    line, clone still attempted (it'll error out itself, with
+    a more useful message).
+
+The brain TUI's "Share with peers" section (committed in db60592)
+should be updated in M8 to reflect the simpler peer-side flow:
+
+  Share with peers
+    nous brain clone <gcrypt-url>
+    (peer pubkeys auto-imported from the keys branch)
+
+Plus the threat-model doc rewrites the bootstrap section.
 
 ### 2026-05-19 — M4 landed
 `nous brain recipient add` and `nous brain recipient remove` now

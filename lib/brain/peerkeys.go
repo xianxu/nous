@@ -3,6 +3,9 @@ package brain
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/xianxu/nous/lib/brain/filestore"
@@ -80,6 +83,75 @@ func RevokePubkey(ctx context.Context, brainRoot, fp string) error {
 		return fmt.Errorf("peerkeys: revoke %s: %w", name, err)
 	}
 	return nil
+}
+
+// BootstrapPubkeys fetches the brain's `keys` branch directly from
+// its gcrypt remote URL — WITHOUT requiring a local brain clone to
+// exist yet — and imports every pubkey into the local GPG keyring.
+// The pre-flight for `nous brain clone`: peers run this first so
+// gcrypt's signature-verification has the operator's (and every
+// other peer's) pubkey by the time the actual brain clone runs.
+//
+// gcryptURL: the same URL the operator would pass to `git clone
+// gcrypt::...`. The `gcrypt::` prefix is stripped to get the plain
+// URL used to fetch the keys branch.
+//
+// Returns the number of pubkeys successfully imported and any
+// per-file errors (none aborts the loop). The top-level err is
+// non-nil only on infrastructure failures (no remote, git not
+// installed). A brain provisioned before #23 landed has no `keys`
+// branch — that case returns (0, nil, nil) so callers proceed
+// with the gcrypt clone gracefully and rely on the legacy
+// sneakernet pubkey flow.
+func BootstrapPubkeys(ctx context.Context, gcryptURL string) (imported int, errs []error, err error) {
+	plainURL := strings.TrimPrefix(gcryptURL, "gcrypt::")
+
+	tmpDir, err := os.MkdirTemp("", "nous-bootstrap-keys-")
+	if err != nil {
+		return 0, nil, fmt.Errorf("peerkeys bootstrap: tempdir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cmd := exec.CommandContext(ctx, "git", "clone",
+		"--branch", keysBranch,
+		"--single-branch",
+		"--depth=1",
+		plainURL, tmpDir)
+	if out, cerr := cmd.CombinedOutput(); cerr != nil {
+		// Remote-branch-missing is the common case for brains
+		// provisioned before #23 landed. Detect via git's stderr
+		// rather than parsing exit codes; "Remote branch ... not
+		// found" is git's standard phrasing.
+		msg := string(out)
+		if strings.Contains(msg, "Remote branch") && strings.Contains(msg, "not found") {
+			return 0, nil, nil
+		}
+		return 0, nil, fmt.Errorf("peerkeys bootstrap: clone keys branch: %w\n%s", cerr, msg)
+	}
+
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		return 0, nil, fmt.Errorf("peerkeys bootstrap: read tempdir: %w", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		if !strings.HasSuffix(e.Name(), pubkeyFilenameSuffix) {
+			continue
+		}
+		content, rerr := os.ReadFile(filepath.Join(tmpDir, e.Name()))
+		if rerr != nil {
+			errs = append(errs, fmt.Errorf("read %s: %w", e.Name(), rerr))
+			continue
+		}
+		if _, ierr := identity.Import(string(content)); ierr != nil {
+			errs = append(errs, fmt.Errorf("import %s: %w", e.Name(), ierr))
+			continue
+		}
+		imported++
+	}
+	return imported, errs, nil
 }
 
 // ImportAllPubkeys fetches every pubkey from the brain's keys store

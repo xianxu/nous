@@ -36,6 +36,7 @@ actions. Use the subcommands below for scriptable / agent-driven use.
 
 Subcommands:
   new                      provision a brain (single or multi-recipient)
+  clone                    clone a shared brain (auto-imports peer pubkeys)
   list                     show brains under the workspace root
   recipient list           list recipients on a brain
   recipient add            admit a recipient (TTY-only; verify-fingerprint)
@@ -66,6 +67,7 @@ Subcommands:
 	}
 	cmd.AddCommand(
 		newBrainNewCmd(),
+		newBrainCloneCmd(),
 		newBrainListCmd(),
 		newBrainRecipientCmd(),
 		newBrainResolveCmd(),
