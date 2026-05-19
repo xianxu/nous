@@ -211,21 +211,25 @@ func (m detailModel) View() string {
 		}
 	}
 
-	// Share with peers — surface the exact `git clone` command an
+	// Share with peers — surface the full onboarding sequence an
 	// operator should hand to a peer they've just admitted as a
-	// recipient. Only meaningful for shared brains (private brains have
-	// no peers to share with) AND when an origin URL is configured (a
-	// brand-new brain before the first push has none). For peers, the
-	// flow on their machine: `git clone <url>` after the operator has
-	// added them to the recipient list and pushed (`nous brain
-	// recipient add` does both).
+	// recipient. Three parts: peer needs YOUR pubkey to verify the
+	// gcrypt manifest signature, you need peer's pubkey (already
+	// done if they're listed above), and the clone command. Only
+	// meaningful for shared brains (private brains have no peers)
+	// AND when an origin URL is configured (a brand-new brain
+	// before the first push has none).
 	if s.Manifest.Shared() && s.OriginURL != "" {
 		b.WriteString(sectionHeaderStyle.Render("Share with peers"))
 		b.WriteString("\n")
-		b.WriteString(fmt.Sprintf("  git clone %s\n", s.OriginURL))
+		b.WriteString("  On YOUR machine, send peer your pubkey:\n")
+		b.WriteString(mutedStyle.Render("    nous identity export > you.pub      # then sneakernet to peer\n"))
+		b.WriteString("  On THEIR machine, import your pubkey + clone the brain:\n")
+		b.WriteString(mutedStyle.Render("    nous identity import you.pub        # verify-fingerprint ceremony\n"))
+		b.WriteString(mutedStyle.Render(fmt.Sprintf("    git clone %s\n", s.OriginURL)))
 		b.WriteString(mutedStyle.Render(
-			"  (run this on each admitted recipient's machine; gcrypt + their\n" +
-				"   GPG private key decrypt the contents locally)"))
+			"  Both directions: gcrypt signs every manifest, so each peer\n" +
+				"  needs every other peer's pubkey to verify before decrypting."))
 		b.WriteString("\n")
 	}
 
