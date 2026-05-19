@@ -1,6 +1,6 @@
 ---
 id: 000026
-status: open
+status: working
 deps: [000023, 000024, 000025]
 created: 2026-05-19
 updated: 2026-05-19
@@ -264,10 +264,15 @@ if v, ok := verified[login]; ok && v.Fingerprint != fp {
 
 ## Plan
 
-- [ ] M1: `gh` helper wrappers in `lib/gh/`: `UserExists`,
+- [x] M1: `gh` helper wrappers in `lib/gh/`: `UserExists`,
       `AddCollaborator`, `PendingInvitations`, `AcceptInvitation`,
-      `AuthLogin`. All thin wrappers around `gh api` subprocess
-      calls; no new dependencies.
+      `AuthLogin` (+ `DeclineInvitation` for symmetry). All thin
+      wrappers around `gh api` subprocess calls; no new dependencies.
+      Smoke-tested against live gh: AuthLogin returns the auth'd
+      login, UserExists returns `ErrUserNotVisible`-wrapped for the
+      404 case, PendingInvitations parses (empty slice). Mutating
+      ops (AddCollaborator, AcceptInvitation) will be exercised in
+      M2.
 - [ ] M2: `cmd/nous/brain_invite.go` + TUI in `lib/tui/brain/invite.go`.
       Brain discovery (`DiscoverAll`) probably already exists from
       the `nous brain` TUI — verify and reuse.
