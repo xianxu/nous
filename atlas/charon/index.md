@@ -12,11 +12,12 @@ The charon-origin code lives in nous's substrate. Original charon GitHub repo (`
 `internal/charon/` no longer exists. Disassembled into `lib/` per the lib-first design principle (`nous#14 M2`, commit `07f4b6f`):
 
 - `lib/provider/{oauth, providers, proxy, runtime, vault}/` — credential proxy + provider auth + per-provider impls
-- `lib/security/` — host-security audit machinery (powers `cmd/nous-security/`)
+- `lib/security/` — host-security audit machinery (powers `nous security check`)
+- `lib/notify/` — macOS notification dispatcher (UserNotifications.framework when signed+bundled; terminal-notifier or osascript when unsigned)
+- `lib/codesign/` — runtime "am I signed by `make nous-install`?" primitive, consumed by lib/notify's backend picker and lib/provider/vault/keychain's namespace router
 - `lib/tui/` — bubbletea + lipgloss components
 - `lib/service/` — launchd plist generation + service control
-- `cmd/nous/` — the substrate binary; mounts `lib/charoncli`'s cobra constructors at top-level + under `nous provider` (run, arm, disarm, vault top-level; gcp/who/stats/scopes under provider). The unified daemon entry is `nous serve`. (`cmd/charon/` existed until nous#20 as a standalone shim over `charoncli.BuildRoot`; retired so all keychain reads use one codesign identity.)
-- `cmd/nous-security/` — separate menubar binary; signing model differs (Info.plist + notarization), so it stays its own cmd
+- `cmd/nous/` — the substrate binary; mounts `lib/charoncli`'s cobra constructors at top-level + under `nous provider` (run, arm, disarm, vault top-level; gcp/who/stats/scopes under provider). The unified daemon entry is `nous serve`. The security audit + menubar moved here in nous#22 as `nous security {check,remedy,menubar}` subcommands. (`cmd/charon/`, `cmd/brain-sync/`, `cmd/nous-security/` all existed historically as standalone binaries; retired in nous#20 and nous#22 so all keychain reads use one codesign identity.)
 
 Full layout map: [`atlas/nous/lib-layout.md`](../nous/lib-layout.md).
 

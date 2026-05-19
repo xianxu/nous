@@ -205,13 +205,13 @@ becomes a safety net rather than a normal path).
       possible (mostly: assert correct backend chosen for given
       `codesign.IsSigned()` mock). End-to-end: a manual test of
       `nous security menubar` posting a notification in each mode.
-- [ ] M3: Add `nous security check` + `nous security menubar` to
-      `cmd/nous/`. Both delegate to the existing `lib/security/*`
-      and the menubar code (which migrates from cmd/nous-security
-      to a new place — likely `lib/menubar` or under `cmd/nous/`
-      directly). Existing menubar tests adapt.
-- [ ] M4: Delete `cmd/nous-security/`. Update Makefile.nous and
-      atlas references. Add `terminal-notifier` to Brewfile.
+- [x] M3+M4: Add `nous security {check, remedy, menubar}` subcommands;
+      delete `cmd/nous-security/` entirely; update Makefile.nous and
+      the most-prominent atlas pointers. Combined into one commit
+      since the M3-without-M4 intermediate state has the new code AND
+      the old binary side-by-side, which isn't a useful checkpoint
+      (the M2 retrofit already made cmd/nous-security depend on
+      lib/notify, so it was already structurally redundant).
 - [ ] M5: Atlas + README + workshop/lessons.md updates. Punt or
       rescope nous#19 with a Revisions section linking back here.
 
@@ -248,6 +248,54 @@ notification path actually working:
   warrant a lib/ home.
 
 ## Log
+
+### 2026-05-18 — M3+M4 landed
+
+`cmd/nous-security/` is gone. `nous security` cluster now lives in
+`cmd/nous/`:
+
+- `cmd/nous/security.go` (new, ~250 lines) — `newSecurityCmd()`
+  registers the cluster + check / remedy subcommands. Flags scoped
+  to a `securityFlags` struct closure (avoids polluting cmd/nous's
+  package namespace). `runSecurityCheck` and `runSecurityRemedy`
+  port `cmd/nous-security/main.go`'s body verbatim, parameterized on
+  the flags struct instead of package globals.
+- `cmd/nous/security_menubar.go` (git mv from cmd/nous-security/
+  menubar.go) — the menubar agent. Cobra constructor renamed
+  `menubarCmd` → `newSecurityMenubarCmd` for clarity. Docstrings
+  updated to reflect "runs as `nous security menubar`" framing,
+  including the deferred `.app` packaging note.
+- `cmd/nous/security_menubar_test.go` (git mv) — existing menubar
+  tests, no change.
+- `cmd/nous/main.go` — added `root.AddCommand(newSecurityCmd())` next
+  to identity / brain / provider.
+
+Makefile.nous: dropped docstring references to `nous-security` as a
+separate binary; updated layout block and post-install note to point
+at `nous security` subcommands and the rescoped nous#19. The build
+loop is unchanged (it iterates cmd/*/, no nous-security-specific
+plumbing was there).
+
+Atlas:
+- `atlas/nous/lib-layout.md` — `cmd/nous-security/` entry deleted;
+  consumer of `lib/security/` now named as `cmd/nous/security.go`;
+  historical note appended.
+- `atlas/charon/index.md` — added `lib/notify/` + `lib/codesign/`
+  to the layout list; folded nous-security retirement into the
+  cmd/nous bullet.
+- `atlas/charon/security-audit.md` — added a top-of-file Note redirecting
+  `nous-security <verb>` → `nous security <verb>`. Deep edits deferred
+  to M5.
+
+`go build`, `go vet`, `go test ./cmd/nous/ ./lib/notify/ ./lib/codesign/
+./lib/security/...` all green. `nous security --help` and `nous
+security check --help` render correctly; smoke-tested `bin/nous
+security` from the new symlink-into-bin/ layout.
+
+Skipped: a deeper rewrite of `atlas/charon/security-audit.md`,
+`atlas/charon/charon.md`, and `atlas/nous/dev-vs-runtime-mode.md`.
+Those still describe nous-security as a separate binary; the top
+note in security-audit.md tells readers to translate. Tracked in M5.
 
 ### 2026-05-18 — M2 landed
 Added `lib/notify` with the decision-tree dispatcher (signed+bundled

@@ -1,5 +1,14 @@
 # Charon Security Audit Tool
 
+> **Note (nous#22):** the audit + menubar moved from the standalone
+> `cmd/nous-security/` into `cmd/nous` as the `nous security {check,
+> remedy, menubar}` subcommand cluster. Historical references to
+> `nous-security <verb>` below map directly to `nous security <verb>`.
+> A signed `.app` wrapper for the menubar is a deferred follow-up
+> (rescoped nous#19); without it, notifications fall through to
+> `terminal-notifier` via `lib/notify`. Full atlas sweep tracked as
+> nous#22 M5.
+
 ## What
 
 `nous-security` is a two-purpose helper bundled into a single

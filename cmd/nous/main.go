@@ -41,6 +41,7 @@ specific docs.`,
 
 	root.AddCommand(newIdentityCmd())
 	root.AddCommand(newBrainCmd())
+	root.AddCommand(newSecurityCmd())
 	root.AddCommand(providerCmd())
 	root.AddCommand(serviceCmdImpl())
 	root.AddCommand(newServeCmd())

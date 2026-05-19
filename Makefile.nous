@@ -40,8 +40,10 @@ NOUS_CODESIGN_IDENTITY ?=
 # had no Developer ID); retired in nous#20.
 #
 # See atlas/nous/dev-vs-runtime-mode.md for the threat-model rationale.
-# nous-security is its own concern (signed + notarized .app bundle
-# for Notifications.framework; see nous#19).
+# The security audit + menubar are now `nous security check / menubar`
+# subcommands inside the unified binary (nous#22). A separate signed
+# .app wrapper for the menubar is a deferred follow-up (rescoped from
+# nous#19); without it, notifications fall through to terminal-notifier.
 
 build:
 	@mkdir -p bin
@@ -66,9 +68,9 @@ build:
 # charon namespace — no chance of dev iteration corrupting prod
 # OAuth state.
 #
-# Layout (post nous#20):
+# Layout (post nous#22):
 #   bin/nous              unified CLI/TUI + daemon (proxy + brain-sync)
-#   bin/nous-security     macOS menubar app (security audit)
+#                         + security audit + menubar (via subcommands)
 #   bin/gmail, bin/oneshot, ...
 #
 # Single daemon binary: `nous serve` runs both the credential proxy
@@ -144,7 +146,8 @@ nous-install:
 	@echo "         when running unsigned via make nous-dev). Any OAuth"
 	@echo "         tokens previously stored under charon-dev are NOT"
 	@echo "         visible to the signed binary; re-auth as needed."
-	@echo "         For nous-security menubar + notifications, see nous#19."
+	@echo "         For signed .app packaging of nous security menubar, see"
+	@echo "         the rescoped nous#19 (deferred follow-up to nous#22)."
 
 # make nous-uninstall — symmetric counterpart to nous-install. Stops
 # and removes the unified launchd service plus any legacy plists left

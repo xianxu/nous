@@ -15,24 +15,26 @@ import (
 	"github.com/xianxu/nous/lib/provider/proxy"
 )
 
-// menubarCmd runs Charon Security as a macOS menubar agent. The
-// bundle's Info.plist already has LSUIElement=true, so this process
-// runs without a Dock icon — just the menubar item.
+// newSecurityMenubarCmd runs nous security menubar as a macOS menubar
+// agent. When wrapped in a signed .app bundle (deferred follow-up to
+// nous#22), LSUIElement=true keeps the process dock-less; today the
+// raw-binary invocation still works, just with a dock icon present.
 //
 // Talks to the proxy's unix-domain runtime socket (#16 C) for state.
 // Connection-per-RPC keeps the peer-DR check fresh on the proxy side.
-func menubarCmd() *cobra.Command {
+func newSecurityMenubarCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "menubar",
 		Short: "Run as macOS menubar agent (consent oracle for the proxy)",
-		Long: `Charon Security's menubar mode: a status icon in the macOS menu bar
+		Long: `nous security menubar: a status icon in the macOS menu bar
 that shows whether the proxy session is armed and lets the user
 arm/disarm with a click. Talks to the proxy at
 ~/Library/Caches/charon/runtime.sock.
 
-Started automatically when the .app bundle is double-clicked or
-opened via 'open' (LSUIElement=true keeps it dock-less). To exit,
-click the menubar item and pick Quit.`,
+In dev, runs as a regular foreground process (Ctrl-C to exit, or
+click the menubar item and pick Quit). The prod packaging story
+(signed .app bundle with LSUIElement=true) is a deferred follow-up;
+once it lands, double-clicking the .app launches this same command.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runMenubar()

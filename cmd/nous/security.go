@@ -1,11 +1,13 @@
-// Command nous-security audits a personal Mac for the hygiene
-// baseline charon's threat model assumes (see docs/threat-model.md):
-// SIP enabled, no TCC grants on terminals/IDEs, no suspicious launchd
-// agents, charon's keychain ACLs intact.
+// nous security cluster: macOS hygiene audit (`check`), per-finding
+// remediation lookup (`remedy`), and the runtime-consent menubar agent
+// (`menubar`). Ported from the standalone cmd/nous-security/ binary
+// per nous#22 — same lib/security/* implementation, same flags, same
+// output, just hosted inside nous.
 //
-// Designed to be packaged as Charon Security.app so TCC attributes
-// permissions to com.charon.security specifically; run from
-// `make security` after `make security-install`.
+// Audience tags:
+//   - security check    (h) audits the host; prints findings to stderr.
+//   - security remedy   (h) prints remediation steps for a finding ID.
+//   - security menubar  (h) UI surface; arms/disarms via the proxy socket.
 package main
 
 import (
@@ -17,88 +19,86 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
+
 	"github.com/xianxu/nous/lib/security"
 )
 
-var (
-	flagNoTCC      bool
-	flagNoColor    bool
-	flagForceColor bool
-	flagJSON       bool
-	flagStrict     bool
-	flagYes        bool
-)
-
-func main() {
-	root := &cobra.Command{
-		Use:   "nous-security",
-		Short: "Audit macOS hygiene + run the runtime-consent menubar",
-		Long: "Charon Security has two modes:\n\n" +
-			"  check  — audit macOS hygiene assumptions charon's threat\n" +
-			"           model relies on (SIP, TCC grants, keychain ACL).\n" +
-			"  menubar — run as a menubar agent that arms/disarms the\n" +
-			"            proxy's runtime-consent gate.\n\n" +
-			"Default (no subcommand): launch menubar mode. The .app\n" +
-			"bundle's LSUIElement=true setting keeps it dock-less.\n" +
-			"See docs/threat-model.md.",
-		// No-args default → menubar. The .app bundle launched via
-		// Finder/launchd/`open` invokes the binary with no args; we
-		// want that to mean "show the menubar item." Explicit
-		// subcommands (check, remedy, menubar) all still work.
-		Run: func(cmd *cobra.Command, args []string) {
-			runMenubar()
-		},
-	}
-	root.PersistentFlags().BoolVar(&flagNoColor, "no-color", false, "disable colored output")
-	root.PersistentFlags().BoolVar(&flagForceColor, "force-color", false,
-		"force colored output even when stdout/stderr isn't a TTY (used by `make security` whose `open -W` indirection redirects to a tempfile)")
-	root.PersistentFlags().BoolVar(&flagJSON, "json", false, "emit findings as JSON (overrides text output)")
-
-	root.AddCommand(checkCmd())
-	root.AddCommand(remedyCmd())
-	root.AddCommand(menubarCmd())
-
-	if err := root.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
-		os.Exit(1)
-	}
+// securityFlags scopes the shared `nous security` flag set to a
+// closure rather than package globals — matches the convention the
+// rest of cmd/nous uses, and avoids polluting the package's namespace
+// with names like `flagNoColor` that other clusters might collide on.
+type securityFlags struct {
+	noTCC      bool
+	noColor    bool
+	forceColor bool
+	json       bool
+	strict     bool
+	yes        bool
 }
 
-func checkCmd() *cobra.Command {
+func newSecurityCmd() *cobra.Command {
+	flags := &securityFlags{}
+
+	cmd := &cobra.Command{
+		Use:   "security",
+		Short: "macOS hygiene audit + runtime-consent menubar",
+		Long: `nous security has three modes:
+
+  check    — audit macOS hygiene assumptions charon's threat model
+             relies on (SIP, TCC grants, keychain ACL).
+  remedy   — print remediation steps for a finding ID.
+  menubar  — run as a menubar agent that arms/disarms the proxy's
+             runtime-consent gate.
+
+See atlas/ + brain/atlas/threat-model-shared-brain.md for context.`,
+		Args: cobra.NoArgs,
+	}
+	cmd.PersistentFlags().BoolVar(&flags.noColor, "no-color", false, "disable colored output")
+	cmd.PersistentFlags().BoolVar(&flags.forceColor, "force-color", false,
+		"force colored output even when stdout/stderr isn't a TTY (used when "+
+			"output is routed through a tempfile, as `open -W` does for .app launches)")
+	cmd.PersistentFlags().BoolVar(&flags.json, "json", false,
+		"emit findings as JSON (overrides text output)")
+
+	cmd.AddCommand(newSecurityCheckCmd(flags))
+	cmd.AddCommand(newSecurityRemedyCmd(flags))
+	cmd.AddCommand(newSecurityMenubarCmd())
+	return cmd
+}
+
+func newSecurityCheckCmd(flags *securityFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "check",
 		Short: "Run the audit and report findings",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCheck()
+			return runSecurityCheck(flags)
 		},
 	}
-	cmd.Flags().BoolVar(&flagNoTCC, "no-tcc", false,
+	cmd.Flags().BoolVar(&flags.noTCC, "no-tcc", false,
 		"skip TCC.db reads (no FDA needed); fall back to manual System Settings walk")
-	cmd.Flags().BoolVar(&flagStrict, "strict", false,
+	cmd.Flags().BoolVar(&flags.strict, "strict", false,
 		"promote every severity tier up by one before exit-code rollup")
-	cmd.Flags().BoolVar(&flagYes, "yes", false,
+	cmd.Flags().BoolVar(&flags.yes, "yes", false,
 		"skip the pre-flight consent gate (for non-interactive runs)")
 	return cmd
 }
 
-func remedyCmd() *cobra.Command {
+func newSecurityRemedyCmd(flags *securityFlags) *cobra.Command {
 	return &cobra.Command{
 		Use:   "remedy [finding-id]",
 		Short: "Print remediation steps (all findings, or one by ID)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRemedy(args)
+			return runSecurityRemedy(flags, args)
 		},
 	}
 }
 
-func runCheck() error {
-	// Lipgloss/glamour decide whether to emit ANSI based on
-	// termenv's TTY detection. `make security` routes the
-	// bundle's output through a tempfile (LaunchServices doesn't
-	// pipe stdout to the calling terminal), so by default the
-	// rendered output is uncolored even though we then `cat` it
-	// back to a TTY. --force-color overrides termenv's verdict.
-	if flagForceColor {
+func runSecurityCheck(flags *securityFlags) error {
+	// Lipgloss/glamour decide whether to emit ANSI based on termenv's
+	// TTY detection. .app bundles launched via `open` route output
+	// through a tempfile, defeating that detection — --force-color is
+	// the override.
+	if flags.forceColor {
 		lipgloss.SetColorProfile(termenv.ANSI256)
 	}
 
@@ -108,15 +108,13 @@ func runCheck() error {
 	}
 
 	opts := security.PreflightOptions{
-		// Toggled on as M6 lands. Keeping these honest now is the
-		// difference between a transparency block and a fairy tale.
-		WillReadTCC:      !flagNoTCC,
+		WillReadTCC:      !flags.noTCC,
 		WillCheckCharon:  true,
 		WillPromptRevoke: false,
 	}
 	security.PrintPreflight(os.Stderr, self, opts)
 
-	if flagYes {
+	if flags.yes {
 		fmt.Fprintln(os.Stderr, "(--yes specified, skipping consent gate)")
 	} else {
 		if !security.ConfirmDefaultDeny("Continue with the audit?") {
@@ -142,13 +140,12 @@ func runCheck() error {
 	}
 	report.Findings = append(report.Findings, security.CheckCodesignEntitlements(apps)...)
 
-	if !flagNoTCC {
+	if !flags.noTCC {
 		tccFindings := security.CheckTCC(apps)
 		report.Findings = append(report.Findings, tccFindings...)
-		// Mark items 2–5 evaluated only if TCC.db was actually
-		// readable. The "tcc-no-fda-*" finding signals the read
-		// failed and we couldn't see the state; in that case we
-		// leave 2–5 as Skipped so the user knows the audit is
+		// Mark items 2–5 evaluated only if TCC.db was actually readable.
+		// The "tcc-no-fda-*" finding signals the read failed; in that
+		// case leave 2–5 as Skipped so the user knows the audit is
 		// incomplete.
 		if !sawNoFDA(tccFindings) {
 			report.MarkEvaluated(
@@ -158,7 +155,7 @@ func runCheck() error {
 				security.BarTerminalEvents,
 			)
 		}
-		offerFDAGrantIfNeeded(tccFindings, self)
+		offerFDAGrantIfNeeded(flags, tccFindings, self)
 	}
 
 	report.Findings = append(report.Findings, security.CheckCharonKeychainACLs()...)
@@ -176,15 +173,16 @@ func runCheck() error {
 	report.Findings = append(report.Findings, security.CheckTimeMachine()...)
 	report.MarkEvaluated(security.BarTimeMachine)
 
-	if flagNoTCC {
-		if !flagYes && security.IsInteractive() {
+	if flags.noTCC {
+		if !flags.yes && security.IsInteractive() {
 			security.RunVisualWalk(os.Stderr)
 		} else {
-			fmt.Fprintln(os.Stderr, "(skipping visual TCC walk; re-run interactively without --yes for the System Settings audit)")
+			fmt.Fprintln(os.Stderr,
+				"(skipping visual TCC walk; re-run interactively without --yes for the System Settings audit)")
 		}
 	}
 
-	if flagStrict {
+	if flags.strict {
 		// Promote every finding's severity by one before rollup.
 		for i := range report.Findings {
 			if report.Findings[i].Severity < security.SevCritical {
@@ -194,13 +192,13 @@ func runCheck() error {
 	}
 
 	out := os.Stderr
-	if flagJSON {
+	if flags.json {
 		out = os.Stdout
 	}
 	if err := report.Print(out, security.PrintOptions{
-		NoColor:    flagNoColor,
-		ForceColor: flagForceColor,
-		JSON:       flagJSON,
+		NoColor:    flags.noColor,
+		ForceColor: flags.forceColor,
+		JSON:       flags.json,
 	}); err != nil {
 		return err
 	}
@@ -224,9 +222,8 @@ func sawNoFDA(findings []security.Finding) bool {
 // offerFDAGrantIfNeeded looks for the tcc-no-fda-* findings produced
 // by CheckTCC and, when running interactively, walks the user through
 // adding the .app to the FDA pane. No-op on --yes (non-interactive)
-// or when running outside a .app bundle (where granting FDA wouldn't
-// be scoped to com.charon.security).
-func offerFDAGrantIfNeeded(findings []security.Finding, self security.SelfInfo) {
+// or when running outside a .app bundle.
+func offerFDAGrantIfNeeded(flags *securityFlags, findings []security.Finding, self security.SelfInfo) {
 	needsFDA := false
 	for _, f := range findings {
 		if strings.HasPrefix(f.ID, "tcc-no-fda-") {
@@ -234,11 +231,13 @@ func offerFDAGrantIfNeeded(findings []security.Finding, self security.SelfInfo) 
 			break
 		}
 	}
-	if !needsFDA || flagYes || !security.IsInteractive() {
+	if !needsFDA || flags.yes || !security.IsInteractive() {
 		return
 	}
 	if self.BundleID == "" {
-		fmt.Fprintln(os.Stderr, "\nNote: running outside a .app bundle. Granting FDA now would attach to your terminal, not to nous-security. Run via `make security` for proper TCC attribution.")
+		fmt.Fprintln(os.Stderr,
+			"\nNote: running outside a .app bundle. Granting FDA now would attach to your terminal, "+
+				"not to nous. Wrap `nous security check` in a signed .app to get proper TCC attribution.")
 		return
 	}
 	fmt.Fprintf(os.Stderr, "\nFull Disk Access not granted to %s.\n", self.BundleID)
@@ -255,13 +254,13 @@ func offerFDAGrantIfNeeded(findings []security.Finding, self security.SelfInfo) 
 		_ = exec.Command("open", "-R", self.BundlePath).Run()
 	}
 	fmt.Fprintln(os.Stderr, "\nIn the System Settings pane:")
-	fmt.Fprintln(os.Stderr, "  1. Drag \"Charon Security.app\" from Finder into the list, OR click + and pick it.")
+	fmt.Fprintln(os.Stderr, "  1. Drag the .app from Finder into the list, OR click + and pick it.")
 	fmt.Fprintln(os.Stderr, "  2. Toggle the switch ON.")
-	fmt.Fprintln(os.Stderr, "  3. Re-run `make security` to read TCC.db.")
+	fmt.Fprintln(os.Stderr, "  3. Re-run `nous security check` to read TCC.db.")
 }
 
-func runRemedy(args []string) error {
-	opts := security.RenderOptions{NoColor: flagNoColor}
+func runSecurityRemedy(flags *securityFlags, args []string) error {
+	opts := security.RenderOptions{NoColor: flags.noColor}
 	if len(args) == 0 {
 		security.PrintAllRemedies(os.Stdout, opts)
 		return nil
@@ -275,4 +274,3 @@ func runRemedy(args []string) error {
 	security.PrintRemedy(os.Stdout, entry, opts)
 	return nil
 }
-

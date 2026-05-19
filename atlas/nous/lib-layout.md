@@ -46,7 +46,8 @@ lib/
                                        memory)
   security/    — host-security audit machinery. Sibling to provider/,
                  not nested, since security audits are orthogonal to
-                 credential routing. Consumer: cmd/nous-security/.
+                 credential routing. Consumer: cmd/nous/security.go
+                 (the `nous security check` / `remedy` subcommands).
   service/     — launchd plist generation + service control. Today
                  the charon-side service manager; brain-sync has its
                  own at lib/brainsync/service_darwin.go (kept separate
@@ -69,10 +70,9 @@ lib/
   - Top-level verbs from `lib/charoncli`: `run`, `arm`, `disarm`, `vault`, plus the substrate-owned `serve`, `service`, `status`, `instructions`, `manifest`, `identity`, `brain`.
   - `nous provider` cluster (also from `lib/charoncli`): bare cmd is the auth TUI (`AuthCmd`), subcommands `manifest`, `gcp`, `who`, `stats`, `scopes`.
   Wires `nous service install/start/stop/status` to the unified `com.42shots.nous` plist via `lib/service.NewUnified`. Identity + brain clusters import `lib/identity` + `lib/brain`.
-- `cmd/nous-security/` — macOS menubar app. Separate cmd (different Info.plist + signing). Imports `lib/security`.
 - `cmd/gmail/`, `cmd/oneshot/` — Gmail tool entry points. Import `lib/gmail`.
 
-(Historical: `cmd/charon/` and `cmd/brain-sync/` existed as standalone binaries until nous#20. Their CLI verbs migrated onto `nous` and they were retired to keep the keychain ACL story coherent — every daemon read uses one codesign identity rather than three.)
+(Historical: `cmd/charon/` and `cmd/brain-sync/` existed as standalone binaries until nous#20. Their CLI verbs migrated onto `nous` and they were retired to keep the keychain ACL story coherent — every daemon read uses one codesign identity rather than three. `cmd/nous-security/` followed the same pattern in nous#22: the audit and menubar moved onto `nous security {check,remedy,menubar}` subcommands inside the unified binary. A signed `.app` wrapper for the menubar remains as a deferred follow-up.)
 
 ## Cross-import rule
 
