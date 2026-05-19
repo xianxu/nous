@@ -211,25 +211,22 @@ func (m detailModel) View() string {
 		}
 	}
 
-	// Share with peers — surface the full onboarding sequence an
-	// operator should hand to a peer they've just admitted as a
-	// recipient. Three parts: peer needs YOUR pubkey to verify the
-	// gcrypt manifest signature, you need peer's pubkey (already
-	// done if they're listed above), and the clone command. Only
-	// meaningful for shared brains (private brains have no peers)
-	// AND when an origin URL is configured (a brand-new brain
-	// before the first push has none).
+	// Share with peers — surface the one command an operator should
+	// hand to a peer after admitting them as a recipient. Auto-imports
+	// all peer pubkeys from the brain's keys branch (nous#23) before
+	// running gcrypt clone, so the peer doesn't need any pubkey hand-
+	// off beyond the initial fingerprint exchange to verify (opt-in
+	// via `nous brain recipient verify`). Only shown for shared brains
+	// with a configured origin URL.
 	if s.Manifest.Shared() && s.OriginURL != "" {
 		b.WriteString(sectionHeaderStyle.Render("Share with peers"))
 		b.WriteString("\n")
-		b.WriteString("  On YOUR machine, send peer your pubkey:\n")
-		b.WriteString(mutedStyle.Render("    nous identity export > you.pub      # then sneakernet to peer\n"))
-		b.WriteString("  On THEIR machine, import your pubkey + clone the brain:\n")
-		b.WriteString(mutedStyle.Render("    nous identity import you.pub        # verify-fingerprint ceremony\n"))
-		b.WriteString(mutedStyle.Render(fmt.Sprintf("    git clone %s\n", s.OriginURL)))
+		b.WriteString(fmt.Sprintf("  nous brain clone %s\n", s.OriginURL))
 		b.WriteString(mutedStyle.Render(
-			"  Both directions: gcrypt signs every manifest, so each peer\n" +
-				"  needs every other peer's pubkey to verify before decrypting."))
+			"  (run on the peer's machine; their fresh clone auto-imports\n" +
+				"   every recipient's pubkey from the keys branch, then gcrypt-\n" +
+				"   clones the brain. Verify any pubkey out-of-band later with\n" +
+				"   `nous brain recipient verify` if desired.)"))
 		b.WriteString("\n")
 	}
 

@@ -1,6 +1,6 @@
 ---
 id: 000023
-status: open
+status: done
 deps: [000012, 000022]
 created: 2026-05-19
 updated: 2026-05-19
@@ -451,7 +451,7 @@ Share with peers
       ceremony that replaces the mandatory verify-fingerprint at
       `nous identity import` for keys-branch-discovered pubkeys.
 
-- [ ] M8: TUI "Share with peers" simplification + threat-model
+- [x] M8: TUI "Share with peers" simplification + threat-model
       doc rewrite + nous#12 Phase 1-3 collapse.
 
 M1 is the foundation; M2-M7 each consume the abstraction without
@@ -504,6 +504,41 @@ they already have. WhatsApp's "verify on suspicion" UX model is
 the right fit.
 
 ## Log
+
+### 2026-05-19 — M8 landed; #23 closes
+
+Documentation sweep across three surfaces:
+
+- **`lib/tui/brain/detail.go` "Share with peers"** — collapsed
+  from the 4-line bidirectional sneakernet instructions
+  (`nous identity export → sneakernet → import → git clone`) to a
+  single command: `nous brain clone <gcrypt-url>`. Trailing note
+  explains the keys-branch auto-import + opt-in `recipient verify`.
+- **`brain/atlas/threat-model-shared-brain.md`** — new Revisions
+  section dated 2026-05-19 captures the peer-pubkey distribution
+  design. Spells out threat-surface deltas (new: rogue current
+  recipient with push access can swap pubkeys; removed: N×N
+  sneakernet failure modes), the bounded write surface (mutating
+  the keys branch requires GitHub push access, which is exactly
+  the recipient set), and the WhatsApp-flavored verify-on-suspicion
+  UX. Leaves the operator's-own-private-key bootstrap section
+  unchanged — #23 is about pubkey distribution, not private-key
+  delivery.
+- **`workshop/issues/000012-shared-brain-dogfood.md` Phase 5** —
+  rewrote wife's clone step to use `nous brain clone` (which
+  auto-imports pubkeys before gcrypt-cloning). Added an optional
+  `nous brain recipient verify` ceremony as the "if you suspect
+  tampering" follow-up. Pre-#23 fallback documented for
+  completeness. Phases 1-3 unchanged: those are about wife's
+  pubkey reaching operator (still needed for `nous brain recipient
+  add`); #23 changes the OPERATOR's pubkey → wife direction.
+
+#23 closes. The user contract from the design discussion holds:
+
+  - Pairwise OOB exchange: ONE fingerprint per relationship, at
+    admit time. 40 hex chars; phone / voice / text.
+  - Everything else flows through the keys branch.
+  - Verify-fingerprint ceremony available on demand, not required.
 
 ### 2026-05-19 — M7 landed
 New verb: `nous brain recipient verify BRAIN-PATH FINGERPRINT`.

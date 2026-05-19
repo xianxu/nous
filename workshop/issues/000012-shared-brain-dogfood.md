@@ -188,19 +188,34 @@ She runs:
 
 ```sh
 cd ~/workspace
-git clone gcrypt::ssh://git@github.com/xianxu/brain-shared-family.git
+nous brain clone gcrypt::ssh://git@github.com/xianxu/brain-shared-family.git
 cd brain-shared-family
 ls -la                              # should see .brain/config.md + the seed content
 cat .brain/config.md                # should show both recipients, no mode:
 ```
 
 **Expected:**
-- Clone takes a beat (gcrypt has to decrypt). pinentry-mac may pop up asking for her passphrase if gpg-agent's cache is cold.
+- `nous brain clone` first fetches operator's pubkey from the brain's `keys` branch and gpg-imports it (post-`nous#23`), then runs the gcrypt clone. Without this auto-import step the gcrypt clone would fail with `gpg: Can't check signature: No public key` — gcrypt signs every manifest with the producer's GPG key, and the consumer must have it to verify.
+- Clone takes a beat (gcrypt has to decrypt the pack). pinentry-mac may pop up asking for her passphrase if gpg-agent's cache is cold.
 - `.brain/config.md` is plaintext on her side — gcrypt is at the remote, working tree is decrypted.
 - Manifest matches what I provisioned.
 
+**Pre-`nous#23` fallback** (only relevant if she's cloning a brain provisioned before the keys-branch design landed):
+```sh
+nous identity import /path/to/xianxu.pub   # one-time sneakernet hand-off
+git clone gcrypt::ssh://git@github.com/xianxu/brain-shared-family.git
+```
+`nous brain clone` detects the missing keys branch and falls through silently to this flow; the operator's pubkey still needs to arrive OOB once.
+
+**Optional verification ceremony** (`nous#23` opt-in): after the clone, she can confirm operator's pubkey wasn't tampered with on the keys branch:
+```sh
+nous brain recipient verify ~/workspace/brain-shared-family $XIANXU_FP
+```
+Renders fingerprint + UID, prompts for the last-8 he sent her OOB (phone/voice, NOT the same channel as the brain access), reports match/mismatch. Skippable; recommended once when she joins a new family member's brain.
+
 **Watch for:**
 - `gcrypt: cannot decrypt for any of the recipients` → her keyring doesn't have her own secret key (Phase 1 didn't actually generate it) OR my `--recipient $WIFE_FP` was wrong.
+- `gpg: Can't check signature: No public key` → keys branch missing AND no manual pubkey import done. `nous brain clone`'s fallback hint should have surfaced before this.
 - pinentry-mac silent failures (her macOS Keychain not configured). If she has to type her passphrase every operation, log it for `nous#3` follow-up.
 
 ### Phase 6 — round-trip edit
