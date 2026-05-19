@@ -5,6 +5,8 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 // Run is the entrypoint for the brain-sync goroutine. Two modes:
@@ -151,11 +153,58 @@ func runWithAutoDiscovery(ctx context.Context, fetchEvery, discoverEvery time.Du
 		log.Printf("brainsync: auto-discovered %d shared brain(s); rescanning every %s", initialCount, discoverEvery)
 	}
 
+	// Set up an fsnotify watch on the rescan-signal file so any
+	// `nous brain` cobra invocation wakes us sub-second (vs. waiting
+	// up to discoverEvery for the periodic tick). Best-effort: if the
+	// signal file path can't be resolved or fsnotify won't attach, we
+	// fall back to ticker-only — a degraded but functional mode.
+	signalCh := make(chan struct{}, 1)
+	if signalPath, err := EnsureRescanSignal(); err != nil {
+		log.Printf("brainsync: rescan-signal setup failed (ticker-only): %v", err)
+	} else if watcher, err := fsnotify.NewWatcher(); err != nil {
+		log.Printf("brainsync: fsnotify init failed (ticker-only): %v", err)
+	} else {
+		if err := watcher.Add(signalPath); err != nil {
+			log.Printf("brainsync: fsnotify add %s failed (ticker-only): %v", signalPath, err)
+			_ = watcher.Close()
+		} else {
+			defer watcher.Close()
+			go func() {
+				for {
+					select {
+					case ev, ok := <-watcher.Events:
+						if !ok {
+							return
+						}
+						// CHMOD covers os.Chtimes; WRITE covers explicit
+						// writes; CREATE covers a manual `rm` + recreate.
+						if ev.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Chmod) != 0 {
+							select {
+							case signalCh <- struct{}{}:
+							default:
+								// Already have a pending wakeup queued; drop.
+							}
+						}
+					case err, ok := <-watcher.Errors:
+						if !ok {
+							return
+						}
+						log.Printf("brainsync: fsnotify error: %v", err)
+					case <-ctx.Done():
+						return
+					}
+				}
+			}()
+		}
+	}
+
 	ticker := time.NewTicker(discoverEvery)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
+			reconcile()
+		case <-signalCh:
 			reconcile()
 		case <-ctx.Done():
 			mu.Lock()

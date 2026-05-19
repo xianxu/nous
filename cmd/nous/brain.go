@@ -18,6 +18,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+
+	"github.com/xianxu/nous/lib/brainsync"
 )
 
 func newBrainCmd() *cobra.Command {
@@ -48,6 +50,18 @@ Subcommands:
 				return runBrainTUI()
 			}
 			return cmd.Help()
+		},
+		// User contract: "if you can see it in `nous brain`, the daemon
+		// watches it." Every subcommand under nous-brain (including this
+		// command itself when it falls through to help / TUI) touches the
+		// rescan-signal file on completion, waking any running `nous
+		// serve` to re-discover. Best-effort; touch failures are logged
+		// but don't fail the user's command.
+		PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
+			if err := brainsync.TouchRescanSignal(); err != nil {
+				cmd.PrintErrf("brainsync: rescan-signal touch failed: %v\n", err)
+			}
+			return nil
 		},
 	}
 	cmd.AddCommand(
