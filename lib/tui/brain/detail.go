@@ -129,13 +129,16 @@ func (m detailModel) View() string {
 	if s.Manifest.Shared() {
 		kind = "shared"
 	}
-	substrate := s.Manifest.SyncSubstrate
-	if substrate == "" {
-		substrate = "none"
+	// sync_substrate names any *additional* file-sync layer beyond
+	// git+gcrypt (syncthing, git-daemon). The default "" / "none" means
+	// "git+gcrypt only" — which IS the sync mechanism — so showing it
+	// in the header was misleading ("am I not syncing?"). Surface only
+	// when a substrate is actually configured.
+	headerLine := fmt.Sprintf("%s · %d recipient(s)", kind, len(s.Manifest.Recipients))
+	if sub := s.Manifest.SyncSubstrate; sub != "" && sub != "none" {
+		headerLine += fmt.Sprintf(" · sync_substrate: %s", sub)
 	}
-	b.WriteString(mutedStyle.Render(fmt.Sprintf(
-		"%s · %d recipient(s) · sync_substrate: %s",
-		kind, len(s.Manifest.Recipients), substrate)))
+	b.WriteString(mutedStyle.Render(headerLine))
 	b.WriteString("\n")
 
 	if s.Mismatch {
@@ -206,6 +209,24 @@ func (m detailModel) View() string {
 			b.WriteString(mutedStyle.Render(fmt.Sprintf("... and %d more (press c to preview)", len(s.ConflictFiles)-max)))
 			b.WriteString("\n")
 		}
+	}
+
+	// Share with peers — surface the exact `git clone` command an
+	// operator should hand to a peer they've just admitted as a
+	// recipient. Only meaningful for shared brains (private brains have
+	// no peers to share with) AND when an origin URL is configured (a
+	// brand-new brain before the first push has none). For peers, the
+	// flow on their machine: `git clone <url>` after the operator has
+	// added them to the recipient list and pushed (`nous brain
+	// recipient add` does both).
+	if s.Manifest.Shared() && s.OriginURL != "" {
+		b.WriteString(sectionHeaderStyle.Render("Share with peers"))
+		b.WriteString("\n")
+		b.WriteString(fmt.Sprintf("  git clone %s\n", s.OriginURL))
+		b.WriteString(mutedStyle.Render(
+			"  (run this on each admitted recipient's machine; gcrypt + their\n" +
+				"   GPG private key decrypt the contents locally)"))
+		b.WriteString("\n")
 	}
 
 	if m.banner != "" {

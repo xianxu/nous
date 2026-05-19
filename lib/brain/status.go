@@ -42,6 +42,12 @@ type Status struct {
 	Ahead       int
 	Behind      int
 
+	// OriginURL is the gcrypt remote URL configured at remote.origin.url,
+	// e.g. `gcrypt::ssh://git@github.com/owner/brain.git`. Empty when
+	// no origin remote is configured (fresh `git init` before any push).
+	// Surfaced so the brain TUI can show peers the exact clone command.
+	OriginURL string
+
 	// ConflictFiles is relative paths under brain root that match the
 	// brainsync conflict-file convention (`*.conflict-<peer>-<utc>.<ext>`).
 	// Empty slice = no conflicts.
@@ -91,11 +97,25 @@ func LoadStatus(brainRoot string) (Status, error) {
 	// Sync state.
 	s.LastCommit = readLastCommit(abs)
 	s.HasUpstream, s.Ahead, s.Behind = readUpstreamPosition(abs)
+	s.OriginURL = readOriginURL(abs)
 
 	// Conflict files.
 	s.ConflictFiles = findConflictFiles(abs)
 
 	return s, nil
+}
+
+// readOriginURL returns the configured `remote.origin.url` (e.g.
+// `gcrypt::ssh://git@github.com/owner/brain.git`), or empty string
+// when no origin remote is configured. Best-effort; errors swallowed
+// — Status callers degrade to "no clone URL available" rather than
+// failing the whole status read.
+func readOriginURL(brainRoot string) string {
+	out, err := exec.Command("git", "-C", brainRoot, "config", "--get", "remote.origin.url").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // conflictFileRE matches the brainsync convention:
