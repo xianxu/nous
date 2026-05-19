@@ -415,11 +415,14 @@ Share with peers
       bare-repo fixture as the "remote" (file:// URLs) — zero
       GitHub or network calls. 10 tests, all passing.
 
-- [ ] M2: **`lib/brain/peerkeys.go` thin layer**. Convenience
+- [x] M2: **`lib/brain/peerkeys.go` thin layer**. Convenience
       helpers (PublishPubkey, RevokePubkey, ImportAllPubkeys) that
-      compose filestore + identity packages. Tests cover the
-      filename-convention + idempotence behaviors, not the
-      filestore mechanics (already tested in M1).
+      compose filestore + identity packages. Behaviors uniquely
+      owned by peerkeys: filename convention (uppercase fp + .asc
+      suffix), non-.asc filter in ImportAllPubkeys, idempotent
+      delete on missing entries. Dedicated unit tests skipped —
+      peerkeys is pass-through glue; end-to-end coverage starts
+      in M3 (wire into `nous brain new`).
 
 - [ ] M3: Wire into **`nous brain new`** (operator + initial peer
       pubkeys published via filestore on the first push). Verify
@@ -501,6 +504,32 @@ they already have. WhatsApp's "verify on suspicion" UX model is
 the right fit.
 
 ## Log
+
+### 2026-05-19 — M2 landed
+`lib/brain/peerkeys.go` — 80-line glue layer. Three exported
+functions:
+
+- `PublishPubkey(ctx, brainRoot, fp)` — exports the pubkey from
+  the local GPG keyring, opens the brain's keys filestore, Puts
+  `<UPPERCASE-FP>.asc`. Idempotent at the filestore layer
+  (identical content → no commit).
+- `RevokePubkey(ctx, brainRoot, fp)` — opens the keys filestore,
+  Deletes `<UPPERCASE-FP>.asc`. Doesn't touch the local keyring
+  (operator's concern).
+- `ImportAllPubkeys(ctx, brainRoot) (imported, errs, err)` —
+  Lists every file in the keys filestore, filters for `.asc`
+  suffix, runs `identity.Import` on each. Per-file Import errors
+  collected into `errs` without aborting; only a Store.List
+  failure surfaces as `err`.
+
+The filename convention (`<UPPERCASE-FP>.asc`) is owned here. All
+git vocabulary — branches, remotes, pushes, commits — stays
+encapsulated in M1's filestore package. Callers from M3 onward
+only touch fp strings and bytes.
+
+Dedicated unit tests skipped: peerkeys is glue; end-to-end
+coverage starts in M3 when `nous brain new` wires it into the
+brain-provision flow.
 
 ### 2026-05-19 — M1 landed
 `lib/brain/filestore/` foundation. Interface is exactly the
