@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/xianxu/nous/lib/brain"
 )
 
 // RunGit runs `git -C repo args...` and returns stdout. Stderr is folded
@@ -57,6 +59,13 @@ var ErrPushRejected = errors.New("push rejected by remote")
 //
 // If the working tree is clean (nothing to commit), returns nil without
 // error — this is the "edited and reverted within window" case.
+//
+// Before the push, syncs `remote.origin.gcrypt-participants` from the
+// brain's manifest (the canonical source of recipients). gcrypt's
+// remote helper reads that config at push time to decide who to
+// encrypt to; treating it as a derived-cache-of-the-manifest rather
+// than a separately-mutated store eliminates the drift class that
+// produces silent ciphertext-to-wrong-recipients bugs (see nous#24).
 func AddCommitPush(repo, msg string) error {
 	if _, err := RunGit(repo, "add", "-A"); err != nil {
 		return err
@@ -68,6 +77,12 @@ func AddCommitPush(repo, msg string) error {
 	if _, err := RunGit(repo, "commit", "-m", msg); err != nil {
 		return err
 	}
+	// Derive gcrypt-participants from the (now-committed) manifest
+	// before push. Manifest is canonical; this is the single sync
+	// point that keeps the two storage locations consistent.
+	if err := brain.SyncGcryptParticipantsFromManifest(repo); err != nil {
+		return fmt.Errorf("sync gcrypt-participants from manifest: %w", err)
+	}
 	if _, err := RunGit(repo, "push", "origin", "main"); err != nil {
 		if strings.Contains(err.Error(), "rejected") || strings.Contains(err.Error(), "non-fast-forward") {
 			return ErrPushRejected
@@ -78,7 +93,14 @@ func AddCommitPush(repo, msg string) error {
 }
 
 // Push runs `git push origin`. Returns ErrPushRejected on non-fast-forward.
+//
+// Same gcrypt-participants sync as AddCommitPush — manifest is the
+// canonical source; push is the only place we need the derived config
+// to be current.
 func Push(repo string) error {
+	if err := brain.SyncGcryptParticipantsFromManifest(repo); err != nil {
+		return fmt.Errorf("sync gcrypt-participants from manifest: %w", err)
+	}
 	if _, err := RunGit(repo, "push", "origin", "main"); err != nil {
 		if strings.Contains(err.Error(), "rejected") || strings.Contains(err.Error(), "non-fast-forward") {
 			return ErrPushRejected

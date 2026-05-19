@@ -165,9 +165,9 @@ a second commit + push (gcrypt re-encrypts to all recipients).`,
 			if err := brain.WriteManifest(abs, m); err != nil {
 				return fmt.Errorf("rewrite manifest: %w", err)
 			}
-			if err := brain.SetGcryptParticipants(abs, recipients); err != nil {
-				return fmt.Errorf("rewrite gcrypt-participants: %w", err)
-			}
+			// gcrypt-participants will be synced from the manifest by
+			// the push wrapper below (nous#24); no explicit
+			// SetGcryptParticipants call needed.
 
 			// If we changed anything, commit + push so gcrypt
 			// re-encrypts to the full recipient set. Without this

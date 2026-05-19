@@ -38,9 +38,10 @@ import (
 //	                admitting to a brain is a distinct trust event
 //	                from importing the pubkey.
 //	addStageApply   async: identity.Import + brain.RewriteFrontmatter
-//	                + brain.SetGcryptParticipants +
-//	                brainsync.AddCommitPush. Static "applying..."
-//	                while waiting on addApplyResultMsg.
+//	                + brainsync.AddCommitPush (which auto-syncs
+//	                gcrypt-participants from the manifest before push,
+//	                per nous#24). Static "applying..." while waiting on
+//	                addApplyResultMsg.
 //	addStageDone    success/error banner. enter/esc pops to detail.
 
 // recipientAddedMsg signals success back to the detail model so it can
@@ -404,9 +405,8 @@ func (m recipientAddModel) applyCmd() tea.Cmd {
 		if err := libbrain.RewriteFrontmatter(brainPath, man); err != nil {
 			return addApplyResultMsg{err: fmt.Errorf("rewrite frontmatter: %w", err)}
 		}
-		if err := libbrain.SetGcryptParticipants(brainPath, man.Recipients); err != nil {
-			return addApplyResultMsg{err: fmt.Errorf("gcrypt participants: %w", err)}
-		}
+		// gcrypt-participants derives from the manifest at push time
+		// (nous#24); AddCommitPush below handles the sync.
 		if err := brainsync.AddCommitPush(brainPath, fmt.Sprintf("recipient: admit %s", last8)); err != nil {
 			return addApplyResultMsg{err: fmt.Errorf("push: %w", err)}
 		}

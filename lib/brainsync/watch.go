@@ -3,7 +3,6 @@ package brainsync
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -63,11 +62,12 @@ func PushBrain(repo, peer string, now func() time.Time) (pushed bool, err error)
 // is dirty (lets the user commit first; resolve happens on push). Returns
 // true if a fast-forward pull actually happened.
 //
-// On a successful pull, also re-syncs `remote.origin.gcrypt-participants`
-// from the brain's manifest. Without this, a peer who pulls after another
-// recipient is added would still have a stale participants list, and
-// their next push would encrypt to the old set — breaking decryption for
-// recipients admitted after their clone.
+// Doesn't sync gcrypt-participants — that's the push wrapper's job
+// (AddCommitPush / Push) per nous#24. The manifest update from the
+// pull lands on disk; the next push reads the manifest and derives
+// gcrypt-participants from it. Pull-side sync would be belt-and-
+// suspenders; the push-side single sync point is sufficient for the
+// "manifest is canonical" property.
 func PullBrain(repo string) (pulled bool, err error) {
 	if err := Fetch(repo); err != nil {
 		return false, err
@@ -82,13 +82,6 @@ func PullBrain(repo string) (pulled bool, err error) {
 	}
 	if err := PullFF(repo); err != nil {
 		return false, err
-	}
-	// Re-sync gcrypt-participants from the (now-current) manifest.
-	// Best-effort: a sync failure here is noisy but the pull itself
-	// succeeded. Surface as a returned error so the caller logs it,
-	// but don't pretend the pull failed.
-	if err := brain.SyncGcryptParticipantsFromManifest(repo); err != nil {
-		return true, fmt.Errorf("pull succeeded but gcrypt-participants sync failed: %w", err)
 	}
 	return true, nil
 }

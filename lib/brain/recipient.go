@@ -21,8 +21,9 @@ import (
 //	// caller-specific safeguards (self-removal warning, ceremony, etc.)
 //	m.Recipients = brain.WithoutRecipient(m.Recipients, match)
 //	brain.RewriteFrontmatter(path, m)
-//	brain.SetGcryptParticipants(path, m.Recipients)
-//	brainsync.AddCommitPush(path, msg)
+//	brainsync.AddCommitPush(path, msg)  // syncs gcrypt-participants
+//	                                    // from manifest before push
+//	                                    // (nous#24)
 
 // MatchRecipient finds a recipient on `manifestFps` matching the
 // operator's `input` — either the full 40-char fingerprint or its last

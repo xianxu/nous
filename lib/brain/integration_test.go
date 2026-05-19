@@ -339,9 +339,11 @@ func provisionBrain(t *testing.T, p *testPeer, remoteURL string, recipients []st
 	mustGit(t, brainDir, "config", "user.name", p.name)
 	mustGit(t, brainDir, "remote", "add", "origin", "gcrypt::"+remoteURL)
 
-	if err := brain.SetGcryptParticipants(brainDir, recipients); err != nil {
-		t.Fatalf("set gcrypt participants: %v", err)
-	}
+	// Note: no explicit brain.SetGcryptParticipants here — per
+	// nous#24, the manifest is the canonical source and the push
+	// wrapper (brainsync.AddCommitPush below) syncs gcrypt-participants
+	// before the actual push. If this provisioning fails because of a
+	// missing gcrypt-participants config, the refactor is broken.
 	if err := brain.WriteManifest(brainDir, brain.Manifest{
 		Name:       filepath.Base(brainDir),
 		Recipients: recipients,
@@ -374,9 +376,9 @@ func admitRecipient(t *testing.T, brainPath, newFP string) {
 	if err := brain.RewriteFrontmatter(brainPath, m); err != nil {
 		t.Fatalf("rewrite frontmatter: %v", err)
 	}
-	if err := brain.SetGcryptParticipants(brainPath, m.Recipients); err != nil {
-		t.Fatalf("set gcrypt participants: %v", err)
-	}
+	// No explicit SetGcryptParticipants — push wrapper syncs from
+	// manifest (nous#24). If the test breaks after this removal, the
+	// refactor doesn't actually centralize the sync.
 	if err := brainsync.AddCommitPush(brainPath, "admit "+newFP[len(newFP)-8:]); err != nil {
 		t.Fatalf("admit push: %v", err)
 	}

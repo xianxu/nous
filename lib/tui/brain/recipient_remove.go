@@ -275,9 +275,8 @@ func (m recipientRemoveModel) applyCmd() tea.Cmd {
 		if err := libbrain.RewriteFrontmatter(brainPath, man); err != nil {
 			return removeApplyResultMsg{err: fmt.Errorf("rewrite frontmatter: %w", err)}
 		}
-		if err := libbrain.SetGcryptParticipants(brainPath, man.Recipients); err != nil {
-			return removeApplyResultMsg{err: fmt.Errorf("gcrypt participants: %w", err)}
-		}
+		// gcrypt-participants derives from the manifest at push time
+		// (nous#24); AddCommitPush below handles the sync.
 		if err := brainsync.AddCommitPush(brainPath, fmt.Sprintf("recipient: revoke %s", short)); err != nil {
 			return removeApplyResultMsg{err: fmt.Errorf("push: %w", err)}
 		}

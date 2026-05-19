@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -102,42 +101,11 @@ Args:
 			if err := c.Run(); err != nil {
 				return fmt.Errorf("git clone: %w", err)
 			}
-
-			// 3. Resync gcrypt-participants from the cloned manifest.
-			// gcrypt's clone protocol doesn't auto-populate the local
-			// participants list, so without this step the new clone's
-			// first push would encrypt to a stale (or empty) set —
-			// breaking decryption for the other recipients.
-			clonedBrain := deriveCloneTarget(gcryptURL, targetDir)
-			if err := brain.SyncGcryptParticipantsFromManifest(clonedBrain); err != nil {
-				// Don't fail the clone over this — the brain is on
-				// disk and decryptable. Surface as a warning + hint;
-				// the next pull will retry the sync.
-				fmt.Fprintf(out, "  warning: gcrypt-participants sync failed: %v\n", err)
-				fmt.Fprintln(out, "  (subsequent pushes may not reach every recipient until you re-sync — `nous brain` will retry on next pull)")
-			}
+			// No explicit gcrypt-participants sync needed here: the
+			// brainsync push wrapper syncs from the manifest before
+			// every push (nous#24). The local config is stale until
+			// the first push, but nothing reads it before then.
 			return nil
 		},
 	}
-}
-
-// deriveCloneTarget mirrors `git clone`'s default target-directory
-// behavior: when target is empty, basename of the URL (stripped of
-// `.git` suffix) is the directory name in the operator's CWD. When
-// target is explicit, use it as-is.
-//
-// We need this because the SyncGcryptParticipantsFromManifest call
-// needs the clone's local path, but `git clone` doesn't print it.
-func deriveCloneTarget(gcryptURL, targetDir string) string {
-	if targetDir != "" {
-		return targetDir
-	}
-	// Strip the gcrypt:: prefix, then any URL-ish bits, then take
-	// basename, then drop trailing ".git".
-	url := strings.TrimPrefix(gcryptURL, "gcrypt::")
-	base := url
-	if i := strings.LastIndexAny(url, "/:"); i >= 0 {
-		base = url[i+1:]
-	}
-	return strings.TrimSuffix(base, ".git")
 }

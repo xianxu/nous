@@ -149,11 +149,16 @@ func renderManifest(m Manifest) string {
 // gcrypt accepts a space-separated list of fingerprints; sorted to
 // match WriteManifest's posture.
 //
-// Re-running with a different fingerprint list updates the config; the
-// next `git push` re-encrypts gcrypt's metadata to the new list. Old
-// recipients can still decrypt blobs already in the gcrypt object
-// store — see RecipientRemove caller-side comments for the revocation
-// caveat.
+// **New code should not call this directly.** Per nous#24, the manifest
+// is the canonical source for the recipient list, and gcrypt-participants
+// is a derived cache the brainsync push wrapper refreshes before every
+// push (via SyncGcryptParticipantsFromManifest below). Calling
+// SetGcryptParticipants from outside the push wrapper risks drift
+// between the two stores — exactly the bug class nous#24 closed.
+//
+// Kept exported because (a) the push wrapper needs it as the underlying
+// primitive, and (b) tests / migration tools occasionally need an
+// explicit write that bypasses the manifest read.
 func SetGcryptParticipants(brainRoot string, fingerprints []string) error {
 	if len(fingerprints) == 0 {
 		return fmt.Errorf("at least one recipient required (gcrypt rejects empty participant list)")

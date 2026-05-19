@@ -205,9 +205,8 @@ brain/atlas/threat-model-shared-brain.md.`,
 			if err := brain.RewriteFrontmatter(brainPath, m); err != nil {
 				return err
 			}
-			if err := brain.SetGcryptParticipants(brainPath, m.Recipients); err != nil {
-				return err
-			}
+			// gcrypt-participants derives from the manifest at push
+			// time (nous#24) — no explicit SetGcryptParticipants here.
 
 			fmt.Fprintf(out, "Admitted %s to %s.\n", key.Last8(), brainPath)
 			fmt.Fprintln(out, "Pushing so gcrypt re-encrypts to the new recipient set …")
@@ -418,9 +417,8 @@ TTY-only.`,
 			if err := brain.RewriteFrontmatter(brainPath, m); err != nil {
 				return err
 			}
-			if err := brain.SetGcryptParticipants(brainPath, m.Recipients); err != nil {
-				return err
-			}
+			// gcrypt-participants derives from the manifest at push
+			// time (nous#24) — no explicit SetGcryptParticipants here.
 
 			fmt.Fprintf(out, "Removed locally. Pushing so gcrypt re-encrypts …\n")
 			short := match
