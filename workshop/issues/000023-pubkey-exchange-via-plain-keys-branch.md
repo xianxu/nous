@@ -424,7 +424,7 @@ Share with peers
       peerkeys is pass-through glue; end-to-end coverage starts
       in M3 (wire into `nous brain new`).
 
-- [ ] M3: Wire into **`nous brain new`** (operator + initial peer
+- [x] M3: Wire into **`nous brain new`** (operator + initial peer
       pubkeys published via filestore on the first push). Verify
       manually: a peer can fetch the keys branch and gpg-import
       both pubkeys.
@@ -504,6 +504,36 @@ they already have. WhatsApp's "verify on suspicion" UX model is
 the right fit.
 
 ## Log
+
+### 2026-05-19 — M3 landed
+`nous brain new` now publishes every recipient's pubkey to the
+brain's `keys` filestore branch as the final step of provisioning,
+after the gcrypt-side commit + push succeeds.
+
+Loop is tight: 5 lines in the RunE that iterate recipients →
+`brain.PublishPubkey(ctx, abs, fp)`. No git/branch/remote vocab
+leaks into cmd/nous; all the plumbing stays behind peerkeys +
+filestore.
+
+Failure posture: degrade-gracefully. A keys-branch publish error
+doesn't unwind the gcrypt provisioning — the brain is functional
+either way. Failed publishes surface as `warning:` lines in
+operator output, with a trailing line that names the fallback
+(sneakernet) for peers. Hard-fail was rejected because the
+common failure mode (network blip mid-push) shouldn't waste an
+otherwise-successful brain creation.
+
+Added a small `shortFp(fp)` helper at the bottom of brain_new.go
+to centralize the last-8-lowercase formatting that this block
+needed; same shape as `shortFP` in lib/tui/brain. The cmd/nous
+copy is package-private to avoid a dependency churn just for
+formatting.
+
+Dedicated unit tests skipped: brain_new.go has no unit tests
+today (the flow is integration-shaped, exercised by the #12
+dogfood walkthrough). Adding peerkeys assertions in isolation
+would re-test what M1's filestore tests + M2's peerkeys glue
+already cover. Manual VM-side dogfood is the integration gate.
 
 ### 2026-05-19 — M2 landed
 `lib/brain/peerkeys.go` — 80-line glue layer. Three exported

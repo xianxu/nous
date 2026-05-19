@@ -199,6 +199,34 @@ a second commit + push (gcrypt re-encrypts to all recipients).`,
 				fmt.Fprintln(out, "Pushed.")
 			}
 
+			// Publish every recipient's pubkey to the brain's `keys`
+			// filestore branch (nous#23). Peers cloning the brain
+			// later can auto-import all pubkeys before gcrypt's
+			// signature verification needs them — eliminates the
+			// manual sneakernet step.
+			//
+			// Best-effort: a keys-branch publish failure doesn't
+			// undo the gcrypt provisioning above. The brain works
+			// without it; peers would need the legacy sneakernet
+			// flow until publish succeeds. Surface failures loudly
+			// so operator knows to remediate (re-run nous brain new,
+			// or a future `nous brain publish-keys` verb).
+			fmt.Fprintln(out)
+			fmt.Fprintln(out, "Publishing recipient pubkeys to the keys branch …")
+			ctx := cmd.Context()
+			anyFailed := false
+			for _, fp := range recipients {
+				if err := brain.PublishPubkey(ctx, abs, fp); err != nil {
+					fmt.Fprintf(out, "  warning: publish %s: %v\n", shortFp(fp), err)
+					anyFailed = true
+					continue
+				}
+				fmt.Fprintf(out, "  published %s\n", shortFp(fp))
+			}
+			if anyFailed {
+				fmt.Fprintln(out, "  (some publishes failed; peers may need sneakernet pubkey exchange)")
+			}
+
 			fmt.Fprintln(out)
 			fmt.Fprintln(out, "Brain provisioned.")
 			return nil
@@ -258,3 +286,14 @@ func hasUnstagedChanges(repo string) (bool, error) {
 
 // silence unused — io is referenced via importPubkeyFromFile elsewhere.
 var _ io.Reader = (*os.File)(nil)
+
+// shortFp returns the lowercase last-8 hex chars of a fingerprint —
+// the operator-facing short form used by every nous log line that
+// mentions a key. Centralized here to avoid the inline len-slice
+// snippet creeping into every call site.
+func shortFp(fp string) string {
+	if len(fp) < 8 {
+		return strings.ToLower(fp)
+	}
+	return strings.ToLower(fp[len(fp)-8:])
+}
