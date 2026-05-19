@@ -1,15 +1,20 @@
 package keychain
 
-import "testing"
+import (
+	"testing"
 
-// withSignatureCheck swaps the package-level signatureCheck for the
-// duration of the test, restoring it on cleanup. Ensures parallel tests
-// don't observe leaked overrides.
+	"github.com/xianxu/nous/lib/codesign"
+)
+
+// withSignatureCheck swaps codesign.Check for the duration of the
+// test, restoring it on cleanup. Ensures parallel tests don't observe
+// leaked overrides. Tests using this helper MUST NOT call t.Parallel()
+// — codesign.Check has no mutex.
 func withSignatureCheck(t *testing.T, fn func() bool) {
 	t.Helper()
-	orig := signatureCheck
-	t.Cleanup(func() { signatureCheck = orig })
-	signatureCheck = fn
+	orig := codesign.Check
+	t.Cleanup(func() { codesign.Check = orig })
+	codesign.Check = fn
 }
 
 func TestResolveServiceName_signed(t *testing.T) {
