@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"os/exec"
 	"sync"
 	"time"
 
 	"fyne.io/systray"
 	"github.com/spf13/cobra"
+	"github.com/xianxu/nous/lib/notify"
 	"github.com/xianxu/nous/lib/provider/proxy"
 )
 
@@ -85,10 +85,11 @@ func menubarReady() {
 	systray.SetTitle(menubarTitle(false, "starting"))
 	systray.SetTooltip("Charon — runtime consent oracle")
 
-	// Pop the system "Charon Security would like to send notifications"
-	// prompt on first launch. Idempotent on subsequent launches; the
-	// user's answer persists in System Settings → Notifications.
-	requestNotificationAuth()
+	// Pop the system "<App> would like to send notifications" prompt
+	// on first launch (no-op outside the .app-bundle path / on non-
+	// darwin). Idempotent on subsequent launches; the user's answer
+	// persists in System Settings → Notifications.
+	notify.RequestAuth()
 
 	menubarState.mu.Lock()
 	menubarState.statusItem = systray.AddMenuItem("Status: …", "Current session state")
@@ -165,7 +166,7 @@ func doArm(ttl time.Duration) {
 	resp, err := socketRoundTrip(runtimeReq{Op: "arm", TTLSeconds: int64(ttl.Seconds())})
 	updateAfterRPC(resp, err)
 	if err == nil && !resp.OK {
-		notify("Charon: arm failed", resp.Error)
+		notifyBanner("Charon: arm failed", resp.Error)
 	}
 }
 
@@ -182,7 +183,7 @@ func refreshState() {
 	// driving disarm (i.e., this poll discovered an idle/absolute
 	// auto-disarm), notify.
 	if prevArmed && !getArmed() && err == nil {
-		notify("Charon", "Session auto-disarmed (idle or absolute timeout). Click the ○ icon in the menu bar to re-arm.")
+		notifyBanner("Charon", "Session auto-disarmed (idle or absolute timeout). Click the ○ icon in the menu bar to re-arm.")
 	}
 }
 
@@ -301,23 +302,15 @@ func socketRoundTrip(req runtimeReq) (runtimeResp, error) {
 	return resp, nil
 }
 
-// notify shows a macOS notification banner. When running inside the
-// Charon Security.app bundle, uses UserNotifications.framework via
-// cgo so the banner is attributed to com.charon.security (and the
-// user's Banner-vs-Alert preference is scoped to this app rather
-// than to Script Editor). Falls back to osascript when run as a
-// bare binary during dev iteration. Best-effort: failures are
-// swallowed so the menubar stays usable.
-func notify(title, msg string) {
-	if hasBundle() {
-		postNativeNotification(title, msg)
-		return
-	}
-	script := fmt.Sprintf(`display notification %q with title %q`, msg, title)
+// notifyBanner is a thin wrapper around lib/notify.Send that fits the
+// menubar's existing call sites (title + body, no subtitle, fire and
+// forget, best-effort). Runs the actual Send in a goroutine to keep
+// the systray event loop unblocked when the backend is a slow shell-
+// out (terminal-notifier, osascript).
+func notifyBanner(title, body string) {
 	go func() {
-		err := exec.Command("osascript", "-e", script).Run()
-		if err != nil {
-			log.Printf("notify osascript: %v", err)
+		if err := notify.Send(notify.Notification{Title: title, Body: body}); err != nil {
+			log.Printf("notify: %v", err)
 		}
 	}()
 }

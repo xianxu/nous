@@ -201,7 +201,7 @@ becomes a safety net rather than a normal path).
 
 - [x] M1: Extract `lib/codesign` from `lib/provider/vault/keychain/`.
       Existing keychain tests still pass. No behavioral change.
-- [ ] M2: Add `lib/notify` with three backends. Unit tests where
+- [x] M2: Add `lib/notify` with three backends. Unit tests where
       possible (mostly: assert correct backend chosen for given
       `codesign.IsSigned()` mock). End-to-end: a manual test of
       `nous security menubar` posting a notification in each mode.
@@ -248,6 +248,41 @@ notification path actually working:
   warrant a lib/ home.
 
 ## Log
+
+### 2026-05-18 — M2 landed
+Added `lib/notify` with the decision-tree dispatcher (signed+bundled
+→ UserNotifications.framework; else terminal-notifier when on PATH;
+else osascript). Public API is `notify.Send(Notification)` +
+`notify.RequestAuth()`; `notify.SetBackend` swaps the dispatch for
+tests. Backend selection is lazy (first Send picks; subsequent Sends
+reuse).
+
+Files:
+- `lib/notify/notify.go` — public API, mutex-guarded cached dispatch.
+- `lib/notify/backend_darwin.go` — pickBackend + terminal-notifier
+  and osascript backends. Test-swappable `hasBundle` and
+  `terminalNotifierPath` vars.
+- `lib/notify/userns_darwin.go` — UserNotifications.framework cgo
+  body (moved from `cmd/nous-security/notify_darwin.go`; renamed
+  C symbols charon_ → nous_; subtitle support added).
+- `lib/notify/backend_other.go` — non-darwin no-op stub.
+- `lib/notify/funcptr.go` — small reflect helper used by tests to
+  compare which backend pickBackend returned without polluting test
+  code with imports.
+- `lib/notify/notify_test.go` + `lib/notify/backend_darwin_test.go`
+  — 8 tests total: SetBackend dispatch, error propagation, nil-clear-
+  resets-cache, four pickBackend decision-tree cases, escapeAppleScript
+  table-driven.
+
+Retrofit:
+- `cmd/nous-security/menubar.go` — local `notify()` function replaced
+  by `notifyBanner()` wrapper that goroutines `notify.Send(...)` (the
+  goroutine matches the prior osascript-async behavior; matters for
+  the slow shell-out backends).
+- `cmd/nous-security/notify_darwin.go` + `notify_other.go` — deleted;
+  their logic now lives in lib/notify.
+
+Brewfile: added `terminal-notifier`.
 
 ### 2026-05-18 — M1 landed
 Extracted `lib/codesign` from `lib/provider/vault/keychain/`. New

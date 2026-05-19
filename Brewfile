@@ -13,6 +13,7 @@ brew "gnupg"
 brew "pinentry-mac"   # GUI dialog with macOS Keychain integration (default for Aqua sessions)
 brew "pinentry"       # curses/tty variants for SSH/headless contexts
 brew "git-remote-gcrypt"
+brew "terminal-notifier"  # preferred dev fallback for lib/notify; supports actions vs osascript
 brew "mutagen-io/mutagen/mutagen"
 brew "xianxu/pair/pair"
 
