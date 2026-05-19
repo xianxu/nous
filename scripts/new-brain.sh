@@ -148,7 +148,22 @@ create_repo() {
         --disable-issues --disable-wiki >/dev/null
 }
 
-if gh repo view "$GH_FULL" >/dev/null 2>&1; then
+# Existence check via REST `/repos/<owner>/<name>` rather than `gh repo
+# view` (GraphQL) — GraphQL and `/users/<login>` lookups can lag for
+# brand-new accounts (~minutes to hours), while the REST repo endpoint
+# resolves via the repo's own ID immediately. See nous#25 for the
+# original repro (fresh `yingtest42` account, 2026-05-19).
+#
+# Escape hatch: SKIP_REPO_CREATE=1 skips both existence check and
+# create entirely, for cases where even the REST endpoint hasn't
+# propagated but the operator knows the repo exists (manually created
+# via web UI).
+SKIP_REPO_CREATE="${SKIP_REPO_CREATE:-0}"
+
+if [ "$SKIP_REPO_CREATE" = "1" ]; then
+    warn "SKIP_REPO_CREATE=1 — skipping GitHub repo creation/verification."
+    warn "  Assuming $GH_FULL exists and is empty. Push will fail if not."
+elif gh api "repos/$GH_FULL" --silent >/dev/null 2>&1; then
     BRANCH_COUNT=$(gh api "repos/$GH_FULL/branches" --jq 'length' 2>/dev/null || echo 0)
     if [ "${BRANCH_COUNT:-0}" -eq 0 ]; then
         ok "$GH_FULL exists but is empty — using it."
@@ -184,7 +199,28 @@ if gh repo view "$GH_FULL" >/dev/null 2>&1; then
     fi
 else
     info "Creating GitHub repo $GH_FULL (private, no issues, no wiki)..."
-    create_repo
+    create_err=$(mktemp -t new-brain-create.XXXXXX)
+    if ! create_repo 2>"$create_err"; then
+        # If the failure looks like fresh-account /users/<login> lookup
+        # lag (and the auth'd user IS $GH_OWNER), give a clear hint
+        # rather than the bare HTTP 404. See nous#25.
+        if grep -q "users/$GH_OWNER" "$create_err" 2>/dev/null \
+           && [ "$(gh api user --jq .login 2>/dev/null)" = "$GH_OWNER" ]; then
+            warn ""
+            warn "  GitHub's /users/$GH_OWNER endpoint hasn't propagated yet."
+            warn "  Your account is recent enough that 'gh repo create' can't"
+            warn "  validate the owner. Two options:"
+            warn "    1. Wait 30-60 min and retry."
+            warn "    2. Create the repo manually at https://github.com/new"
+            warn "       ($GH_FULL, private, empty), then rerun with:"
+            warn "         SKIP_REPO_CREATE=1 make new-brain"
+            warn ""
+        fi
+        cat "$create_err" >&2
+        rm -f "$create_err"
+        die "gh repo create failed."
+    fi
+    rm -f "$create_err"
     ok "Created https://github.com/$GH_FULL"
 fi
 
