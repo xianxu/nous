@@ -439,7 +439,7 @@ Share with peers
       then `git clone gcrypt::...`. Familiar shape for operators
       who know git.
 
-- [ ] M6: **Brain-sync watcher integration**. Per-brain ticker
+- [x] M6: **Brain-sync watcher integration**. Per-brain ticker
       also fetches the keys branch (via filestore) and runs
       ImportAllPubkeys. New entries get added to keyring within
       one tick (≤60s) without operator action. Log new pubkeys at
@@ -504,6 +504,51 @@ they already have. WhatsApp's "verify on suspicion" UX model is
 the right fit.
 
 ## Log
+
+### 2026-05-19 — M6 landed
+Brain-sync watcher's periodic tick now calls
+`brain.ImportAllPubkeys` for each watched brain alongside the
+existing `PullBrain`. New peers added by anyone (on this machine
+or any other) propagate into the local GPG keyring within one
+tick (≤60s default) with no operator action.
+
+Wrapped in `syncBrainPubkeys` helper inside lib/brainsync/watch.go
+so the verbose/non-verbose logging logic stays consistent:
+
+  - imported > 0     → log "imported N peer pubkey(s) for <brain>"
+                       at Info (always, not just verbose)
+  - imported == 0    → silent
+  - top-level err    → log only under --verbose (silent otherwise
+                       to avoid spamming on every tick for brains
+                       that predate #23 / lack a keys branch)
+  - per-file errs[]  → log only under --verbose (gpg's import is
+                       noisy on duplicates; Info-logging would
+                       flood the journal)
+
+Import-cycle check: lib/brainsync already imports lib/brain (via
+discovery.go's manifest reads), so adding ImportAllPubkeys
+doesn't introduce a new dependency direction.
+
+End-to-end (after M6 lands on both peers' machines):
+
+  Operator (on host):     nous brain recipient add <brain> <peer-pub>
+                          → manifest update, gcrypt re-key push,
+                            keys-branch publish (M4).
+  Other peers (any host): on next brain-sync tick (≤60s),
+                          ImportAllPubkeys picks up the new pubkey,
+                          gpg-imports it. Next gcrypt pull's
+                          signature-verify works without manual
+                          intervention.
+
+This closes the "N×N pubkey exchange" friction. The user's family-
+brain dogfood now reduces to:
+
+  - Operator + each peer share their fingerprint OOB once (40 hex
+    chars; phone/voice/text).
+  - Operator runs `nous brain recipient add` per peer; everything
+    else propagates automatically.
+  - Peers `nous brain clone` once; subsequent recipient additions
+    flow without further hand-off.
 
 ### 2026-05-19 — M5 landed
 New verb: `nous brain clone <gcrypt-url> [target-dir]`.

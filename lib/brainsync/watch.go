@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/xianxu/nous/lib/brain"
 )
 
 // PeerIDFor derives a stable peer label from `git config user.name` in the
@@ -113,9 +115,44 @@ func Watch(ctx context.Context, brains []string, fetchEvery time.Duration, verbo
 				} else if pulled && verbose {
 					log.Printf("brainsync: pulled %s", b)
 				}
+				// Also refresh peer pubkeys from the keys branch
+				// (nous#23). A peer added by anyone on this brain
+				// shows up in the keyring within one tick — no
+				// operator action required. New imports are logged
+				// at Info; "nothing new" is silent.
+				syncBrainPubkeys(ctx, b, verbose)
 			}
 		case <-ctx.Done():
 			return nil
+		}
+	}
+}
+
+// syncBrainPubkeys runs peerkeys.ImportAllPubkeys for one brain and
+// logs new imports at Info. Wrapped (rather than inlined) so the
+// import-loop's error handling is consistent across the verbose /
+// non-verbose paths, and so the function-level doc captures why we
+// don't surface per-file Import errors at Warning (gpg's import is
+// noisy on duplicates; logging at Info would spam every tick).
+func syncBrainPubkeys(ctx context.Context, brainRoot string, verbose bool) {
+	imported, perFileErrs, err := brain.ImportAllPubkeys(ctx, brainRoot)
+	if err != nil {
+		// Top-level error (filestore open / list failed). Common cause:
+		// the brain was provisioned before nous#23 and has no `keys`
+		// branch yet. Don't log every tick — the operator already saw
+		// it once. Future enhancement: rate-limit this with a sync.Map
+		// keyed by brain path. For now, only log under verbose.
+		if verbose {
+			log.Printf("brainsync: pubkey sync %s: %v", brainRoot, err)
+		}
+		return
+	}
+	if imported > 0 {
+		log.Printf("brainsync: imported %d peer pubkey(s) for %s", imported, brainRoot)
+	}
+	if verbose {
+		for _, e := range perFileErrs {
+			log.Printf("brainsync: pubkey sync %s: %v", brainRoot, e)
 		}
 	}
 }
