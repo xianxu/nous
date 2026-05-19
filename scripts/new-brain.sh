@@ -17,7 +17,8 @@
 #   5. mkdir target; git init; set branch main; set git user identity.
 #   6. Pre-create go.mod with right module path (so setup.sh doesn't infer
 #      from the opaque gcrypt remote URL).
-#   7. Run nous/setup.sh --all --yes from the target directory.
+#   7. Run nous/setup.sh --yes from the target directory (default
+#      symlink mode after the 2026-05-19 simplification).
 #   8. Author .brain/config.md per ariadne AGENTS.md §1.
 #   9. Set gcrypt remote and gcrypt-participants.
 #  10. git add . && commit && push --force --set-upstream origin main.
@@ -253,9 +254,10 @@ go 1.22
 EOF
 ok "Wrote go.mod (module github.com/$GH_FULL)"
 
-# ── 7. Run nous setup.sh --all --yes ─────────────────────────────────────────
-info "Running nous/setup.sh --all --yes ..."
-"$NOUS_DIR/nous/setup.sh" --all --yes
+# ── 7. Run nous setup.sh --yes ───────────────────────────────────────────────
+# Default mode is symlink (matches the old --all behavior).
+info "Running nous/setup.sh --yes ..."
+"$NOUS_DIR/nous/setup.sh" --yes
 ok "nous setup complete."
 
 # ── 8. Author .brain/config.md ───────────────────────────────────────────────

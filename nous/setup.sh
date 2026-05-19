@@ -3,33 +3,38 @@
 # Bootstraps a target repo with nous infrastructure and plugins.
 #
 # Usage:
-#   cd /path/to/your-repo && ../nous/nous/setup.sh <mode> [--yes]
+#   cd /path/to/your-repo && ../nous/nous/setup.sh [--vendor] [--yes]
 #
-# Modes:
-#   --all              Symlink everything (all plugins, track nous HEAD)
-#   --add <plugin>     Vendor a specific plugin (copy files, you own them)
-#   --rm <plugin>      Remove a vendored plugin
-#   (no mode flag)     Refresh: re-run in whatever mode was previously set
+#   --vendor   Copy files instead of symlinking (for public repos that
+#              can't depend on nous as a sibling clone). Re-running
+#              refreshes.
+#   --yes      Skip confirmation prompt when switching modes.
 #
-# Mode is recorded in .nous-mode ("all" or "selective").
-# Selected plugins recorded in .nous-plugins (one per line).
-# Idempotent — safe to re-run for updates.
+# Mode is recorded in .nous-mode (content: "symlink" or "vendor"),
+# mirroring ariadne/construct/setup.sh's pattern. Idempotent — safe
+# to re-run for updates.
+#
+# Historical: pre-2026-05-19 this script had --all / --add <plugin>
+# / --rm <plugin> for selective plugin management. That distinction
+# was operator-confusing without solving a real problem (the plugin
+# set is small and operators always wanted everything). Switched to
+# the simpler ariadne-shaped two-mode design. Old .nous-mode values
+# "all" and "selective" are auto-migrated to "symlink" / "vendor"
+# on first run.
 set -euo pipefail
 
 # ── Parse flags ───────────────────────────────────────────────────────────────
-ACTION=""          # all, add, rm, refresh
-PLUGIN=""          # plugin name for add/rm
+# MODE empty here = "use previous mode if .nous-mode exists, else symlink".
+# Explicit --vendor / --symlink overrides.
+MODE=""
 ASSUME_YES=false
-
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --all)       ACTION="all" ;;
-        --add)       ACTION="add"; PLUGIN="${2:-}"; shift ;;
-        --rm)        ACTION="rm";  PLUGIN="${2:-}"; shift ;;
-        --yes|-y)    ASSUME_YES=true ;;
-        *)           echo "Error: unknown flag: $1" >&2; exit 2 ;;
+for arg in "$@"; do
+    case "$arg" in
+        --vendor)  MODE="vendor" ;;
+        --symlink) MODE="symlink" ;;
+        --yes|-y)  ASSUME_YES=true ;;
+        *)         echo "Error: unknown flag: $arg" >&2; exit 2 ;;
     esac
-    shift
 done
 
 # ── Resolve paths ────────────────────────────────────────────────────────────
@@ -268,42 +273,40 @@ if [[ "$NOUS_DIR" == "$TARGET_DIR" ]]; then
     exit 0
 fi
 
-# ── State files ──────────────────────────────────────────────────────────────
+# ── State files + mode resolution ─────────────────────────────────────────────
 MODE_MARKER="$TARGET_DIR/.nous-mode"
-PLUGINS_FILE="$TARGET_DIR/.nous-plugins"
+LEGACY_PLUGINS_FILE="$TARGET_DIR/.nous-plugins"
 PREVIOUS_MODE=""
 
 if [[ -f "$MODE_MARKER" ]]; then
     PREVIOUS_MODE="$(tr -d '[:space:]' < "$MODE_MARKER")"
+    # Migrate legacy mode values from the pre-2026-05-19 selective-plugins
+    # design: "all" → "symlink", "selective" → "vendor". Done in-memory
+    # so the rest of the script sees the new vocabulary; the marker file
+    # is rewritten with the canonical name at the end.
+    case "$PREVIOUS_MODE" in
+        all)       PREVIOUS_MODE="symlink" ;;
+        selective) PREVIOUS_MODE="vendor" ;;
+    esac
 fi
 
-# ── Determine action ─────────────────────────────────────────────────────────
-if [[ -z "$ACTION" ]]; then
-    # No flag — refresh mode
-    if [[ -z "$PREVIOUS_MODE" ]]; then
-        echo "First run. Use --all (symlink everything) or --add <plugin> (vendor selectively)."
-        echo ""
-        echo "Available plugins: $(list_plugins)"
-        exit 0
-    fi
-    ACTION="refresh"
-fi
-
-# Validate plugin name for --add/--rm
-if [[ "$ACTION" == "add" || "$ACTION" == "rm" ]]; then
-    if [[ -z "$PLUGIN" ]]; then
-        echo "Error: --$ACTION requires a plugin name." >&2
-        echo "Available plugins: $(list_plugins)" >&2
-        exit 1
-    fi
-    if [[ ! -f "$PLUGINS_DIR/$PLUGIN.manifest" ]]; then
-        echo "Error: unknown plugin '$PLUGIN'." >&2
-        echo "Available plugins: $(list_plugins)" >&2
-        exit 1
+# Resolve MODE: flag wins; else previous mode if known; else default to
+# symlink (the cheapest path — operator typically wants nous tracking
+# its sibling checkout).
+if [[ -z "$MODE" ]]; then
+    if [[ -n "$PREVIOUS_MODE" ]]; then
+        MODE="$PREVIOUS_MODE"
+    else
+        MODE="symlink"
     fi
 fi
 
-# ── Mode switching confirmation ──────────────────────────────────────────────
+if [[ "$MODE" != "symlink" && "$MODE" != "vendor" ]]; then
+    echo "Error: invalid mode '$MODE' (expected symlink or vendor)" >&2
+    exit 2
+fi
+
+# ── Confirmations ─────────────────────────────────────────────────────────────
 confirm() {
     local msg="$1"
     printf "${YELLOW}%s${RESET}\n" "$msg"
@@ -319,17 +322,13 @@ confirm() {
     esac
 }
 
-# Confirm first-time setup in a new repo (no .nous-mode marker yet).
-# Guards against accidental runs in the wrong directory.
-if [[ -z "$PREVIOUS_MODE" && "$ACTION" != "rm" ]]; then
+# First-time setup in a new repo (no .nous-mode marker yet) — guard against
+# accidental runs in the wrong directory.
+if [[ -z "$PREVIOUS_MODE" ]]; then
     REPO_NAME=$(basename "$TARGET_DIR")
     printf "${YELLOW}First-time nous setup in:${RESET} ${BOLD_RED}%s${RESET}\n" "$REPO_NAME"
     printf "  Path:   %s\n" "$TARGET_DIR"
-    if [[ "$ACTION" == "all" ]]; then
-        printf "  Action: --all (symlink everything from nous)\n"
-    elif [[ "$ACTION" == "add" ]]; then
-        printf "  Action: --add %s (vendor selectively)\n" "$PLUGIN"
-    fi
+    printf "  Mode:   %s\n" "$MODE"
     if ! $ASSUME_YES; then
         if [[ ! -t 0 ]]; then
             echo "Error: first-time setup requires --yes in non-interactive runs." >&2
@@ -344,124 +343,50 @@ if [[ -z "$PREVIOUS_MODE" && "$ACTION" != "rm" ]]; then
     printf "\n"
 fi
 
-if [[ "$ACTION" == "all" && "$PREVIOUS_MODE" == "selective" ]]; then
-    confirm "Switching from selective → all. Vendored plugin files with local modifications will be REPLACED by symlinks."
-elif [[ "$ACTION" == "add" && "$PREVIOUS_MODE" == "all" ]]; then
-    confirm "Switching from all → selective. All symlinked plugins will be REMOVED. Only explicitly added plugins will be vendored."
-elif [[ "$ACTION" == "rm" && "$PREVIOUS_MODE" == "all" ]]; then
-    echo "Error: cannot --rm in --all mode (everything is symlinked). Switch to --add first." >&2
-    exit 1
+# Mode switch confirmation. Switching symlink ↔ vendor flips every
+# fragment's representation, so make the operator confirm.
+if [[ -n "$PREVIOUS_MODE" && "$PREVIOUS_MODE" != "$MODE" ]]; then
+    if [[ "$PREVIOUS_MODE" == "symlink" && "$MODE" == "vendor" ]]; then
+        confirm "Switching from symlink → vendor. All symlinked fragments will be replaced by copies you own."
+    else
+        confirm "Switching from vendor → symlink. Vendored fragments with local modifications will be REPLACED by symlinks into nous."
+    fi
 fi
 
 # ── Execute ──────────────────────────────────────────────────────────────────
-printf "${CYAN}Nous setup: %s → %s${RESET}\n\n" "$NOUS_DIR" "$TARGET_DIR"
+printf "${CYAN}Nous setup: %s → %s (mode=%s)${RESET}\n\n" "$NOUS_DIR" "$TARGET_DIR" "$MODE"
 
-# Install nous core manifest (which includes the ariadne base layer entries
-# re-exported from nous's vendored construct/, .openshell/, etc.)
-CORE_MODE=""
-if [[ "$ACTION" == "all" ]]; then
-    CORE_MODE="symlink"
-elif [[ "$ACTION" == "add" ]]; then
-    CORE_MODE="vendor"
-elif [[ "$ACTION" == "refresh" ]]; then
-    # Honor previous mode so refresh doesn't silently switch symlinks → copies.
-    if [[ "$PREVIOUS_MODE" == "all" ]]; then
-        CORE_MODE="symlink"
-    else
-        CORE_MODE="vendor"
-    fi
+# Ariadne base layer (re-exported from nous's vendored construct/,
+# .openshell/, etc.).
+if [[ -f "$ARIADNE_BASE_MANIFEST" ]]; then
+    printf "  ${CYAN}[ariadne base]${RESET}\n"
+    process_manifest "$ARIADNE_BASE_MANIFEST" "$MODE"
 fi
 
-if [[ -n "$CORE_MODE" ]]; then
-    if [[ -f "$ARIADNE_BASE_MANIFEST" ]]; then
-        printf "  ${CYAN}[ariadne base]${RESET}\n"
-        process_manifest "$ARIADNE_BASE_MANIFEST" "$CORE_MODE"
-    fi
-    printf "  ${CYAN}[nous core]${RESET}\n"
-    process_manifest "$CORE_MANIFEST" "$CORE_MODE"
+# Nous core (skills, Makefile.nous, scaffolds).
+printf "  ${CYAN}[nous core]${RESET}\n"
+process_manifest "$CORE_MANIFEST" "$MODE"
+
+# All plugins, every time. The pre-2026-05-19 selective-plugin design
+# is gone — plugin sets are small enough that always-on is operator-
+# friendly, and the .nous-plugins state file caused more confusion
+# than it solved.
+for manifest in "$PLUGINS_DIR"/*.manifest; do
+    [[ -f "$manifest" ]] || continue
+    name=$(basename "$manifest" .manifest)
+    printf "  ${CYAN}[plugin: %s]${RESET}\n" "$name"
+    process_manifest "$manifest" "$MODE"
+done
+
+# Clean up the legacy .nous-plugins marker if it's still around from a
+# pre-migration setup. The file is no longer authoritative.
+if [[ -f "$LEGACY_PLUGINS_FILE" ]]; then
+    rm -f "$LEGACY_PLUGINS_FILE"
+    printf "  ${YELLOW}removed${RESET} legacy .nous-plugins (no longer used)\n"
 fi
 
-case "$ACTION" in
-    all)
-        # Remove previous selective state if switching
-        if [[ "$PREVIOUS_MODE" == "selective" ]]; then
-            rm -f "$PLUGINS_FILE"
-        fi
-
-        # Symlink all plugins
-        for manifest in "$PLUGINS_DIR"/*.manifest; do
-            [[ -f "$manifest" ]] || continue
-            name=$(basename "$manifest" .manifest)
-            printf "  ${CYAN}[plugin: %s]${RESET}\n" "$name"
-            process_manifest "$manifest" "symlink"
-        done
-
-        echo "all" > "$MODE_MARKER"
-        ;;
-
-    add)
-        # If switching from all, remove all symlinked plugins first
-        if [[ "$PREVIOUS_MODE" == "all" ]]; then
-            for manifest in "$PLUGINS_DIR"/*.manifest; do
-                [[ -f "$manifest" ]] || continue
-                process_manifest "$manifest" "remove"
-            done
-        fi
-
-        # Vendor the requested plugin
-        printf "  ${CYAN}[plugin: %s]${RESET}\n" "$PLUGIN"
-        process_manifest "$PLUGINS_DIR/$PLUGIN.manifest" "vendor"
-
-        # Update .nous-plugins
-        touch "$PLUGINS_FILE"
-        if ! grep -qxF "$PLUGIN" "$PLUGINS_FILE"; then
-            echo "$PLUGIN" >> "$PLUGINS_FILE"
-            printf "  ${GREEN}added${RESET}   %s to .nous-plugins\n" "$PLUGIN"
-        fi
-
-        echo "selective" > "$MODE_MARKER"
-        ;;
-
-    rm)
-        # Remove the plugin's files
-        printf "  ${CYAN}[removing: %s]${RESET}\n" "$PLUGIN"
-        process_manifest "$PLUGINS_DIR/$PLUGIN.manifest" "remove"
-
-        # Remove from .nous-plugins
-        if [[ -f "$PLUGINS_FILE" ]]; then
-            grep -vxF "$PLUGIN" "$PLUGINS_FILE" > "$PLUGINS_FILE.tmp" || true
-            mv "$PLUGINS_FILE.tmp" "$PLUGINS_FILE"
-            printf "  ${GREEN}removed${RESET} %s from .nous-plugins\n" "$PLUGIN"
-        fi
-        ;;
-
-    refresh)
-        if [[ "$PREVIOUS_MODE" == "all" ]]; then
-            # Re-symlink all plugins
-            for manifest in "$PLUGINS_DIR"/*.manifest; do
-                [[ -f "$manifest" ]] || continue
-                name=$(basename "$manifest" .manifest)
-                printf "  ${CYAN}[plugin: %s]${RESET}\n" "$name"
-                process_manifest "$manifest" "symlink"
-                done
-        elif [[ "$PREVIOUS_MODE" == "selective" ]]; then
-            # Re-vendor selected plugins
-            if [[ -f "$PLUGINS_FILE" ]]; then
-                while IFS= read -r plugin; do
-                    [[ -z "$plugin" ]] && continue
-                    if [[ -f "$PLUGINS_DIR/$plugin.manifest" ]]; then
-                        printf "  ${CYAN}[plugin: %s]${RESET}\n" "$plugin"
-                        process_manifest "$PLUGINS_DIR/$plugin.manifest" "vendor"
-                    else
-                        printf "  ${YELLOW}skipped${RESET} %s (manifest not found)\n" "$plugin"
-                    fi
-                done < "$PLUGINS_FILE"
-            else
-                echo "  No plugins selected. Use --add <plugin> to add one."
-            fi
-        fi
-        ;;
-esac
+# Record the resolved mode for next-run refresh.
+echo "$MODE" > "$MODE_MARKER"
 
 # ── Go module wiring ─────────────────────────────────────────────────────────
 NOUS_MODULE="github.com/xianxu/nous"
@@ -479,14 +404,19 @@ fi
 TARGET_MODULE=$(head -1 "$TARGET_DIR/go.mod" | awk '{print $2}')
 
 if [[ "$TARGET_MODULE" != "$NOUS_MODULE" ]]; then
-    MODE_NOW=$(cat "$MODE_MARKER" 2>/dev/null || echo "")
-    if [[ "$MODE_NOW" == "selective" ]]; then
-        # Vendor mode: rewrite import paths
+    # Use the in-memory MODE rather than re-reading the marker — the
+    # marker was just written with the canonical name above, but using
+    # MODE keeps the branch self-contained.
+    if [[ "$MODE" == "vendor" ]]; then
+        # Vendored sources: rewrite import paths so the copies build
+        # against the target's module path rather than nous's.
         find "$TARGET_DIR/cmd" "$TARGET_DIR/lib" -name '*.go' -exec \
             sed -i '' "s|$NOUS_MODULE|$TARGET_MODULE|g" {} + 2>/dev/null || true
         printf "  ${GREEN}rewrote${RESET} imports: %s → %s\n" "$NOUS_MODULE" "$TARGET_MODULE"
-    elif [[ "$MODE_NOW" == "all" ]]; then
-        # Symlink mode: add replace directive
+    elif [[ "$MODE" == "symlink" ]]; then
+        # Symlinked sources: add a go.mod replace directive so the
+        # target's go build resolves nous's module path to the sibling
+        # checkout.
         NOUS_REL=$(rel_path "$NOUS_DIR" "$TARGET_DIR")
         if ! grep -q "replace $NOUS_MODULE" "$TARGET_DIR/go.mod" 2>/dev/null; then
             if ! grep -q "require $NOUS_MODULE" "$TARGET_DIR/go.mod"; then
@@ -525,7 +455,6 @@ fi
 GITIGNORE="$TARGET_DIR/.gitignore"
 NOUS_IGNORES=(
     ".nous-mode"
-    ".nous-plugins"
     "cmd/*/bin/"
 )
 

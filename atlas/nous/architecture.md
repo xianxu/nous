@@ -15,12 +15,13 @@ nous/         ← nous layer (Go tools, plugins, setup for downstream repos)
 
 **Ariadne** (private) provides the development workflow — issue tracking, plan management, skills, Claude Code settings. Vendored into nous so users don't need ariadne access.
 
-**Nous** provides the tool infrastructure — Go libraries, CLI binaries, Charon integration, and a plugin system for selective installation.
+**Nous** provides the tool infrastructure — Go libraries, CLI binaries, Charon integration, and a plugin system.
 
-Downstream repos consume nous via a single command:
+Downstream repos consume nous via a single command (matches `ariadne/construct/setup.sh`'s shape):
 ```bash
-../nous/nous/setup.sh --all       # symlink everything, track HEAD
-../nous/nous/setup.sh --add gmail  # vendor just the gmail plugin
+../nous/nous/setup.sh            # symlink everything from nous (default)
+../nous/nous/setup.sh --vendor   # copy everything (for repos that can't sibling-link)
+../nous/nous/setup.sh --yes      # skip confirmations (non-interactive)
 ```
 
 ## Repo Structure
@@ -59,8 +60,21 @@ The `nous-tools` meta-skill (in `nous/skills/`) tells Claude to discover tools b
 
 ## Plugin System
 
-Plugins are defined by manifest files in `nous/plugins/`:
-- `--all` mode: symlink everything, track nous HEAD
-- `--add <plugin>` mode: vendor selectively, user owns the files
-- `--rm <plugin>`: remove a vendored plugin
-- Re-run with no args: refresh in current mode
+Plugins are defined by manifest files in `nous/plugins/` and applied
+in bulk — every plugin manifest is processed on every setup run. Two
+modes (matches `ariadne/construct/setup.sh`):
+
+- **default (symlink)**: symlink everything into the target tree, track nous HEAD
+- **`--vendor`**: copy files into the target so the consumer owns them
+  (for public repos that can't depend on nous as a sibling clone)
+- Re-run with no args: refresh in whatever mode was previously set
+
+Mode recorded in `.nous-mode` (content: `symlink` or `vendor`).
+Switching modes requires confirmation.
+
+Historical note: pre-2026-05-19 the script had `--all` / `--add <plugin>`
+/ `--rm <plugin>` for selective plugin management. That distinction
+solved a problem operators didn't have (plugin set is small; everyone
+wanted everything); folded into the simpler ariadne-shaped two-mode
+design. Legacy `.nous-mode` values `all` and `selective` auto-migrate
+to `symlink` / `vendor` on first run.
