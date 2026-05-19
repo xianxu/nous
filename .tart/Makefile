@@ -91,7 +91,7 @@ help-tart:
 # Default is always "stop nothing" — Enter with no selection, or
 # Esc, both keep all VMs running.
 define _tart_check_others
-	@bash $(CURDIR)/.tart/scripts/tart-stop-others.sh $(TART_VM)
+	@bash $(CURDIR)/.tart/scripts/tart-stop-others.sh $(TART_VM) $(TART_BASE)
 endef
 
 # `tart stop` returns after sending shutdown, but tart list's State
@@ -147,6 +147,12 @@ define _tart_boot_and_ssh
 	done
 	@ip=$$(tart ip $(TART_VM)); \
 	    if ! nc -z -G 2 "$$ip" 22 2>/dev/null; then \
+	        if grep -q "exceeds the system limit" /tmp/tart-$(TART_VM).log 2>/dev/null; then \
+	            echo "==> Boot failed: Apple's 2-macOS-VM cap reached."; \
+	            echo "    Stop another macOS VM first ('tart list' to see them,"; \
+	            echo "    'tart stop <name>' to stop one), then retry."; \
+	            exit 1; \
+	        fi; \
 	        echo "==> SSH never came up at $$ip (boot log: /tmp/tart-$(TART_VM).log)"; \
 	        exit 1; \
 	    fi; \
