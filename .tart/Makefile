@@ -26,7 +26,11 @@
 #   make tart RUN_FLAGS=
 #
 # Auto-derived per repo via $(REPO_NAME):
-#   - TART_VM defaults to <repo>-test (one VM per consuming repo)
+#   - TART_VM defaults to <repo>-test (one VM per consuming repo).
+#     Override the suffix with TART_SUFFIX for parallel VMs in the
+#     same repo: `make tart TART_SUFFIX=emma` in pair → pair-emma.
+#     Full TART_VM=… override is still supported for cases the
+#     suffix shorthand doesn't model.
 #   - Mount tag and mount path inside the VM both default to <repo>
 #
 # Cache (~/.tart/cache, ~/.tart/vms) is system-wide and shared across
@@ -38,7 +42,10 @@
 # recommended but not required — see scripts/tart-*.sh for fallbacks.
 
 TART_BASE      ?= ghcr.io/cirruslabs/macos-tahoe-base:latest
-TART_VM        ?= $(REPO_NAME)-test
+# Default: <repo>-test. Override the suffix with TART_SUFFIX for
+# parallel VMs in the same repo (TART_SUFFIX=emma → <repo>-emma).
+# Full TART_VM=… override still bypasses suffix logic entirely.
+TART_VM        ?= $(REPO_NAME)-$(or $(TART_SUFFIX),test)
 # --no-graphics by default; tart-gui overrides to --vnc to delegate
 # display to macOS Screen Sharing.app. Tart's built-in UI is broken
 # on macOS Tahoe (tart registers as a GUI app via Cmd-Tab but never
@@ -72,6 +79,9 @@ help-tart:
 	"  VM-local changes to ~/repo are wiped on next boot; keep persistent" \
 	"  work outside ~/repo. Skip both entirely with 'make tart RUN_FLAGS='" \
 	"  for a vanilla boot." \
+	"" \
+	"  Parallel VMs per repo: 'make tart TART_SUFFIX=emma' → $(REPO_NAME)-emma" \
+	"  (cleanup also takes the suffix: 'make tart-stop TART_SUFFIX=emma')." \
 	""
 
 # Interactive multi-select to stop OTHER running tart VMs (4-8 GB
