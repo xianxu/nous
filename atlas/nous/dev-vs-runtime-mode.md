@@ -46,9 +46,13 @@ Aimed predominantly at **dev mode**. Specifically:
 - The verify-fingerprint ceremony, the TTY-only delegation
   boundary, the agent-vs-human help split — all assume a developer
   who reads cobra help and types into a terminal.
-- `nous-security` is the partial exception: it knows about the
-  bundle-vs-bare distinction and has notification machinery. But
-  it's not actually built as a `.app` bundle today (see nous#19).
+- `nous security` (the cluster inside nous, post-nous#22) is the
+  partial exception: `lib/notify` knows about the bundle-vs-bare
+  distinction and dispatches between UserNotifications.framework,
+  terminal-notifier, and osascript. But the `.app` bundle wrapper
+  that would unlock native UserNotifications source attribution
+  doesn't exist yet (deferred follow-up tracked as the rescoped
+  nous#19).
 - `ariadne`'s base layer — which seeds the workflow conventions
   (`AGENTS.md`, `workshop/`, `atlas/`, `construct/`) — is similarly
   dev-mode-shaped. The `make issue-sync` / `make close-issue`
@@ -59,10 +63,11 @@ Aimed predominantly at **dev mode**. Specifically:
 
 1. **Don't conflate the two in install flows.** nous#16's
    `make nous-install` is a dev-mode install (unsigned, foreground-
-   capable). nous#19's `nous-security.app` packaging is a
-   runtime-mode artifact (signed, notarized, installable to
-   `/Applications/`). Mixing them produces a flow that's neither
-   convenient for dev nor solid enough for daily use.
+   capable). The deferred `.app` packaging for `nous security
+   menubar` (rescoped nous#19) is a runtime-mode artifact (signed,
+   notarized, installable to `/Applications/`). Mixing them
+   produces a flow that's neither convenient for dev nor solid
+   enough for daily use.
 
 2. **Keychain namespace + ACL is load-bearing once agents touch
    the proxy.** Initial framing here undersold this — corrected:
@@ -107,12 +112,13 @@ Aimed predominantly at **dev mode**. Specifically:
 
 3. **Runtime-mode packaging is its own scope.** When the operator
    says "the wife is using this daily to plan our trip," the
-   forcing function is real, and the work is: notarized
-   `nous-security.app`, homebrew bottle (or .pkg), bootstrapped
-   directory structure (where does `~/.config/nous/` live for a
-   non-engineer who didn't `git clone`?), first-run UX (no `make
-   nous-bootstrap`; some other onboarding). That's not a single
-   issue — it's a project. File when needed; don't pre-build.
+   forcing function is real, and the work is: notarized signed
+   `.app` wrapper for `nous security menubar`, homebrew bottle (or
+   .pkg), bootstrapped directory structure (where does
+   `~/.config/nous/` live for a non-engineer who didn't `git
+   clone`?), first-run UX (no `make nous-bootstrap`; some other
+   onboarding). That's not a single issue — it's a project. File
+   when needed; don't pre-build.
 
 4. **Ariadne base-layer assumption.** A meaningful chunk of
    ariadne's `construct/` machinery + the workflow conventions
@@ -129,9 +135,13 @@ Aimed predominantly at **dev mode**. Specifically:
 - `nous/workshop/issues/000016-unified-nous-serve-dev-prod-workflow.md`
   — the dev-mode install flow (`make nous-dev`, `make nous-install`)
 - `nous/workshop/issues/000019-nous-security-app-packaging.md` — the
-  first runtime-mode artifact (signed + notarized menubar)
+  first runtime-mode artifact (signed + notarized `.app` wrapper for
+  `nous security menubar`; rescoped after nous#22)
+- `nous/workshop/issues/000022-merge-nous-security-into-nous.md` —
+  the merge of audit + menubar into the unified `nous` binary;
+  introduced lib/codesign + lib/notify
 - `lib/provider/vault/keychain/service.go` — `ServiceProd` /
   `ServiceDev` namespace split (dormant today; load-bearing once
   signed binaries exist)
-- `cmd/nous-security/notify_darwin.go` — bundle-vs-bare detection +
+- `lib/notify/` — bundle-vs-bare + signed-vs-unsigned detection +
   osascript fallback (the current dev-mode workaround)

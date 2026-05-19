@@ -141,3 +141,60 @@ can send notification etc." Splitting the daemon-install (initially
 no signing; now signed via ad-hoc per the M5 follow-up) from the
 menubar-packaging (signing + notarization required) lets each ship
 at its own pace.
+
+## Revisions
+
+### 2026-05-18 — rescoped after nous#22 merge
+
+nous#22 folded `cmd/nous-security/` into the unified `nous` binary
+as the `nous security {check, remedy, menubar}` subcommand cluster.
+That changes what this issue is actually about:
+
+**Before:** build + sign + notarize a standalone `Charon Security.app`
+that wraps the `nous-security` binary.
+
+**After:** build + sign + notarize a small `.app` wrapper whose
+`Contents/MacOS/` executable invokes `nous security menubar` (either
+by exec'ing `/usr/local/bin/nous`, or by including a thin Go shim
+binary that does `os.Args[0] = "nous"; syscall.Exec(...)`). The
+audit half (`nous security check`) doesn't need a bundle — it runs
+as a normal CLI, and `lib/notify` falls through to terminal-notifier /
+osascript for any banners it produces. The bundle is purely for the
+menubar's TCC identity + LSUIElement dock-less behavior + native
+`UserNotifications.framework` source attribution.
+
+Downstream effects on this issue's plan:
+
+- Plan M1 (bundle layout): the bundle no longer holds a separate
+  audit binary. `Contents/MacOS/<entry>` is either a symlink to
+  `/usr/local/bin/nous` + `nous security menubar` argv (won't work;
+  LaunchServices expects a real binary), or a 20-line Go shim that
+  exec()s into the operator's installed `nous` with the right args.
+  The shim binary is what carries the bundle's signature.
+- Plan M2 (signing): unchanged in principle — Developer ID, hardened
+  runtime, notarization, stapling. Still gated on Developer ID
+  recovery (Open Question 1 above).
+- Plan M3 (install + first-run): unchanged.
+- The "dev-mode fallback unchanged" note in the existing Notes
+  section is still accurate, but the mechanism is different — it
+  used to be inline bundle-vs-bare detection in the nous-security
+  binary; it's now `lib/notify` doing the same dispatch from inside
+  `nous`.
+
+What hasn't changed:
+- The bundle identifier question (Open Question 2) — keep
+  `com.charon.security` for keychain ACL continuity, or rename to
+  `com.42shots.nous.security` / `com.42shots.security` to match the
+  unified naming? Still an open call.
+- Developer ID recovery (Open Question 1).
+- Notarization toolchain (Open Question 3).
+
+Status remains `open`. Lower priority than before, because the
+day-to-day dev path is unblocked: `nous security menubar` works as
+a foreground process from any terminal, with terminal-notifier
+delivering banners. The bundle is now strictly a polish item for
+the wife-onboarding case (notifications attributed to "nous
+security" rather than "terminal-notifier").
+
+See `nous#22` for the merge; see `cmd/nous/security_menubar.go` for
+the current menubar implementation that the bundle would wrap.

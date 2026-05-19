@@ -1,6 +1,6 @@
 ---
 id: 000022
-status: open
+status: done
 deps: [000020]
 created: 2026-05-18
 updated: 2026-05-18
@@ -212,7 +212,7 @@ becomes a safety net rather than a normal path).
       the old binary side-by-side, which isn't a useful checkpoint
       (the M2 retrofit already made cmd/nous-security depend on
       lib/notify, so it was already structurally redundant).
-- [ ] M5: Atlas + README + workshop/lessons.md updates. Punt or
+- [x] M5: Atlas + README + workshop/lessons.md updates. Punt or
       rescope nous#19 with a Revisions section linking back here.
 
 ## Test plan
@@ -248,6 +248,38 @@ notification path actually working:
   warrant a lib/ home.
 
 ## Log
+
+### 2026-05-18 — M5 landed
+
+Deep atlas rewrite + #19 rescope.
+
+- `atlas/charon/security-audit.md` rewritten in place. The doc now
+  uses `nous security {check, remedy, menubar}` throughout; the old
+  `nous-security` framing is folded into a one-paragraph history
+  note. Replaced the per-binary "Why a `.app` bundle" section with
+  "Why a `.app` bundle (deferred)" that explains both why it
+  matters and why it isn't blocking. New section: "Notification
+  dispatch (lib/notify)" with the backend-selection table.
+- `atlas/charon/charon.md` — consent-oracle paragraph updated to
+  point at `nous security menubar` and `lib/notify`'s fallback
+  behavior rather than the deleted `Charon Security.app`.
+- `atlas/nous/dev-vs-runtime-mode.md` — partial-exception bullet
+  redirected from `nous-security` to `nous security` + `lib/notify`;
+  runtime-mode-packaging bullet, See-also list, and notify file
+  pointer all updated.
+- `workshop/issues/000019-nous-security-app-packaging.md` — added a
+  Revisions section dated 2026-05-18 explaining how the merge
+  changes what this issue is about (the bundle now wraps a small
+  exec-shim into `nous security menubar`, not a separate binary).
+  Open Questions about Developer ID, identifier naming, and
+  notarization toolchain remain unchanged. Status stays `open`,
+  priority lowered (dev path is unblocked via terminal-notifier).
+
+Skipped: workshop/lessons.md update. The work executed cleanly with
+no surprise corrections — the milestone split was useful as a plan
+but didn't surface lessons that future me would need.
+
+Issue status flipped to `done`.
 
 ### 2026-05-18 — M3+M4 landed
 
