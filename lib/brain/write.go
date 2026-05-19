@@ -169,6 +169,39 @@ func SetGcryptParticipants(brainRoot string, fingerprints []string) error {
 	return nil
 }
 
+// SyncGcryptParticipantsFromManifest reads the brain's manifest and
+// writes its recipient list to `remote.origin.gcrypt-participants`.
+// Used by:
+//
+//   - `nous brain clone` (after a fresh gcrypt clone): gcrypt's
+//     clone protocol doesn't auto-populate participants on the
+//     local side, so the cloned brain's first push would otherwise
+//     encrypt to a stale (or empty) participants list.
+//   - `brainsync.PullBrain` (after a successful pull): peers added
+//     by other recipients should propagate into the local
+//     participants config on the next pull, so subsequent pushes
+//     encrypt to the full current recipient set without operator
+//     intervention.
+//
+// Idempotent: if the manifest's recipients match the current
+// gcrypt-participants config, the write is a no-op at the file
+// level (git config emits the same single line).
+func SyncGcryptParticipantsFromManifest(brainRoot string) error {
+	m, err := Read(brainRoot)
+	if err != nil {
+		return fmt.Errorf("sync gcrypt-participants: read manifest: %w", err)
+	}
+	if len(m.Recipients) == 0 {
+		// Defensive: a manifest with no recipients shouldn't reach
+		// us in practice (brain provisioning always seeds at least
+		// the operator), but if it did, SetGcryptParticipants would
+		// reject the empty list. Skip silently rather than fail —
+		// downstream callers shouldn't bail on a degenerate manifest.
+		return nil
+	}
+	return SetGcryptParticipants(brainRoot, m.Recipients)
+}
+
 // ReadGcryptParticipants returns the fingerprint list configured on
 // the brain's origin remote. Empty slice (no error) when the config
 // key is unset — useful for "is this even a gcrypt-managed brain?"
