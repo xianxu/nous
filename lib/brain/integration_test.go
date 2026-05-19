@@ -213,14 +213,31 @@ func mustHave(t *testing.T, name string) {
 	}
 }
 
+// shortTempBase picks a base directory short enough for gpg-agent's
+// 104-char unix-socket path limit. `/tmp` is the normal host case;
+// `$HOME/.cache` is the fallback when a sandboxed environment blocks
+// `/tmp` writes (still well under 104 chars on macOS). `t.TempDir()`
+// under `/var/folders/` would blow the limit, so it's never used here.
+func shortTempBase(t *testing.T) string {
+	t.Helper()
+	for _, base := range []string{"/tmp", filepath.Join(os.Getenv("HOME"), ".cache")} {
+		probe, err := os.MkdirTemp(base, "ngpg-probe-")
+		if err == nil {
+			os.RemoveAll(probe)
+			return base
+		}
+	}
+	t.Fatalf("shortTempBase: no writable short-path base (tried /tmp, $HOME/.cache)")
+	return ""
+}
+
 // setupPeer creates a fresh GNUPGHOME with a single ed25519 keypair
-// and returns testPeer metadata. Uses `/tmp/ngpg-*` short paths to
-// avoid the macOS unix-socket path-length limit that gpg-agent
-// otherwise hits (104 chars; t.TempDir() under /var/folders/ blows
-// it).
+// and returns testPeer metadata. Uses a short-path tempdir to avoid
+// the macOS unix-socket path-length limit that gpg-agent otherwise
+// hits (104 chars; t.TempDir() under /var/folders/ blows it).
 func setupPeer(t *testing.T, label, email string) *testPeer {
 	t.Helper()
-	home, err := os.MkdirTemp("/tmp", "ngpg-"+label+"-")
+	home, err := os.MkdirTemp(shortTempBase(t), "ngpg-"+label+"-")
 	if err != nil {
 		t.Fatalf("setupPeer %s: tempdir: %v", label, err)
 	}
