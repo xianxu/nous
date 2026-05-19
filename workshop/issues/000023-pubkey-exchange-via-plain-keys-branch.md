@@ -429,7 +429,7 @@ Share with peers
       manually: a peer can fetch the keys branch and gpg-import
       both pubkeys.
 
-- [ ] M4: Wire into **`nous brain recipient add` / `remove`**.
+- [x] M4: Wire into **`nous brain recipient add` / `remove`**.
       After admit-and-push, peerkeys.PublishPubkey; after revoke,
       peerkeys.RevokePubkey. Existing dogfood tests adapted to
       assert the keys branch sees the change.
@@ -504,6 +504,38 @@ they already have. WhatsApp's "verify on suspicion" UX model is
 the right fit.
 
 ## Log
+
+### 2026-05-19 — M4 landed
+`nous brain recipient add` and `nous brain recipient remove` now
+update the keys filestore as their last step:
+
+- **add**: after `brainsync.AddCommitPush` succeeds for the
+  manifest re-key push, call `brain.PublishPubkey` to push the
+  new peer's pubkey to the keys branch. Existing recipients pick
+  it up automatically on their next brain-sync tick (M6 will
+  wire the auto-fetch); peers cloning fresh pick it up via
+  `nous brain clone` (M5).
+- **remove**: after `brainsync.AddCommitPush` for the revoke
+  push, call `brain.RevokePubkey` to delete the entry from the
+  keys branch.
+
+Both paths use the same degrade-gracefully posture as M3 — a
+keys-branch failure surfaces a `warning:` line but doesn't undo
+the manifest/gcrypt operation that just succeeded. Operator can
+re-run the same verb to retry (Put / Delete are idempotent).
+
+The revoke side has an explicit comment about what revocation
+does and doesn't do: it prevents NEW peers from auto-importing
+the gone peer's pubkey after revoke, but doesn't reach back into
+the still-existing-elsewhere copies of the gone peer's previously-
+decrypted content. That's the structural "revocation is heavy"
+property the threat-model doc already names.
+
+Now functionally complete for the operator side of the dogfood:
+new brain creation, recipient admission, and recipient revocation
+all maintain the keys-branch invariant in lockstep with the
+gcrypt-branch state. Peer side (M5 = `nous brain clone`, M6 =
+brain-sync watcher auto-import) is what's left.
 
 ### 2026-05-19 — M3 landed
 `nous brain new` now publishes every recipient's pubkey to the

@@ -214,6 +214,15 @@ brain/atlas/threat-model-shared-brain.md.`,
 				return fmt.Errorf("push: %w (manifest + git config committed locally; re-run to retry push)", err)
 			}
 			fmt.Fprintln(out, "Pushed.")
+
+			// Publish the new recipient's pubkey to the keys filestore
+			// (nous#23). Best-effort: a failure here leaves the brain
+			// gcrypt-functional but the new peer would need a sneakernet
+			// pubkey hand-off until publish succeeds.
+			if err := brain.PublishPubkey(cmd.Context(), brainPath, key.Fingerprint); err != nil {
+				fmt.Fprintf(out, "  warning: publish %s to keys branch: %v\n", key.Last8(), err)
+				fmt.Fprintln(out, "  (peer may need sneakernet pubkey hand-off until keys-branch publish succeeds)")
+			}
 			return nil
 		},
 	}
@@ -421,6 +430,18 @@ TTY-only.`,
 				return fmt.Errorf("push: %w (manifest + git config committed locally; re-run to retry push)", err)
 			}
 			fmt.Fprintln(out, "Pushed.")
+
+			// Revoke the pubkey from the keys filestore (nous#23). The
+			// removed peer can still decrypt any blob they had access
+			// to during their admission window — that's the structural
+			// "revocation is heavy" caveat from the threat model. What
+			// the keys-branch revoke does prevent: new peers cloning
+			// after revocation auto-importing the gone peer's pubkey
+			// and thinking they're still part of the set.
+			if err := brain.RevokePubkey(cmd.Context(), brainPath, match); err != nil {
+				fmt.Fprintf(out, "  warning: revoke %s from keys branch: %v\n", short, err)
+				fmt.Fprintln(out, "  (manifest update succeeded; keys-branch entry left in place — re-run revoke to retry)")
+			}
 			return nil
 		},
 	}
