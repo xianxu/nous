@@ -44,6 +44,12 @@ func runBrainList(w io.Writer) error {
 	// Empty on outage — operator markers just don't render, which is
 	// the safe degradation (worst case is "I don't know I'm operator").
 	myLogin, _ := gh.AuthLogin()
+	if myLogin != "" {
+		fmt.Fprintf(w, "Brains (%s)\n\n", myLogin)
+	} else {
+		fmt.Fprintln(w, "Brains")
+		fmt.Fprintln(w)
+	}
 	for _, b := range brains {
 		kind := "private"
 		if b.Shared() {
@@ -63,7 +69,7 @@ func runBrainList(w io.Writer) error {
 	}
 	if myLogin != "" {
 		fmt.Fprintln(w)
-		fmt.Fprintf(w, "  (* = owner; current login: %s)\n", myLogin)
+		fmt.Fprintln(w, "  (* = owner)")
 	}
 	return nil
 }

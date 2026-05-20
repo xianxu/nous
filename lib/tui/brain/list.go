@@ -102,7 +102,11 @@ func (m listModel) Update(msg tea.Msg) (listModel, tea.Cmd) {
 
 func (m listModel) View() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("Brains under workspace"))
+	title := "Brains"
+	if m.myLogin != "" {
+		title = fmt.Sprintf("Brains (%s)", m.myLogin)
+	}
+	b.WriteString(titleStyle.Render(title))
 	b.WriteString("\n\n")
 
 	if m.err != nil {
@@ -133,7 +137,7 @@ func (m listModel) View() string {
 	}
 	b.WriteString("\n")
 	if m.myLogin != "" {
-		b.WriteString(mutedStyle.Render(fmt.Sprintf("  (* = owner; current login: %s)", m.myLogin)))
+		b.WriteString(mutedStyle.Render("  (* = owner)"))
 		b.WriteString("\n")
 	}
 	b.WriteString(helpStyle.Render("↑↓/jk  navigate    enter  drill in    n  new brain    q/esc  quit"))
