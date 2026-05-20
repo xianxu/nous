@@ -29,22 +29,43 @@ import (
 
 // Invitation captures the minimal subset of GitHub's
 // /user/repository_invitations response that nous brain join needs to
-// filter, display, and accept. Topics are included via the default
-// repository representation (GA since 2020).
+// filter, display, and accept.
+//
+// The embedded repository representation in this endpoint is a
+// "MinimalRepository" — it omits clone_url, ssh_url, git_url, and
+// topics. We populate them as best-effort (json tags still set so
+// they pick up the values when present, e.g., on endpoints that do
+// return the full repository object), and fall back to constructing
+// from full_name via CloneSSHURL. Empirically confirmed 2026-05-19
+// against a real invitation: ssh_url was empty, topics was null.
 type Invitation struct {
 	ID         int
 	Repository struct {
-		FullName    string   `json:"full_name"`
-		Name        string   `json:"name"`
+		FullName    string                 `json:"full_name"`
+		Name        string                 `json:"name"`
 		Owner       struct{ Login string } `json:"owner"`
-		Private     bool     `json:"private"`
-		Description string   `json:"description"`
-		Topics      []string `json:"topics"`
-		CloneURL    string   `json:"clone_url"`
-		SSHURL      string   `json:"ssh_url"`
-		HTMLURL     string   `json:"html_url"`
+		Private     bool                   `json:"private"`
+		Description string                 `json:"description"`
+		Topics      []string               `json:"topics"`
+		CloneURL    string                 `json:"clone_url"`
+		SSHURL      string                 `json:"ssh_url"`
+		HTMLURL     string                 `json:"html_url"`
 	} `json:"repository"`
 	Inviter struct{ Login string } `json:"inviter"`
+}
+
+// CloneSSHURL returns the SSH clone URL for the invitation's repo.
+// Uses the embedded ssh_url if present (full Repository object);
+// otherwise constructs it from full_name (MinimalRepository case,
+// which is what /user/repository_invitations actually returns).
+func (i Invitation) CloneSSHURL() string {
+	if i.Repository.SSHURL != "" {
+		return i.Repository.SSHURL
+	}
+	if i.Repository.FullName == "" {
+		return ""
+	}
+	return "git@github.com:" + i.Repository.FullName + ".git"
 }
 
 // run invokes gh with the given args and returns stdout + an error

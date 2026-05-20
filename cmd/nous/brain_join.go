@@ -35,7 +35,7 @@ import (
 // errors out.
 func newBrainJoinCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "join",
+		Use:   "join [OWNER/REPO]",
 		Short: "Join one or more shared brains you've been invited to",
 		Long: `List your pending GitHub repository invitations for brain projects,
 let you pick which to join, then publish your pubkey to each
@@ -47,14 +47,58 @@ with 'nous-brain:' or contains 'gcrypt-encrypted brain') or its
 topics (contains 'nous-brain'). Non-brain invitations are ignored
 — you can still accept those via the web UI or 'gh' directly.
 
+With an OWNER/REPO argument, skips the pending-invitations listing
+and (re-)publishes your pubkey directly to that brain's keys
+branch. Useful when you're already a collaborator (e.g., previous
+'join' accepted the invite but failed at the publish step) or
+when you want to re-publish after rotating your GPG key.
+
 After this command succeeds, wait for the operator's next sync
 cycle (default ~10s) and then run 'nous brain clone <gcrypt-url>'
 to materialize the brain locally.`,
-		Args: cobra.NoArgs,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 1 {
+				return runBrainJoinRepublish(cmd.Context(), cmd.OutOrStdout(), cmd.InOrStdin(), args[0])
+			}
 			return runBrainJoin(cmd.Context(), cmd.OutOrStdout(), cmd.InOrStdin())
 		},
 	}
+}
+
+// runBrainJoinRepublish (re-)publishes the joiner's pubkey to a
+// specific brain repo's keys branch. Used when the operator-side
+// invitation flow already accepted but the publish step failed
+// (so the joiner is a collaborator but not yet visible to
+// auto-admit), or when rotating GPG keys for an existing
+// participation.
+//
+// Skips the invitation lookup entirely — assumes the joiner is
+// already a collaborator (the underlying git push will fail with
+// a clear permission error otherwise).
+func runBrainJoinRepublish(ctx context.Context, w io.Writer, in io.Reader, fullName string) error {
+	parts := strings.Split(fullName, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return fmt.Errorf("expected OWNER/REPO, got %q", fullName)
+	}
+	fp, armor, err := selectIdentityForJoin(w, in)
+	if err != nil {
+		return err
+	}
+	myLogin, err := gh.AuthLogin()
+	if err != nil {
+		return fmt.Errorf("resolve own login: %w", err)
+	}
+	sshURL := "git@github.com:" + fullName + ".git"
+	fmt.Fprintf(w, "\n→ Publishing %s.asc to %s …\n", myLogin, fullName)
+	if err := brain.PublishOwnPubkeyToRemote(ctx, sshURL, myLogin, armor); err != nil {
+		return fmt.Errorf("publish pubkey: %w", err)
+	}
+	fmt.Fprintf(w, "  published %s.asc to keys branch.\n", myLogin)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Done. The operator's brain-sync will auto-admit you on its next pull cycle.")
+	fmt.Fprintf(w, "  (your fingerprint: %s)\n", fp)
+	return nil
 }
 
 func runBrainJoin(ctx context.Context, w io.Writer, in io.Reader) error {
@@ -117,7 +161,7 @@ func runBrainJoin(ctx context.Context, w io.Writer, in io.Reader) error {
 			continue
 		}
 		fmt.Fprintf(w, "  accepted invitation.\n")
-		if err := brain.PublishOwnPubkeyToRemote(ctx, inv.Repository.SSHURL, myLogin, armor); err != nil {
+		if err := brain.PublishOwnPubkeyToRemote(ctx, inv.CloneSSHURL(), myLogin, armor); err != nil {
 			fmt.Fprintf(w, "  publish pubkey: %v\n", err)
 			fmt.Fprintf(w, "  (you're a collaborator now but the operator can't auto-admit until you re-publish)\n")
 			continue
