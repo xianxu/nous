@@ -107,7 +107,16 @@ func (m newBrainModel) updatePath(msg tea.Msg) (newBrainModel, tea.Cmd) {
 			if val == "" {
 				return m, nil
 			}
-			m.picked = resolvePath(val)
+			abs := resolvePath(val)
+			if pathExists(abs) {
+				// Refuse to advance; the operator can see the ❌ in
+				// the preview and pick a different path. Without
+				// this, the subprocess would fail at scripts/
+				// new-brain.sh's "Local path already exists" check —
+				// surfacing it here is faster and clearer.
+				return m, nil
+			}
+			m.picked = abs
 			m.stage = newStageConfirm
 			return m, nil
 		}
@@ -115,6 +124,15 @@ func (m newBrainModel) updatePath(msg tea.Msg) (newBrainModel, tea.Cmd) {
 	var cmd tea.Cmd
 	m.path, cmd = m.path.Update(msg)
 	return m, cmd
+}
+
+// pathExists reports whether the absolute path refers to an
+// existing filesystem entry (file, directory, or anything else).
+// Used to refuse advance + render ❌ in the live preview when the
+// operator types a target nous brain new would reject.
+func pathExists(abs string) bool {
+	_, err := os.Stat(abs)
+	return err == nil
 }
 
 // resolvePath converts the operator's input into the absolute path
@@ -185,9 +203,18 @@ func (m newBrainModel) View() string {
 		b.WriteString("\n")
 		// Live preview of the resolved absolute path so the operator
 		// sees exactly where the new brain will land — relative-path
-		// confusion was the bug this preview was added to fix.
+		// confusion was the bug this preview was added to fix. The
+		// ❌ vs → marker tells them whether the target is free
+		// before they press Enter (nous brain new refuses to clobber
+		// existing paths, so an already-existing target would fail
+		// the subprocess; better to call it out upfront).
 		if val := strings.TrimSpace(m.path.Value()); val != "" {
-			b.WriteString(mutedStyle.Render("  → " + resolvePath(val)))
+			abs := resolvePath(val)
+			arrow := "→"
+			if pathExists(abs) {
+				arrow = "❌"
+			}
+			b.WriteString(mutedStyle.Render("  " + arrow + " " + abs))
 			b.WriteString("\n")
 		}
 		b.WriteString("\n")
