@@ -2,6 +2,7 @@ package brainsync
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -15,6 +16,20 @@ func mustWriteBrain(t *testing.T, dir, body string) {
 	}
 	if err := os.WriteFile(filepath.Join(dir, ".brain", "config.md"), []byte("---\n"+body+"---\n"), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// mustInitGitRemote does a `git init` in dir and configures origin to
+// the given URL. Used to simulate a brain that's been provisioned
+// for github-mediated sync (has gcrypt:: remote) without actually
+// pushing to GitHub.
+func mustInitGitRemote(t *testing.T, dir, url string) {
+	t.Helper()
+	if err := exec.Command("git", "init", "-q", "-b", "main", dir).Run(); err != nil {
+		t.Fatalf("git init %s: %v", dir, err)
+	}
+	if err := exec.Command("git", "-C", dir, "remote", "add", "origin", url).Run(); err != nil {
+		t.Fatalf("git remote add origin in %s: %v", dir, err)
 	}
 }
 
@@ -73,6 +88,39 @@ func TestFindSharedBrains_BadRoot(t *testing.T) {
 	_, err := FindSharedBrains([]string{"/no/such/path"})
 	if err == nil {
 		t.Error("expected error for nonexistent root")
+	}
+}
+
+// TestFindSharedBrains_SingleRecipientWithGcryptRemote captures the
+// nous#26 bug: a brand-new brain that's just been provisioned (one
+// recipient = the operator, gcrypt remote configured, invitation
+// sent to a peer who hasn't been admitted yet) should be watched.
+// Otherwise auto-admit never fires for it — chicken-and-egg.
+func TestFindSharedBrains_SingleRecipientWithGcryptRemote(t *testing.T) {
+	root := t.TempDir()
+	// Single-recipient brain with a gcrypt:: remote = "shared-intent,
+	// not yet admitted." Must be watched.
+	dir := filepath.Join(root, "brain-family")
+	mustWriteBrain(t, dir, "name: brain-family\nrecipients: [FP1]\n")
+	mustInitGitRemote(t, dir, "gcrypt::ssh://git@github.com/xianxu/brain-family.git")
+
+	// Single-recipient brain with NO remote = truly private, must be
+	// skipped (no point watching; nothing to sync).
+	priv := filepath.Join(root, "personal-brain")
+	mustWriteBrain(t, priv, "name: personal\nrecipients: [FP1]\n")
+
+	// Single-recipient brain with non-gcrypt remote (e.g., plain
+	// github mirror) = not subject to our auto-admit flow. Skipped.
+	nongcrypt := filepath.Join(root, "code-repo")
+	mustWriteBrain(t, nongcrypt, "name: code\nrecipients: [FP1]\n")
+	mustInitGitRemote(t, nongcrypt, "https://github.com/xianxu/code-repo.git")
+
+	got, err := FindSharedBrains([]string{root})
+	if err != nil {
+		t.Fatalf("FindSharedBrains: %v", err)
+	}
+	if len(got) != 1 || filepath.Base(got[0]) != "brain-family" {
+		t.Errorf("got %v, want [brain-family] only", got)
 	}
 }
 

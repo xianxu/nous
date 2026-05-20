@@ -1,6 +1,7 @@
 package brain
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -192,6 +193,15 @@ func SetGcryptParticipants(brainRoot string, fingerprints []string) error {
 // gcrypt-participants config, the write is a no-op at the file
 // level (git config emits the same single line).
 func SyncGcryptParticipantsFromManifest(brainRoot string) error {
+	// Tolerate non-brain repos. The push wrapper in lib/brainsync calls
+	// us on every AddCommitPush, including against test fixtures and
+	// generic git repos that don't have a .brain/config.md. For those,
+	// there's nothing to sync — skip silently. A real brain missing its
+	// manifest is a corrupt-repo state and would surface elsewhere
+	// (nous brain commands fail to read it, daemon won't watch it).
+	if _, err := os.Stat(filepath.Join(brainRoot, ".brain", "config.md")); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
 	m, err := Read(brainRoot)
 	if err != nil {
 		return fmt.Errorf("sync gcrypt-participants: read manifest: %w", err)
