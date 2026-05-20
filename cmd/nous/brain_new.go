@@ -14,6 +14,7 @@ import (
 	"github.com/xianxu/nous/lib/brain"
 	"github.com/xianxu/nous/lib/gh"
 	"github.com/xianxu/nous/lib/identity"
+	"github.com/xianxu/nous/lib/workspace"
 )
 
 // newBrainNewCmd builds `nous brain new <path>`: multi-recipient
@@ -308,6 +309,23 @@ func pickAnchor(keys []identity.Key, anchorArg string) (string, error) {
 	return "", fmt.Errorf("--as %q matches no secret key in your keyring", anchorArg)
 }
 
+// findNewBrainScript locates scripts/new-brain.sh from several common
+// install layouts. The function is order-sensitive: more specific +
+// operator-controlled paths come first.
+//
+// Resolution order:
+//  1. $NOUS_DIR/scripts/new-brain.sh — explicit override.
+//  2. <dir-of-binary>/../scripts/new-brain.sh — works for the
+//     `make nous-build` dev layout where the binary is at
+//     `nous/bin/nous` (so ../scripts/ is the script dir).
+//  3. <workspace-root>/nous/scripts/new-brain.sh — catches the
+//     install case (`make nous-install` puts the binary at
+//     ~/.local/bin/nous, where workspace.Root falls back to
+//     $HOME/workspace, and the source repo is at <ws>/nous).
+//     This was the previously-broken case when nous brain new
+//     was invoked from outside the nous folder.
+//  4. ./scripts/new-brain.sh — CWD relative; covers
+//     ad-hoc dev invocations from inside the nous repo.
 func findNewBrainScript() (string, error) {
 	if dir := os.Getenv("NOUS_DIR"); dir != "" {
 		p := filepath.Join(dir, "scripts", "new-brain.sh")
@@ -317,9 +335,26 @@ func findNewBrainScript() (string, error) {
 	}
 	if exe, err := os.Executable(); err == nil {
 		// <root>/<repo>/bin/<exe> → <root>/<repo>/scripts/new-brain.sh
-		bin := filepath.Dir(exe)
+		// EvalSymlinks so bin/nous → cmd/nous/bin/nous resolves to
+		// the real path, then walk up to scripts/.
+		real := exe
+		if r, err := filepath.EvalSymlinks(exe); err == nil {
+			real = r
+		}
+		bin := filepath.Dir(real)
 		repo := filepath.Dir(bin)
 		p := filepath.Join(repo, "scripts", "new-brain.sh")
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
+	}
+	// Workspace-root fallback: installed binaries (e.g.,
+	// ~/.local/bin/nous via `make nous-install`) don't sit in the
+	// nous source tree, so the binary-relative path above misses.
+	// workspace.Root() resolves to $HOME/workspace as a last resort,
+	// where nous typically lives as a sibling brain dir.
+	if root, err := workspace.Root(); err == nil {
+		p := filepath.Join(root, "nous", "scripts", "new-brain.sh")
 		if _, err := os.Stat(p); err == nil {
 			return p, nil
 		}
@@ -329,7 +364,9 @@ func findNewBrainScript() (string, error) {
 			return p, nil
 		}
 	}
-	return "", fmt.Errorf("scripts/new-brain.sh not found; set $NOUS_DIR to the nous repo root")
+	return "", fmt.Errorf("scripts/new-brain.sh not found in $NOUS_DIR, " +
+		"binary-relative path, workspace-root (`<workspace>/nous/scripts/`), or CWD-relative. " +
+		"Set $NOUS_DIR to the nous repo root, or run `nous brain new` from inside it.")
 }
 
 // pickSubstrate returns "none" for single-recipient (private) brains
