@@ -154,6 +154,90 @@ func BootstrapPubkeys(ctx context.Context, gcryptURL string) (imported int, errs
 	return imported, errs, nil
 }
 
+// PublishOwnPubkeyToRemote writes `<login>.asc` (with the given
+// armored pubkey) to the `keys` branch of the remote at `cloneURL`,
+// without requiring a local brain clone. The new-joiner flow
+// (nous#26): a freshly-invited collaborator has plain-git push
+// access to the repo (including the keys branch) but cannot yet
+// decrypt the gcrypt'd main branch, so the filestore abstraction
+// (which assumes a local brain) doesn't fit.
+//
+// `cloneURL` is the plain (non-gcrypt) URL. Typically the
+// invitation's ssh_url field. `login` is the joiner's GitHub
+// login (used as filename stem — the auto-admit on the operator's
+// side keys the trust mapping off this stem).
+//
+// Handles the case where the keys branch doesn't exist yet by
+// creating it as an orphan branch and pushing. That's the
+// expected state for a brand-new brain whose operator hasn't
+// finished pubkey publishing.
+func PublishOwnPubkeyToRemote(ctx context.Context, cloneURL, login, armoredPubkey string) error {
+	tmpDir, err := os.MkdirTemp("", "nous-join-")
+	if err != nil {
+		return fmt.Errorf("peerkeys join: tempdir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Try to clone the keys branch directly.
+	cmd := exec.CommandContext(ctx, "git", "clone",
+		"--branch", keysBranch,
+		"--single-branch",
+		"--depth=1",
+		cloneURL, tmpDir)
+	if out, cerr := cmd.CombinedOutput(); cerr != nil {
+		// "Remote branch ... not found" is the new-brain case —
+		// fall through to orphan-branch creation. Anything else is
+		// a real failure (auth, network, repo missing).
+		msg := string(out)
+		if !(strings.Contains(msg, "Remote branch") && strings.Contains(msg, "not found")) {
+			return fmt.Errorf("peerkeys join: clone keys branch: %w\n%s", cerr, msg)
+		}
+		// Fresh clone of any branch, then orphan-checkout keys.
+		if err := os.RemoveAll(tmpDir); err != nil {
+			return fmt.Errorf("peerkeys join: clean tempdir: %w", err)
+		}
+		if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+			return fmt.Errorf("peerkeys join: re-mkdir: %w", err)
+		}
+		init := exec.CommandContext(ctx, "git", "-C", tmpDir, "init", "-q", "-b", keysBranch)
+		if iout, ierr := init.CombinedOutput(); ierr != nil {
+			return fmt.Errorf("peerkeys join: git init: %w\n%s", ierr, iout)
+		}
+		add := exec.CommandContext(ctx, "git", "-C", tmpDir, "remote", "add", "origin", cloneURL)
+		if aout, aerr := add.CombinedOutput(); aerr != nil {
+			return fmt.Errorf("peerkeys join: git remote add: %w\n%s", aerr, aout)
+		}
+	}
+
+	// Write <login>.asc.
+	target := filepath.Join(tmpDir, login+pubkeyFilenameSuffix)
+	if err := os.WriteFile(target, []byte(armoredPubkey), 0o644); err != nil {
+		return fmt.Errorf("peerkeys join: write %s: %w", target, err)
+	}
+
+	// git add + commit. Configure user.email/name from the operator's
+	// global git config so the commit author is consistent with their
+	// other repos. If not set, leave the default ("git config user.email"
+	// returning empty means git will use the global / default).
+	if out, err := exec.CommandContext(ctx, "git", "-C", tmpDir, "add", login+pubkeyFilenameSuffix).CombinedOutput(); err != nil {
+		return fmt.Errorf("peerkeys join: git add: %w\n%s", err, out)
+	}
+	commit := exec.CommandContext(ctx, "git", "-C", tmpDir, "commit", "-q", "-m", "publish "+login+pubkeyFilenameSuffix)
+	if out, err := commit.CombinedOutput(); err != nil {
+		// "nothing to commit" means the same key is already published —
+		// idempotent.
+		if strings.Contains(string(out), "nothing to commit") {
+			return nil
+		}
+		return fmt.Errorf("peerkeys join: git commit: %w\n%s", err, out)
+	}
+	push := exec.CommandContext(ctx, "git", "-C", tmpDir, "push", "origin", keysBranch)
+	if out, err := push.CombinedOutput(); err != nil {
+		return fmt.Errorf("peerkeys join: git push: %w\n%s", err, out)
+	}
+	return nil
+}
+
 // ImportAllPubkeys fetches every pubkey from the brain's keys store
 // and runs identity.Import on each. Returns the count successfully
 // imported. Idempotent: gpg's import is a no-op for keys already in

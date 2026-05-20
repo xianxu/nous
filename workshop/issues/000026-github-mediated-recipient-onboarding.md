@@ -288,9 +288,15 @@ if v, ok := verified[login]; ok && v.Fingerprint != fp {
       Unit tested `looksLikeFingerprint` (the legacy-vs-new
       filename discriminator). Full end-to-end exercise lands
       in M7's integration-test extension (4-peer scenario).
-- [ ] M4: `cmd/nous/brain_join.go` + TUI in `lib/tui/brain/join.go`.
-      Filter invitations by description prefix `nous-brain:` and topic
-      `nous-brain`. Belt-and-suspenders.
+- [x] M4: `cmd/nous/brain_join.go`. Filter accepts three markers:
+      description prefix `nous-brain:` (new), description contains
+      `gcrypt-encrypted brain` (legacy from scripts/new-brain.sh),
+      or topic `nous-brain`. Comma-separated index multi-select
+      (or 'all'). New `brain.PublishOwnPubkeyToRemote(ctx, cloneURL,
+      login, armor)` does plain-git clone of keys branch (with
+      orphan-create fallback for new brains), writes `<login>.asc`,
+      pushes. Smoke-tested the "no pending invitations" path against
+      live gh.
 - [ ] M5: Update `scripts/new-brain.sh` AND `cmd/nous/brain_new.go` to
       set description (`nous-brain: <name>`) + topic (`nous-brain`).
       Verify both code paths.

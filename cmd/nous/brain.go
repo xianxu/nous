@@ -69,6 +69,7 @@ Subcommands:
 		newBrainNewCmd(),
 		newBrainCloneCmd(),
 		newBrainInviteCmd(),
+		newBrainJoinCmd(),
 		newBrainListCmd(),
 		newBrainRecipientCmd(),
 		newBrainResolveCmd(),
