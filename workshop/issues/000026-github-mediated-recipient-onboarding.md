@@ -1,10 +1,11 @@
 ---
 id: 000026
-status: working
+status: done
 deps: [000023, 000024, 000025]
 created: 2026-05-19
-updated: 2026-05-19
+updated: 2026-05-20
 estimate_hours: 6
+actual_hours: 7
 ---
 
 # brain: GitHub-mediated recipient onboarding (invite/join/auto-admit/verify)
@@ -353,9 +354,14 @@ if v, ok := verified[login]; ok && v.Fingerprint != fp {
       wrapper now tolerates non-brain repos (regression fix for
       three pre-existing brainsync tests that broke under #24).
       Drift-detection (M6 scope) tested separately when M6 lands.
-- [ ] M8: Atlas update — `atlas/nous/recipient-onboarding.md` documents
-      the trust model (GH-collaborator = recipient, verify opt-in)
-      and the WhatsApp analogy.
+- [x] M8: `atlas/nous/recipient-onboarding.md` — documents the
+      trust model (GH-collaborator = recipient), the WhatsApp
+      analogy (admission convenient by default; verify opt-in),
+      both command flows (invite + join), auto-admit mechanism,
+      drift detection as the safety floor, what's explicitly NOT
+      in this flow (offline sneakernet, GPG keyservers, WoT
+      signatures), and the file map. Sized to match sibling
+      atlas docs (e2e-integration-testing.md as the template).
 
 ## Out of scope
 
