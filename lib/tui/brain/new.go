@@ -180,18 +180,7 @@ func (m newBrainModel) View() string {
 
 	switch m.stage {
 	case newStagePath:
-		cwd, _ := os.Getwd()
-		b.WriteString("Where should the new brain live? Relative paths resolve from\n")
-		b.WriteString("the current working directory ")
-		b.WriteString(mutedStyle.Render("(" + cwd + ")"))
-		b.WriteString(".\n")
-		b.WriteString("Absolute and ")
-		b.WriteString(mutedStyle.Render("`~/`"))
-		b.WriteString("-prefixed paths also work. Examples:\n")
-		b.WriteString(mutedStyle.Render("  ../brain-family"))
-		b.WriteString("\n")
-		b.WriteString(mutedStyle.Render("  ~/workspace/brain-side-project"))
-		b.WriteString("\n\n")
+		b.WriteString("Where should the new brain live? Brains should be peers of nous.\n\n")
 		b.WriteString(m.path.View())
 		b.WriteString("\n")
 		// Live preview of the resolved absolute path so the operator
