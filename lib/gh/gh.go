@@ -188,6 +188,53 @@ func AcceptInvitation(id int) error {
 	return err
 }
 
+// UserRepo is the minimal subset of GitHub's repository
+// representation that nous needs for the "accessible but not yet
+// cloned" detection in the brain list view. Mirrors the
+// MinimalRepository fields the /user/repos endpoint returns by
+// default.
+type UserRepo struct {
+	FullName    string   `json:"full_name"`
+	Name        string   `json:"name"`
+	Owner       struct{ Login string } `json:"owner"`
+	Private     bool     `json:"private"`
+	Description string   `json:"description"`
+	Topics      []string `json:"topics"`
+	SSHURL      string   `json:"ssh_url"`
+	CloneURL    string   `json:"clone_url"`
+}
+
+// CloneSSHURL returns a usable ssh clone URL for this repo. Falls
+// back to constructing from FullName when GitHub doesn't populate
+// ssh_url (same MinimalRepository fallback Invitation uses).
+func (r UserRepo) CloneSSHURL() string {
+	if r.SSHURL != "" {
+		return r.SSHURL
+	}
+	if r.FullName == "" {
+		return ""
+	}
+	return "git@github.com:" + r.FullName + ".git"
+}
+
+// UserRepos lists every repository the authenticated user has any
+// access to (owned, collaborator, org-member). Single page; for
+// operators with > 100 repos the result is truncated — the
+// "accessible-but-not-cloned" view it powers is informational, not
+// security-critical, so partial results are acceptable.
+func UserRepos() ([]UserRepo, error) {
+	out, err := run("api", "user/repos", "--paginate", "-X", "GET", "-f", "per_page=100")
+	if err != nil {
+		return nil, err
+	}
+	var repos []UserRepo
+	// --paginate emits a single JSON array concatenated across pages.
+	if err := json.Unmarshal(out, &repos); err != nil {
+		return nil, fmt.Errorf("parse user/repos: %w", err)
+	}
+	return repos, nil
+}
+
 // DeclineInvitation declines an invitation. Symmetric with
 // AcceptInvitation. Not used in the happy-path flow but useful for
 // the operator-tooling cases where an invite shouldn't actually be

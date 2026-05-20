@@ -51,10 +51,6 @@ func runBrainList(w io.Writer) error {
 		fmt.Fprintln(w)
 	}
 	for _, b := range brains {
-		kind := "private"
-		if b.Shared() {
-			kind = "shared"
-		}
 		marker := " "
 		if brain.IsOperator(b.Path, myLogin) {
 			marker = "*"
@@ -62,9 +58,17 @@ func runBrainList(w io.Writer) error {
 		// Display directory basename — that's the unambiguous on-disk
 		// identity. manifest.Name is operator-authored and can drift.
 		// `*` prefix marks brains where the current user can act as
-		// operator (invite/remove recipients via gh). See nous#27.
-		fmt.Fprintf(w, "%s %-22s  %s  %d recipient%s  sync=%s\n",
-			marker, filepath.Base(b.Path), kind, len(b.Recipients), pluralS(len(b.Recipients)), defaultStr(b.SyncSubstrate, "?"))
+		// operator (invite/remove collaborators via gh). See nous#27.
+		// Terminology: "collaborators" in UI; manifest still says
+		// "recipients" (schema, not user-facing).
+		n := len(b.Recipients)
+		if n <= 1 {
+			fmt.Fprintf(w, "%s %-22s  private                       sync=%s\n",
+				marker, filepath.Base(b.Path), defaultStr(b.SyncSubstrate, "?"))
+		} else {
+			fmt.Fprintf(w, "%s %-22s  shared  %d collaborators  sync=%s\n",
+				marker, filepath.Base(b.Path), n, defaultStr(b.SyncSubstrate, "?"))
+		}
 		fmt.Fprintf(w, "      %s\n", b.Path)
 	}
 	if myLogin != "" {
