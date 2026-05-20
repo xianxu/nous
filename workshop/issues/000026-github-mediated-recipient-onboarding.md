@@ -297,9 +297,14 @@ if v, ok := verified[login]; ok && v.Fingerprint != fp {
       orphan-create fallback for new brains), writes `<login>.asc`,
       pushes. Smoke-tested the "no pending invitations" path against
       live gh.
-- [ ] M5: Update `scripts/new-brain.sh` AND `cmd/nous/brain_new.go` to
-      set description (`nous-brain: <name>`) + topic (`nous-brain`).
-      Verify both code paths.
+- [x] M5: Updated `scripts/new-brain.sh` (the source for both
+      `make new-brain` and `nous brain new` paths since the latter
+      delegates to the former): description now `nous-brain: <name>
+      (gcrypt-encrypted)` and topic `nous-brain` is set via a
+      separate `gh api PUT repos/.../topics` call. Backward compat
+      preserved — the legacy `gcrypt-encrypted brain` description
+      still matches `nous brain join`'s filter for any brain
+      created before this commit.
 - [ ] M6: `cmd/nous/brain_recipient_verify.go` + TUI. Reads/writes
       `.brain/verified.yaml`. Drift detection in `autoAdmit`.
 - [ ] M7: Integration test extension: new peer joins shared brain via

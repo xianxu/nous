@@ -143,9 +143,23 @@ GH_FULL="$GH_OWNER/$GH_NAME"
 # *before* `git push --force` semantics ever apply. The honest recovery is
 # delete + recreate, not force-push.
 create_repo() {
+    # Description marker is the primary signal nous#26's `nous brain
+    # join` uses to discover brain invitations (filtered server-side
+    # via the repo's description field — it travels with the
+    # invitation listing, no extra API call needed). Format:
+    # `nous-brain: <local-target-name>` — the suffix doubles as the
+    # brain's human name in the join TUI.
+    #
+    # Topic `nous-brain` is the belt-and-suspenders backup, in case
+    # an operator hand-edits the description later.
     gh repo create "$GH_FULL" --private \
-        --description "gcrypt-encrypted brain (bootstrapped by make new-brain)" \
+        --description "nous-brain: $TARGET_NAME (gcrypt-encrypted)" \
         --disable-issues --disable-wiki >/dev/null
+    # Topic is set in a separate call (gh repo create doesn't expose
+    # a --topic flag). Best-effort — a topic-set failure doesn't
+    # invalidate the brain; the description marker is enough on its own.
+    gh api -X PUT "repos/$GH_FULL/topics" -f 'names[]=nous-brain' --silent 2>/dev/null || \
+        warn "Topic set failed (nous brain join will still find this brain via description marker)."
 }
 
 # Existence check via REST `/repos/<owner>/<name>` rather than `gh repo
