@@ -21,8 +21,10 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xianxu/nous/lib/brain"
+	"github.com/xianxu/nous/lib/brain/filestore"
 	"github.com/xianxu/nous/lib/brainsync"
 	"github.com/xianxu/nous/lib/identity"
 )
@@ -550,9 +552,12 @@ func TestEndToEnd_GitHubMediatedOnboarding(t *testing.T) {
 		}
 		assertPubkeyInKeyring(t, operator, peerC.fp)
 
-		added, err := brain.AutoAdmitFromKeysBranch(ctx, operator.brainPath)
+		added, drift, err := brain.AutoAdmitFromKeysBranch(ctx, operator.brainPath)
 		if err != nil {
 			t.Fatalf("AutoAdmitFromKeysBranch: %v", err)
+		}
+		if len(drift) != 0 {
+			t.Errorf("unexpected drift: %+v", drift)
 		}
 		if len(added) != 1 {
 			t.Fatalf("expected 1 admitted, got %d: %+v", len(added), added)
@@ -587,9 +592,12 @@ func TestEndToEnd_GitHubMediatedOnboarding(t *testing.T) {
 
 	// === Step 5: idempotence — re-run auto-admit yields no new admissions ===
 	withPeer(t, operator, func() {
-		added, err := brain.AutoAdmitFromKeysBranch(context.Background(), operator.brainPath)
+		added, drift, err := brain.AutoAdmitFromKeysBranch(context.Background(), operator.brainPath)
 		if err != nil {
 			t.Fatalf("AutoAdmitFromKeysBranch (idempotence): %v", err)
+		}
+		if len(drift) != 0 {
+			t.Errorf("unexpected drift in idempotence check: %+v", drift)
 		}
 		if len(added) != 0 {
 			t.Errorf("idempotence: expected 0 new admissions, got %d: %+v", len(added), added)
@@ -660,9 +668,12 @@ func TestEndToEnd_OperatorPubkeyMissingThenRepublish(t *testing.T) {
 		if _, _, err := brain.ImportAllPubkeys(ctx, operator.brainPath); err != nil {
 			t.Fatalf("operator ImportAllPubkeys: %v", err)
 		}
-		added, err := brain.AutoAdmitFromKeysBranch(ctx, operator.brainPath)
+		added, drift, err := brain.AutoAdmitFromKeysBranch(ctx, operator.brainPath)
 		if err != nil {
 			t.Fatalf("AutoAdmitFromKeysBranch: %v", err)
+		}
+		if len(drift) != 0 {
+			t.Errorf("unexpected drift: %+v", drift)
 		}
 		if len(added) != 1 {
 			t.Fatalf("expected 1 admission, got %d", len(added))
@@ -747,6 +758,196 @@ func provisionBrainNoPubkeyPublish(t *testing.T, p *testPeer, remoteURL string, 
 	// INTENTIONALLY skipping brain.PublishPubkey to simulate the bug
 	// scenario. The recovery path is exercised in step 5.
 	return brainDir
+}
+
+// TestEndToEnd_DriftDetection exercises the M6 safety floor: once
+// the operator has out-of-band verified a recipient's fingerprint
+// (entry written to .brain/verified.yaml), any subsequent
+// substitution of that recipient's pubkey on the keys branch is
+// detected by AutoAdmitFromKeysBranch. The substituted key is NOT
+// auto-admitted; the operator must re-verify (overwriting the
+// verified.yaml entry) before the new fingerprint becomes
+// acceptable.
+//
+// Models the MITM scenario where someone with keys-branch push
+// access replaces peerC.asc with a different pubkey (peerD's, in
+// this test) hoping to silently widen the recipient set. Without
+// drift detection, the next sync tick would admit the substitute.
+// With drift detection, auto-admit refuses and surfaces a
+// DriftEvent for the operator's logs.
+func TestEndToEnd_DriftDetection(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (-short)")
+	}
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skipf("integration test requires POSIX gpg; runtime is %s", runtime.GOOS)
+	}
+	mustHave(t, "gpg")
+	mustHave(t, "git")
+	mustHave(t, "git-remote-gcrypt")
+
+	remoteURL := initBareRepo(t)
+	operator := setupPeer(t, "operator", "operator@test.local")
+	peerC := setupPeer(t, "peerC", "peerC@test.local")
+	peerD := setupPeer(t, "peerD", "peerD@test.local")
+
+	// === Setup: operator provisions, peerC joins + gets admitted ===
+	withPeer(t, operator, func() {
+		operator.brainPath = provisionBrain(t, operator, remoteURL, []string{operator.fp})
+	})
+	const peerCLogin = "peerC"
+	withPeer(t, peerC, func() {
+		if err := brain.PublishOwnPubkeyToRemote(context.Background(), remoteURL, peerCLogin, peerC.armorPub); err != nil {
+			t.Fatalf("peerC publish: %v", err)
+		}
+	})
+	withPeer(t, operator, func() {
+		ctx := context.Background()
+		if _, _, err := brain.ImportAllPubkeys(ctx, operator.brainPath); err != nil {
+			t.Fatalf("ImportAllPubkeys: %v", err)
+		}
+		added, drift, err := brain.AutoAdmitFromKeysBranch(ctx, operator.brainPath)
+		if err != nil {
+			t.Fatalf("auto-admit (initial): %v", err)
+		}
+		if len(drift) != 0 || len(added) != 1 {
+			t.Fatalf("initial auto-admit: added=%d drift=%d, want added=1 drift=0", len(added), len(drift))
+		}
+		if err := brainsync.AddCommitPush(operator.brainPath, "admit "+peerCLogin); err != nil {
+			t.Fatalf("push admit: %v", err)
+		}
+
+		// Operator runs the verify ceremony (out-of-band compare) and
+		// records the result in verified.yaml. We bypass the CLI's
+		// promptVerify (no TTY in tests) and write the entry directly
+		// via the library API — identical to what persistVerify does
+		// on a successful ceremony.
+		v, err := brain.ReadVerified(operator.brainPath)
+		if err != nil {
+			t.Fatalf("ReadVerified: %v", err)
+		}
+		v[peerCLogin] = brain.VerifiedEntry{
+			Fingerprint: strings.ToUpper(peerC.fp),
+			VerifiedBy:  "operator",
+			VerifiedAt:  time.Now().UTC().Truncate(time.Second),
+		}
+		if err := brain.WriteVerified(operator.brainPath, v); err != nil {
+			t.Fatalf("WriteVerified: %v", err)
+		}
+		if err := brainsync.AddCommitPush(operator.brainPath, "verify "+peerCLogin); err != nil {
+			t.Fatalf("push verify: %v", err)
+		}
+	})
+
+	// === Sanity: a follow-up auto-admit run with no changes finds no drift ===
+	withPeer(t, operator, func() {
+		_, drift, err := brain.AutoAdmitFromKeysBranch(context.Background(), operator.brainPath)
+		if err != nil {
+			t.Fatalf("auto-admit (sanity no-drift): %v", err)
+		}
+		if len(drift) != 0 {
+			t.Errorf("no-change run reported drift: %+v", drift)
+		}
+	})
+
+	// === Substitution: write peerD's pubkey under peerC's filename ===
+	// Models an attacker with keys-branch push access replacing the
+	// admitted recipient's pubkey with a different one. The filestore
+	// Put is a direct simulation of what a malicious `git push` would
+	// achieve at the data layer.
+	withPeer(t, operator, func() {
+		store, err := filestore.Open(operator.brainPath, "keys")
+		if err != nil {
+			t.Fatalf("filestore.Open: %v", err)
+		}
+		defer store.Close()
+		if err := store.Put(context.Background(), peerCLogin+".asc", []byte(peerD.armorPub)); err != nil {
+			t.Fatalf("substituted Put: %v", err)
+		}
+	})
+
+	// === Drift detected: auto-admit refuses peerD, returns DriftEvent ===
+	withPeer(t, operator, func() {
+		ctx := context.Background()
+		// Import the substituted pubkey first (what brainsync.Watch
+		// would do via syncBrainPubkeys before auto-admit). The
+		// substituted key being importable is fine — the safety floor
+		// is at the manifest level, not the keyring.
+		if _, _, err := brain.ImportAllPubkeys(ctx, operator.brainPath); err != nil {
+			t.Fatalf("ImportAllPubkeys (post-substitution): %v", err)
+		}
+		added, drift, err := brain.AutoAdmitFromKeysBranch(ctx, operator.brainPath)
+		if err != nil {
+			t.Fatalf("auto-admit (drift case): %v", err)
+		}
+		if len(added) != 0 {
+			t.Errorf("expected 0 admissions in drift case, got %d: %+v", len(added), added)
+		}
+		if len(drift) != 1 {
+			t.Fatalf("expected 1 drift event, got %d: %+v", len(drift), drift)
+		}
+		d := drift[0]
+		if d.Login != peerCLogin {
+			t.Errorf("drift login = %q, want %q", d.Login, peerCLogin)
+		}
+		if !strings.EqualFold(d.OldFingerprint, peerC.fp) {
+			t.Errorf("drift OldFingerprint = %q, want %q", d.OldFingerprint, peerC.fp)
+		}
+		if !strings.EqualFold(d.NewFingerprint, peerD.fp) {
+			t.Errorf("drift NewFingerprint = %q, want %q", d.NewFingerprint, peerD.fp)
+		}
+
+		// Manifest must still list peerC (the verified-against fp),
+		// NOT peerD (the substituted one).
+		m, err := brain.Read(operator.brainPath)
+		if err != nil {
+			t.Fatalf("read manifest after drift: %v", err)
+		}
+		hasC := false
+		hasD := false
+		for _, r := range m.Recipients {
+			if strings.EqualFold(r, peerC.fp) {
+				hasC = true
+			}
+			if strings.EqualFold(r, peerD.fp) {
+				hasD = true
+			}
+		}
+		if !hasC {
+			t.Errorf("manifest lost peerC's fp after drift: %+v", m.Recipients)
+		}
+		if hasD {
+			t.Errorf("manifest admitted peerD's fp despite drift: %+v", m.Recipients)
+		}
+	})
+
+	// === Recovery: operator re-verifies (writes peerD's fp to verified.yaml)
+	// — next auto-admit accepts the new key. ===
+	withPeer(t, operator, func() {
+		v, err := brain.ReadVerified(operator.brainPath)
+		if err != nil {
+			t.Fatalf("ReadVerified for re-verify: %v", err)
+		}
+		v[peerCLogin] = brain.VerifiedEntry{
+			Fingerprint: strings.ToUpper(peerD.fp),
+			VerifiedBy:  "operator",
+			VerifiedAt:  time.Now().UTC().Truncate(time.Second),
+		}
+		if err := brain.WriteVerified(operator.brainPath, v); err != nil {
+			t.Fatalf("WriteVerified (re-verify): %v", err)
+		}
+
+		added, drift, err := brain.AutoAdmitFromKeysBranch(context.Background(), operator.brainPath)
+		if err != nil {
+			t.Fatalf("auto-admit (post-reverify): %v", err)
+		}
+		if len(drift) != 0 {
+			t.Errorf("re-verify didn't clear drift: %+v", drift)
+		}
+		if len(added) != 1 || !strings.EqualFold(added[0].Fingerprint, peerD.fp) {
+			t.Errorf("re-verify auto-admit: got %+v, want one entry for peerD", added)
+		}
+	})
 }
 
 // TestPublishOwnPubkeyToRemote_OrphanCreate covers the brand-new-brain

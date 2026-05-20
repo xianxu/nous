@@ -305,8 +305,34 @@ if v, ok := verified[login]; ok && v.Fingerprint != fp {
       preserved — the legacy `gcrypt-encrypted brain` description
       still matches `nous brain join`'s filter for any brain
       created before this commit.
-- [ ] M6: `cmd/nous/brain_recipient_verify.go` + TUI. Reads/writes
-      `.brain/verified.yaml`. Drift detection in `autoAdmit`.
+- [x] M6: Verify ceremony now persists to `.brain/verified.yaml`;
+      `AutoAdmitFromKeysBranch` pauses for any login whose
+      keys-branch fingerprint differs from the verified entry.
+      Specifically:
+      - `lib/brain/verified.go`: Verified type (login → VerifiedEntry),
+        Read/Write with sorted-key stable output, fingerprint case
+        normalization. 4 unit tests cover round-trip, missing-file,
+        case normalization, and deterministic output.
+      - `lib/brain/autoadmit.go`: AutoAdmitFromKeysBranch returns
+        `([]AdmittedRecipient, []DriftEvent, error)`. Drift detected
+        when `verified.yaml` pins a fingerprint that differs from
+        the keys-branch fingerprint for the same login.
+      - `lib/brainsync/watch.go`: autoAdmitBrain logs drift loudly
+        every tick (regardless of verbose) — MITM safety floor.
+      - `cmd/nous/brain_recipient.go`: existing verify CLI now
+        persists on successful match — looks up github-login via
+        `brain.LoginForFingerprint(keys-branch scan)`, writes the
+        VerifiedEntry, commits + pushes. Legacy `<FP>.asc`
+        admissions get a soft notice (no login → can't persist).
+      - `lib/brain/integration_test.go::TestEndToEnd_DriftDetection`:
+        operator persists verify → MITM substitutes peerC.asc with
+        peerD's pubkey → auto-admit refuses, returns DriftEvent →
+        manifest unchanged → operator re-verifies → next auto-admit
+        accepts the new key. Full safety-floor exercise.
+      Out of scope (deferred): a `nous brain recipient verify`
+      TUI listing all unverified keys for batch verification. The
+      current single-FP CLI is the data-plane primitive; the TUI
+      wrap-around is a separate ergonomics issue.
 - [x] M7: Integration test extension landed in two new tests in
       `lib/brain/integration_test.go`:
       - `TestEndToEnd_GitHubMediatedOnboarding`: full flow with a

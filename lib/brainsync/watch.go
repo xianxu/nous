@@ -148,11 +148,16 @@ func Watch(ctx context.Context, brains []string, fetchEvery time.Duration, verbo
 // remote sees the manifest update, the ciphertext is also re-
 // encrypted to include the newly-admitted recipient.
 //
+// Drift events (a login whose keys-branch fingerprint differs from
+// what verified.yaml pins) are logged loudly at Error every tick
+// until the operator either re-verifies or revokes — they represent
+// a potential MITM and should not be quiet.
+//
 // Logs at Info on each admission (this is operator-visible state
 // change worth surfacing). Errors logged at Info too — auto-admit
 // is best-effort; a transient failure resolves on the next tick.
 func autoAdmitBrain(ctx context.Context, brainRoot string, verbose bool) {
-	added, err := brain.AutoAdmitFromKeysBranch(ctx, brainRoot)
+	added, drift, err := brain.AutoAdmitFromKeysBranch(ctx, brainRoot)
 	if err != nil {
 		// Soft-log. The most common cause is "keys branch doesn't
 		// exist on a pre-#23 brain"; logging every tick would spam.
@@ -160,6 +165,16 @@ func autoAdmitBrain(ctx context.Context, brainRoot string, verbose bool) {
 			log.Printf("brainsync: auto-admit %s: %v", brainRoot, err)
 		}
 		return
+	}
+	// Drift goes out loudly regardless of verbose — substituted-key
+	// MITM is the one thing we don't want to be silent about.
+	for _, d := range drift {
+		log.Printf("brainsync: DRIFT on %s: login %q changed from %s to %s (originally verified by %s). "+
+			"Auto-admit paused for this login. Re-verify with `nous brain recipient verify` "+
+			"to accept the new key, or remove the entry from .brain/verified.yaml to clear.",
+			brainRoot, d.Login,
+			d.OldFingerprint[len(d.OldFingerprint)-8:], d.NewFingerprint[len(d.NewFingerprint)-8:],
+			d.VerifiedBy)
 	}
 	if len(added) == 0 {
 		return

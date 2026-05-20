@@ -18,11 +18,24 @@ type AdmittedRecipient struct {
 	UID         string // first GPG UID on the imported pubkey
 }
 
+// DriftEvent describes a recipient whose keys-branch fingerprint has
+// changed from what's recorded in verified.yaml. Auto-admit pauses
+// for these — re-admitting a substituted key would silently widen
+// the trust circle without operator consent. Surfaced so the caller
+// can log loudly and surface to the operator (in TUI: "ying's key
+// rotated/changed since you verified it last; re-verify or revoke").
+type DriftEvent struct {
+	Login            string // github login of the affected recipient
+	OldFingerprint   string // fingerprint pinned in verified.yaml
+	NewFingerprint   string // fingerprint on the keys branch now
+	VerifiedBy       string // who recorded the original verification
+}
+
 // AutoAdmitFromKeysBranch scans the brain's keys branch for
 // `<github-login>.asc` files whose fingerprints are not yet listed
-// in `.brain/config.md`'s recipients, and appends them. Returns
-// the slice of newly-admitted recipients (empty when nothing
-// changed).
+// in `.brain/config.md`'s recipients, and appends them. Returns the
+// newly-admitted recipients alongside any drift events (a login
+// previously verified now showing a different fingerprint).
 //
 // Does NOT commit or push — the caller (typically brainsync's
 // Watch loop after `syncBrainPubkeys`) calls AddCommitPush so the
@@ -35,28 +48,41 @@ type AdmittedRecipient struct {
 // The new nous#26 convention is `<github-login>.asc` where login
 // is not a fingerprint; those are the candidates.
 //
-// Returns (nil, nil) on no-op (no keys branch yet, no candidates,
-// no new keys). Errors propagate only on infrastructure failures
-// (manifest unreadable, keys branch listable but unparseable).
-func AutoAdmitFromKeysBranch(ctx context.Context, brainRoot string) ([]AdmittedRecipient, error) {
+// Drift detection: if .brain/verified.yaml has an entry for a
+// login and that entry's fingerprint differs from what's on the
+// keys branch now, auto-admit refuses to bring the new fingerprint
+// in. The operator must re-verify (which updates verified.yaml) to
+// re-enable admission for that login. This is the only safety
+// floor the otherwise-fully-automatic admit flow has against a
+// substituted-key MITM.
+//
+// Returns (nil, nil, nil) on no-op. Errors propagate only on
+// infrastructure failures (manifest unreadable, keys branch listable
+// but unparseable, verified.yaml malformed).
+func AutoAdmitFromKeysBranch(ctx context.Context, brainRoot string) ([]AdmittedRecipient, []DriftEvent, error) {
 	m, err := Read(brainRoot)
 	if err != nil {
-		return nil, fmt.Errorf("auto-admit: read manifest: %w", err)
+		return nil, nil, fmt.Errorf("auto-admit: read manifest: %w", err)
+	}
+	verified, err := ReadVerified(brainRoot)
+	if err != nil {
+		return nil, nil, fmt.Errorf("auto-admit: read verified: %w", err)
 	}
 
 	store, err := filestore.Open(brainRoot, keysBranch)
 	if err != nil {
-		return nil, fmt.Errorf("auto-admit: open keys store: %w", err)
+		return nil, nil, fmt.Errorf("auto-admit: open keys store: %w", err)
 	}
 	defer store.Close()
 
 	files, err := store.List(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("auto-admit: list keys store: %w", err)
+		return nil, nil, fmt.Errorf("auto-admit: list keys store: %w", err)
 	}
 
 	existing := setOfUpper(m.Recipients)
 	var added []AdmittedRecipient
+	var drift []DriftEvent
 
 	for name, content := range files {
 		if !strings.HasSuffix(name, pubkeyFilenameSuffix) {
@@ -81,6 +107,21 @@ func AutoAdmitFromKeysBranch(ctx context.Context, brainRoot string) ([]AdmittedR
 			continue
 		}
 		fpUp := strings.ToUpper(key.Fingerprint)
+
+		// Drift check: if this login has been verified before with a
+		// different fingerprint, refuse to admit the new key. The
+		// operator must explicitly re-verify (writing the new FP into
+		// verified.yaml) before auto-admit will accept it.
+		if v, ok := verified[stem]; ok && !strings.EqualFold(v.Fingerprint, fpUp) {
+			drift = append(drift, DriftEvent{
+				Login:          stem,
+				OldFingerprint: strings.ToUpper(v.Fingerprint),
+				NewFingerprint: fpUp,
+				VerifiedBy:     v.VerifiedBy,
+			})
+			continue
+		}
+
 		if existing[fpUp] {
 			continue
 		}
@@ -94,12 +135,12 @@ func AutoAdmitFromKeysBranch(ctx context.Context, brainRoot string) ([]AdmittedR
 	}
 
 	if len(added) == 0 {
-		return nil, nil
+		return nil, drift, nil
 	}
 	if err := RewriteFrontmatter(brainRoot, m); err != nil {
-		return nil, fmt.Errorf("auto-admit: rewrite manifest: %w", err)
+		return nil, drift, fmt.Errorf("auto-admit: rewrite manifest: %w", err)
 	}
-	return added, nil
+	return added, drift, nil
 }
 
 // looksLikeFingerprint reports whether s is a 40-character hex

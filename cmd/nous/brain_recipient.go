@@ -2,17 +2,20 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
 	"github.com/xianxu/nous/lib/brain"
 	"github.com/xianxu/nous/lib/brainsync"
+	"github.com/xianxu/nous/lib/gh"
 	"github.com/xianxu/nous/lib/identity"
 )
 
@@ -482,11 +485,19 @@ channel (phone, in-person, signed message — NOT the same channel
 that delivered the pubkey itself). A match prints ✓; a mismatch
 surfaces the discrepancy and exits non-zero.
 
-This is purely a verification step — no state changes. It's the
-opt-in counterpart to nous#23's auto-import: the auto-import
-makes pubkey distribution convenient by default; this verb is the
-escape hatch when you want to confirm the substrate hasn't been
-tampered with.
+On a successful match, the verification is persisted to
+.brain/verified.yaml — keyed by the recipient's github login —
+recording the fingerprint at verify time, who verified it, and
+when. The auto-admit loop reads this file: if the recipient's
+keys-branch fingerprint ever changes from the verified one, auto-
+admit pauses for that login (the "drift" path), forcing operator
+attention before a substituted key gets silently admitted.
+
+Persistence requires the recipient to have been admitted via the
+nous#26 GitHub-mediated path (<login>.asc on the keys branch).
+Legacy <FP>.asc admissions don't carry a login, so the verify
+ceremony still runs but the result isn't persisted — the operator
+sees a soft notice in that case.
 
 Args:
   BRAIN-PATH    Path to the brain (relative or absolute).
@@ -537,9 +548,65 @@ Args:
 			}
 			fmt.Fprintln(out)
 			fmt.Fprintln(out, "✓ Match. The pubkey in your keyring is what the peer claims it is.")
+
+			// Persist the verification to .brain/verified.yaml. Best-
+			// effort: persistence requires the recipient to have a
+			// <login>.asc on the keys branch (nous#26 path). Legacy
+			// <FP>.asc admissions get a soft notice and the verify
+			// ceremony's match is one-shot for them.
+			if err := persistVerify(cmd.Context(), brainPath, key.Fingerprint, out); err != nil {
+				return fmt.Errorf("persist verify: %w", err)
+			}
 			return nil
 		},
 	}
+}
+
+// persistVerify writes (or refreshes) a .brain/verified.yaml entry
+// for the recipient identified by fp, then commits + pushes via the
+// brainsync push wrapper. Best-effort on the github-login lookup:
+// when no <login>.asc on keys branch matches the fingerprint, the
+// match is one-shot (legacy admission path).
+func persistVerify(ctx context.Context, brainPath, fp string, out io.Writer) error {
+	login, err := brain.LoginForFingerprint(ctx, brainPath, fp)
+	if err != nil {
+		// Filestore failures are infrastructure issues; surface them
+		// so the operator can re-verify after fixing the keys branch.
+		return err
+	}
+	if login == "" {
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "  (not persisted: this recipient was admitted via the legacy <FP>.asc")
+		fmt.Fprintln(out, "   path; persistent verify requires the nous#26 <login>.asc convention.)")
+		return nil
+	}
+	verifier, err := gh.AuthLogin()
+	if err != nil {
+		// gh-auth outage shouldn't block the ceremony output, but the
+		// operator should know we couldn't record their identity.
+		fmt.Fprintln(out)
+		fmt.Fprintf(out, "  (not persisted: couldn't resolve verifier identity via gh: %v)\n", err)
+		return nil
+	}
+	v, err := brain.ReadVerified(brainPath)
+	if err != nil {
+		return err
+	}
+	v[login] = brain.VerifiedEntry{
+		Fingerprint: strings.ToUpper(fp),
+		VerifiedBy:  verifier,
+		VerifiedAt:  time.Now().UTC().Truncate(time.Second),
+	}
+	if err := brain.WriteVerified(brainPath, v); err != nil {
+		return err
+	}
+	if err := brainsync.AddCommitPush(brainPath, "verify "+login+" by "+verifier); err != nil {
+		return err
+	}
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "  Persisted: %s verified by %s — auto-admit will pause if the\n", login, verifier)
+	fmt.Fprintln(out, "  keys-branch fingerprint for this login ever changes.")
+	return nil
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────
