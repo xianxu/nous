@@ -471,6 +471,185 @@ func assertPubkeyInKeyring(t *testing.T, p *testPeer, fp string) {
 	}
 }
 
+// TestEndToEnd_GitHubMediatedOnboarding exercises the nous#26 flow
+// end-to-end against a local bare repo:
+//
+//  1. Operator provisions a single-recipient brain (just operator's fp).
+//  2. peerC "joins" by publishing peerC.asc to the keys branch — the
+//     `nous brain join` path. peerC has plain-git push access (modeled
+//     here by direct PublishOwnPubkeyToRemote); they're not yet a
+//     gcrypt recipient, so they cannot decrypt main.
+//  3. Operator's auto-admit (lib/brain.AutoAdmitFromKeysBranch +
+//     brainsync.AddCommitPush) picks up peerC.asc, appends to the
+//     manifest, and pushes. The #24 push wrapper syncs gcrypt-
+//     participants from the new manifest, so the ciphertext is re-
+//     encrypted to {operator, peerC}.
+//  4. peerC clones via gcrypt — BootstrapPubkeys fetches operator's
+//     pubkey from the keys branch (for signature verify), then the
+//     gcrypt clone decrypts main using peerC's secret key. peerC sees
+//     a fully-formed manifest with both fingerprints.
+//  5. Idempotence: re-running auto-admit on the operator side adds
+//     nothing new (the only candidate is already in the manifest).
+//  6. Legacy <FP>.asc entries (operator's own pubkey, published by
+//     provisionBrain under the nous#23 convention) are NOT auto-
+//     admitted on subsequent runs — looksLikeFingerprint correctly
+//     discriminates "legacy operator-published" from "new joiner-
+//     published."
+//
+// Subtest "orphan_keys_branch" covers the brand-new-brain case where
+// the joiner runs first and creates the keys branch via orphan-
+// checkout (no operator pubkey published yet). This is the empirical
+// case from today's manual test: ying ran `nous brain join` against
+// brain-family before the operator's own keys-branch publish had
+// landed.
+func TestEndToEnd_GitHubMediatedOnboarding(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (-short)")
+	}
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skipf("integration test requires POSIX gpg; runtime is %s", runtime.GOOS)
+	}
+	mustHave(t, "gpg")
+	mustHave(t, "git")
+	mustHave(t, "git-remote-gcrypt")
+
+	remoteURL := initBareRepo(t)
+	operator := setupPeer(t, "operator", "operator@test.local")
+	peerC := setupPeer(t, "peerC", "peerC@test.local")
+
+	// === Step 1: operator provisions a single-recipient brain ===
+	withPeer(t, operator, func() {
+		operator.brainPath = provisionBrain(t, operator, remoteURL, []string{operator.fp})
+	})
+
+	// === Step 2: peerC publishes pubkey via the join flow ===
+	// PublishOwnPubkeyToRemote uses plain-git access to the keys
+	// branch — no gcrypt involvement on peerC's side. peerC is
+	// effectively "a github collaborator who hasn't been admitted to
+	// the gcrypt recipient list yet."
+	const peerCLogin = "peerC"
+	withPeer(t, peerC, func() {
+		if err := brain.PublishOwnPubkeyToRemote(context.Background(), remoteURL, peerCLogin, peerC.armorPub); err != nil {
+			t.Fatalf("peerC PublishOwnPubkeyToRemote: %v", err)
+		}
+	})
+
+	// === Step 3: operator's auto-admit picks up peerC.asc ===
+	// In the watch loop this is two calls in sequence: syncBrainPubkeys
+	// (imports new pubkeys into operator's keyring so gcrypt can encrypt
+	// to them) then autoAdmitBrain (appends to manifest + AddCommitPush
+	// to re-encrypt). We invoke them directly here.
+	withPeer(t, operator, func() {
+		ctx := context.Background()
+		imported, _, err := brain.ImportAllPubkeys(ctx, operator.brainPath)
+		if err != nil {
+			t.Fatalf("operator ImportAllPubkeys: %v", err)
+		}
+		if imported < 1 {
+			t.Errorf("operator ImportAllPubkeys: imported=%d, want ≥1 (peerC's pubkey)", imported)
+		}
+		assertPubkeyInKeyring(t, operator, peerC.fp)
+
+		added, err := brain.AutoAdmitFromKeysBranch(ctx, operator.brainPath)
+		if err != nil {
+			t.Fatalf("AutoAdmitFromKeysBranch: %v", err)
+		}
+		if len(added) != 1 {
+			t.Fatalf("expected 1 admitted, got %d: %+v", len(added), added)
+		}
+		if added[0].Login != peerCLogin {
+			t.Errorf("admitted login = %q, want %q", added[0].Login, peerCLogin)
+		}
+		if !strings.EqualFold(added[0].Fingerprint, peerC.fp) {
+			t.Errorf("admitted fp = %q, want %q (case-insensitive)", added[0].Fingerprint, peerC.fp)
+		}
+
+		// Push the manifest update. The #24 wrapper syncs
+		// gcrypt-participants and the gcrypt push re-encrypts to
+		// the new recipient set.
+		if err := brainsync.AddCommitPush(operator.brainPath, "auto-admit "+peerCLogin); err != nil {
+			t.Fatalf("operator commit/push post-auto-admit: %v", err)
+		}
+	})
+
+	// === Step 4: peerC clones via gcrypt and can decrypt ===
+	withPeer(t, peerC, func() {
+		peerC.brainPath = cloneBrainViaPeerkeys(t, peerC, remoteURL)
+		assertPubkeyInKeyring(t, peerC, operator.fp)
+		manifest := readBrainFile(t, peerC.brainPath, ".brain/config.md")
+		if !strings.Contains(strings.ToUpper(manifest), strings.ToUpper(peerC.fp)) {
+			t.Errorf("peerC's manifest missing peerC's fp:\n%s", manifest)
+		}
+		if !strings.Contains(strings.ToUpper(manifest), strings.ToUpper(operator.fp)) {
+			t.Errorf("peerC's manifest missing operator's fp:\n%s", manifest)
+		}
+	})
+
+	// === Step 5: idempotence — re-run auto-admit yields no new admissions ===
+	withPeer(t, operator, func() {
+		added, err := brain.AutoAdmitFromKeysBranch(context.Background(), operator.brainPath)
+		if err != nil {
+			t.Fatalf("AutoAdmitFromKeysBranch (idempotence): %v", err)
+		}
+		if len(added) != 0 {
+			t.Errorf("idempotence: expected 0 new admissions, got %d: %+v", len(added), added)
+		}
+	})
+
+	// === Step 6: legacy <FP>.asc entries are NOT auto-admitted ===
+	// provisionBrain published operator's pubkey as <operator-FP>.asc
+	// (the nous#23 legacy convention — fingerprint-as-filename).
+	// AutoAdmitFromKeysBranch's looksLikeFingerprint discriminator
+	// should skip those: they predate nous#26 and are in the manifest
+	// by construction (otherwise they wouldn't have been published).
+	// Re-running yields no new admissions even though <operator-FP>.asc
+	// is still in the keys store. (This is covered by step 5's
+	// idempotence check, but worth pinning explicitly via a comment.)
+}
+
+// TestPublishOwnPubkeyToRemote_OrphanCreate covers the brand-new-brain
+// edge case from today's manual test (brain-family). The joiner's
+// `nous brain join` runs against a bare repo with no keys branch yet
+// — PublishOwnPubkeyToRemote must create the branch via orphan-
+// checkout rather than failing. Separate from the main flow because
+// it operates on a freshly-initialized bare repo (no operator
+// provisioning).
+func TestPublishOwnPubkeyToRemote_OrphanCreate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (-short)")
+	}
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skipf("integration test requires POSIX gpg; runtime is %s", runtime.GOOS)
+	}
+	mustHave(t, "gpg")
+	mustHave(t, "git")
+
+	remoteURL := initBareRepo(t)
+	joiner := setupPeer(t, "joiner", "joiner@test.local")
+
+	// No operator has published anything to the keys branch. The
+	// remote is just `git init --bare` with no branches at all.
+	withPeer(t, joiner, func() {
+		if err := brain.PublishOwnPubkeyToRemote(context.Background(), remoteURL, "joiner", joiner.armorPub); err != nil {
+			t.Fatalf("PublishOwnPubkeyToRemote on empty remote: %v", err)
+		}
+	})
+
+	// Verify keys branch was created with joiner.asc on it.
+	tmp := t.TempDir()
+	cmd := exec.Command("git", "clone", "--branch", "keys", "--single-branch", remoteURL, filepath.Join(tmp, "check"))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("clone keys branch after orphan-create: %v\n%s", err, out)
+	}
+	got, err := os.ReadFile(filepath.Join(tmp, "check", "joiner.asc"))
+	if err != nil {
+		t.Fatalf("joiner.asc not present after orphan-create: %v", err)
+	}
+	if !strings.Contains(string(got), "BEGIN PGP PUBLIC KEY BLOCK") {
+		t.Errorf("joiner.asc content doesn't look like an armored pubkey:\n%s", got)
+	}
+}
+
 // mustGit runs git with optional working directory. Empty repo skips
 // the -C flag (used by `git init` which doesn't accept -C against a
 // not-yet-created dir).

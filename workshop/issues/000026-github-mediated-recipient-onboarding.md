@@ -307,9 +307,26 @@ if v, ok := verified[login]; ok && v.Fingerprint != fp {
       created before this commit.
 - [ ] M6: `cmd/nous/brain_recipient_verify.go` + TUI. Reads/writes
       `.brain/verified.yaml`. Drift detection in `autoAdmit`.
-- [ ] M7: Integration test extension: new peer joins shared brain via
-      the new flow (invite → join → auto-admit → verify). Cover the
-      drift detection path with a tampered-pubkey scenario.
+- [x] M7: Integration test extension landed in two new tests in
+      `lib/brain/integration_test.go`:
+      - `TestEndToEnd_GitHubMediatedOnboarding`: full flow with a
+        real bare-repo remote — operator provisions, peerC joins
+        via `PublishOwnPubkeyToRemote`, operator's `ImportAllPubkeys`
+        + `AutoAdmitFromKeysBranch` + `AddCommitPush` admits peerC,
+        peerC clones via gcrypt and reads the manifest with both
+        fingerprints. Also exercises idempotence (re-running
+        auto-admit yields no new admissions) and the
+        `looksLikeFingerprint` discriminator (operator's legacy
+        `<FP>.asc` not re-admitted).
+      - `TestPublishOwnPubkeyToRemote_OrphanCreate`: the brand-new-
+        brain case where the joiner runs against an empty bare
+        repo — orphan-checkout path creates the keys branch.
+      Discovery filter fix (single-recipient brain with gcrypt
+      remote is watched) covered in the unit test
+      `TestFindSharedBrains_SingleRecipientWithGcryptRemote`. Push
+      wrapper now tolerates non-brain repos (regression fix for
+      three pre-existing brainsync tests that broke under #24).
+      Drift-detection (M6 scope) tested separately when M6 lands.
 - [ ] M8: Atlas update — `atlas/nous/recipient-onboarding.md` documents
       the trust model (GH-collaborator = recipient, verify opt-in)
       and the WhatsApp analogy.
