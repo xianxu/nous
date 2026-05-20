@@ -117,6 +117,35 @@ func UserExists(login string) error {
 	return nil
 }
 
+// CollaboratorPermission returns the authenticated user's permission
+// level on owner/repo: one of "admin", "maintain", "push", "triage",
+// "pull", or "" (not a collaborator / not visible).
+//
+// For personal repos, the owner is implicitly "admin" — the GitHub
+// API actually returns "admin" for the owner's own query, so callers
+// don't need a separate "is owner" check.
+//
+// Errors propagate on infrastructure failures; a 404 (no access) is
+// surfaced as ("", nil) rather than an error — the most common
+// reason a brain shows up in someone's workspace without permission
+// info is "I'm a recipient via gcrypt but not a github collaborator,"
+// which is a valid state.
+func CollaboratorPermission(owner, repo, login string) (string, error) {
+	out, err := run("api",
+		fmt.Sprintf("repos/%s/%s/collaborators/%s/permission", owner, repo, login),
+		"--jq", ".permission")
+	if err != nil {
+		// 404 = not a collaborator. Most callers want to treat
+		// this as "no permission" rather than "error" — surface
+		// as empty string.
+		if strings.Contains(err.Error(), "HTTP 404") || strings.Contains(err.Error(), "Not Found") {
+			return "", nil
+		}
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // AddCollaborator invites `login` to `owner/repo` with the given
 // permission ("push", "pull", "admin", "maintain", "triage"). The
 // invitee must accept (via web UI or `nous brain join`) for the

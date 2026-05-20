@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -374,9 +375,17 @@ func provisionBrain(t *testing.T, p *testPeer, remoteURL string, recipients []st
 	if err := brainsync.AddCommitPush(brainDir, "init brain"); err != nil {
 		t.Fatalf("initial push: %v", err)
 	}
-	// Publish operator's pubkey to the keys branch.
-	if err := brain.PublishPubkey(context.Background(), brainDir, p.fp); err != nil {
+	// Publish operator's pubkey to the keys branch under BOTH
+	// conventions — legacy <FP>.asc (nous#23) for backward compat
+	// and new <login>.asc (nous#27) so drift detection has a stable
+	// login key. Mirrors the canonical `nous brain new` flow after
+	// the nous#27 update.
+	ctx := context.Background()
+	if err := brain.PublishPubkey(ctx, brainDir, p.fp); err != nil {
 		t.Fatalf("publish pubkey: %v", err)
+	}
+	if err := brain.PublishOwnPubkey(ctx, brainDir, p.name, p.fp); err != nil {
+		t.Fatalf("publish own pubkey: %v", err)
 	}
 	return brainDir
 }
@@ -522,6 +531,26 @@ func TestEndToEnd_GitHubMediatedOnboarding(t *testing.T) {
 	// === Step 1: operator provisions a single-recipient brain ===
 	withPeer(t, operator, func() {
 		operator.brainPath = provisionBrain(t, operator, remoteURL, []string{operator.fp})
+		// Assertion (nous#27 M1): provisionBrain publishes operator's
+		// pubkey under both <FP>.asc (legacy) AND <login>.asc (new).
+		// Without the <login>.asc, peerC's later clone would fail
+		// signature verification — this is the bug yesterday's manual
+		// repro hit on brain-family.
+		store, err := filestore.Open(operator.brainPath, "keys")
+		if err != nil {
+			t.Fatalf("filestore.Open: %v", err)
+		}
+		defer store.Close()
+		files, err := store.List(context.Background())
+		if err != nil {
+			t.Fatalf("filestore.List: %v", err)
+		}
+		if _, ok := files["operator.asc"]; !ok {
+			t.Errorf("expected operator.asc on keys branch after provision; got files: %v", keysOf(files))
+		}
+		if _, ok := files[strings.ToUpper(operator.fp)+".asc"]; !ok {
+			t.Errorf("expected <FP>.asc (legacy) on keys branch after provision; got files: %v", keysOf(files))
+		}
 	})
 
 	// === Step 2: peerC publishes pubkey via the join flow ===
@@ -991,6 +1020,17 @@ func TestPublishOwnPubkeyToRemote_OrphanCreate(t *testing.T) {
 	if !strings.Contains(string(got), "BEGIN PGP PUBLIC KEY BLOCK") {
 		t.Errorf("joiner.asc content doesn't look like an armored pubkey:\n%s", got)
 	}
+}
+
+// keysOf returns the sorted keys of a filestore.List result, for
+// readable test failure messages when an expected file is missing.
+func keysOf(files map[string][]byte) []string {
+	out := make([]string, 0, len(files))
+	for k := range files {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // mustGit runs git with optional working directory. Empty repo skips

@@ -154,6 +154,39 @@ func BootstrapPubkeys(ctx context.Context, gcryptURL string) (imported int, errs
 	return imported, errs, nil
 }
 
+// PublishOwnPubkey writes the operator's pubkey to the brain's keys
+// store under the new nous#26 `<login>.asc` convention.
+// Counterpart to PublishPubkey (which writes `<FP>.asc`, the
+// nous#23 legacy convention). Both can coexist on the same keys
+// branch — ImportAllPubkeys imports any `.asc` file regardless of
+// stem, and auto-admit's looksLikeFingerprint discriminator
+// correctly skips legacy `<FP>.asc` entries.
+//
+// Use this at brain creation time (nous brain new) so the operator's
+// pubkey is published under both conventions: legacy `<FP>.asc` keeps
+// pre-#26 clones working; new `<login>.asc` makes drift detection
+// (via verified.yaml) keyable by github-login as designed.
+//
+// The fp must already be in the operator's local GPG keyring;
+// identity.Export reads it from there.
+func PublishOwnPubkey(ctx context.Context, brainRoot, login, fp string) error {
+	armor, err := identity.Export(fp)
+	if err != nil {
+		return fmt.Errorf("peerkeys: export %s: %w", fp, err)
+	}
+	store, err := filestore.Open(brainRoot, keysBranch)
+	if err != nil {
+		return fmt.Errorf("peerkeys: open keys store: %w", err)
+	}
+	defer store.Close()
+
+	name := login + pubkeyFilenameSuffix
+	if err := store.Put(ctx, name, []byte(armor)); err != nil {
+		return fmt.Errorf("peerkeys: publish %s: %w", name, err)
+	}
+	return nil
+}
+
 // PublishOwnPubkeyToRemote writes `<login>.asc` (with the given
 // armored pubkey) to the `keys` branch of the remote at `cloneURL`,
 // without requiring a local brain clone. The new-joiner flow

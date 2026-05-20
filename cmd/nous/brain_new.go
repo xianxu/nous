@@ -12,6 +12,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/xianxu/nous/lib/brain"
+	"github.com/xianxu/nous/lib/gh"
 	"github.com/xianxu/nous/lib/identity"
 )
 
@@ -222,6 +223,25 @@ a second commit + push (gcrypt re-encrypts to all recipients).`,
 					continue
 				}
 				fmt.Fprintf(out, "  published %s\n", shortFp(fp))
+			}
+			// Also publish operator's own pubkey under the new
+			// nous#26 `<login>.asc` convention. Joiners running
+			// `nous brain join` orphan-create the keys branch if it's
+			// empty; without this publish, a joiner's first push
+			// would replace the keys branch with just their own key,
+			// leaving the operator's pubkey missing for subsequent
+			// signature verification. (Yesterday's brain-family bug,
+			// nous#26 M7 regression test.)
+			if myLogin, err := gh.AuthLogin(); err == nil && myLogin != "" {
+				if err := brain.PublishOwnPubkey(ctx, abs, myLogin, ownFp); err != nil {
+					fmt.Fprintf(out, "  warning: publish %s.asc: %v\n", myLogin, err)
+					anyFailed = true
+				} else {
+					fmt.Fprintf(out, "  published %s.asc (operator)\n", myLogin)
+				}
+			} else {
+				fmt.Fprintln(out, "  note: couldn't resolve github login (gh auth?); skipping <login>.asc publish.")
+				fmt.Fprintln(out, "        Run `nous brain join <owner>/<repo>` from this host later to publish.")
 			}
 			if anyFailed {
 				fmt.Fprintln(out, "  (some publishes failed; peers may need sneakernet pubkey exchange)")

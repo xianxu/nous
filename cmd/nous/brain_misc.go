@@ -6,11 +6,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/xianxu/nous/lib/brain"
 	"github.com/xianxu/nous/lib/brainsync"
+	"github.com/xianxu/nous/lib/gh"
 )
 
 // nous brain list — read-only enumeration of brains under the workspace
@@ -39,18 +41,64 @@ func runBrainList(w io.Writer) error {
 		fmt.Fprintln(w, "No brains under workspace root.")
 		return nil
 	}
+	// Resolve auth'd login once for all the operator-marker probes.
+	// Empty on outage — operator markers just don't render, which is
+	// the safe degradation (worst case is "I don't know I'm operator").
+	myLogin, _ := gh.AuthLogin()
 	for _, b := range brains {
 		kind := "private"
 		if b.Shared() {
 			kind = "shared"
 		}
+		marker := " "
+		if isOperator(b.Path, myLogin) {
+			marker = "*"
+		}
 		// Display directory basename — that's the unambiguous on-disk
 		// identity. manifest.Name is operator-authored and can drift.
-		fmt.Fprintf(w, "  %-22s  %s  %d recipient%s  sync=%s\n",
-			filepath.Base(b.Path), kind, len(b.Recipients), pluralS(len(b.Recipients)), defaultStr(b.SyncSubstrate, "?"))
+		// `*` prefix marks brains where the current user can act as
+		// operator (invite/remove recipients via gh). See nous#27.
+		fmt.Fprintf(w, "%s %-22s  %s  %d recipient%s  sync=%s\n",
+			marker, filepath.Base(b.Path), kind, len(b.Recipients), pluralS(len(b.Recipients)), defaultStr(b.SyncSubstrate, "?"))
 		fmt.Fprintf(w, "      %s\n", b.Path)
 	}
+	if myLogin != "" {
+		fmt.Fprintln(w)
+		fmt.Fprintf(w, "  (* = you can act as operator on this brain — github admin/maintain or owner; current login: %s)\n", myLogin)
+	}
 	return nil
+}
+
+// isOperator probes whether the current user can act as operator
+// (invite/remove collaborators) on the brain rooted at brainPath.
+// Returns false for any brain without a parsable github.com remote,
+// any gh outage, or any non-admin/maintain permission level.
+//
+// Best-effort: a slow gh response would block `nous brain list`,
+// but the typical case is local-cache-fast. If we ever need to
+// guarantee bounded latency, this can be moved behind a flag or
+// run in parallel with a cap; for now the simplicity wins.
+func isOperator(brainPath, myLogin string) bool {
+	if myLogin == "" {
+		return false
+	}
+	origin := readBrainOriginURL(brainPath)
+	if origin == "" {
+		return false
+	}
+	owner, repo, err := brain.GitHubOwnerRepo(origin)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(owner, myLogin) {
+		// Personal repo owner = operator by definition.
+		return true
+	}
+	perm, err := gh.CollaboratorPermission(owner, repo, myLogin)
+	if err != nil {
+		return false
+	}
+	return perm == "admin" || perm == "maintain"
 }
 
 func defaultStr(s, fallback string) string {

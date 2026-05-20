@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -88,17 +91,43 @@ Args:
 
 			// 2. The actual gcrypt clone. Stream stdout/stderr so
 			// the operator sees gcrypt's progress live (manifest
-			// decrypt, object fetch, etc.).
+			// decrypt, object fetch, etc.). Tee stderr into a
+			// buffer so we can pattern-match on common failure
+			// modes after the fact and surface a clearer diagnostic.
 			fmt.Fprintln(out)
 			fmt.Fprintln(out, "Cloning brain …")
 			cargs := []string{"clone", gcryptURL}
 			if targetDir != "" {
 				cargs = append(cargs, targetDir)
 			}
+			var stderrBuf bytes.Buffer
 			c := exec.CommandContext(ctx, "git", cargs...)
 			c.Stdout = os.Stdout
-			c.Stderr = os.Stderr
+			c.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
 			if err := c.Run(); err != nil {
+				captured := stderrBuf.String()
+				// gcrypt's signature-verify-failed path produces
+				// gpg's canonical "No public key" / "Can't check
+				// signature" output. That's almost always the
+				// "keys branch missing operator's pubkey" case
+				// (the nous#27 M2 fix's motivating bug): the
+				// joiner's BootstrapPubkeys imported their own
+				// .asc back but no operator pubkey, so gcrypt has
+				// nothing to verify the manifest signature
+				// against. Prepend a recovery hint to the bare
+				// gcrypt error.
+				if strings.Contains(captured, "No public key") || strings.Contains(captured, "Can't check signature") {
+					fmt.Fprintln(out)
+					fmt.Fprintln(out, "==> Clone failed: keys branch is missing the operator's pubkey.")
+					fmt.Fprintln(out, "    gcrypt could decrypt the manifest (you're in the recipient list)")
+					fmt.Fprintln(out, "    but couldn't verify its signature.")
+					fmt.Fprintln(out)
+					fmt.Fprintln(out, "    Ask the operator to run from their host:")
+					fmt.Fprintln(out, "      nous brain join <owner>/<repo>")
+					fmt.Fprintln(out, "    which publishes their <login>.asc to the keys branch under the")
+					fmt.Fprintln(out, "    nous#26 convention. Then retry this clone.")
+					return fmt.Errorf("git clone: missing operator pubkey on keys branch")
+				}
 				return fmt.Errorf("git clone: %w", err)
 			}
 			// No explicit gcrypt-participants sync needed here: the
