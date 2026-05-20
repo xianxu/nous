@@ -280,9 +280,14 @@ if v, ok := verified[login]; ok && v.Fingerprint != fp {
       `--force`, `--yes` flags. Added `lib/brain/url.go` with
       `GitHubOwnerRepo(remoteURL)` for parsing gcrypt/ssh/https/SCP
       forms (+ table-driven test).
-- [ ] M3: Auto-admit in `lib/brainsync/pull.go`. Extend the existing
-      `PullBrain` post-`ImportAllPubkeys` hook. Tested via the existing
-      integration test pattern (add a fourth peer scenario).
+- [x] M3: Auto-admit implemented in `lib/brain/autoadmit.go`
+      (`AutoAdmitFromKeysBranch`); wired into `lib/brainsync/watch.go`
+      via new `autoAdmitBrain` helper, called after each tick's
+      `syncBrainPubkeys`. Push uses `AddCommitPush` so #24's
+      gcrypt-participants sync handles re-encryption atomically.
+      Unit tested `looksLikeFingerprint` (the legacy-vs-new
+      filename discriminator). Full end-to-end exercise lands
+      in M7's integration-test extension (4-peer scenario).
 - [ ] M4: `cmd/nous/brain_join.go` + TUI in `lib/tui/brain/join.go`.
       Filter invitations by description prefix `nous-brain:` and topic
       `nous-brain`. Belt-and-suspenders.

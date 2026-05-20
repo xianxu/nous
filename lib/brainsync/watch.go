@@ -3,6 +3,7 @@ package brainsync
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -128,11 +129,51 @@ func Watch(ctx context.Context, brains []string, fetchEvery time.Duration, verbo
 				// operator action required. New imports are logged
 				// at Info; "nothing new" is silent.
 				syncBrainPubkeys(ctx, b, verbose)
+				// Auto-admit any <login>.asc on the keys branch that's
+				// not yet in the manifest (nous#26). Trust anchor:
+				// operator's earlier `nous brain invite` grants GitHub
+				// collaborator access; the joiner's push of their own
+				// pubkey IS the affirmative "I want in." No prompt.
+				autoAdmitBrain(ctx, b, verbose)
 			}
 		case <-ctx.Done():
 			return nil
 		}
 	}
+}
+
+// autoAdmitBrain runs lib/brain.AutoAdmitFromKeysBranch and pushes
+// the resulting manifest mutation via AddCommitPush. The #24 push
+// wrapper handles gcrypt-participants sync, so by the time the
+// remote sees the manifest update, the ciphertext is also re-
+// encrypted to include the newly-admitted recipient.
+//
+// Logs at Info on each admission (this is operator-visible state
+// change worth surfacing). Errors logged at Info too — auto-admit
+// is best-effort; a transient failure resolves on the next tick.
+func autoAdmitBrain(ctx context.Context, brainRoot string, verbose bool) {
+	added, err := brain.AutoAdmitFromKeysBranch(ctx, brainRoot)
+	if err != nil {
+		// Soft-log. The most common cause is "keys branch doesn't
+		// exist on a pre-#23 brain"; logging every tick would spam.
+		if verbose {
+			log.Printf("brainsync: auto-admit %s: %v", brainRoot, err)
+		}
+		return
+	}
+	if len(added) == 0 {
+		return
+	}
+	parts := make([]string, 0, len(added))
+	for _, r := range added {
+		parts = append(parts, fmt.Sprintf("%s (%s)", r.Login, r.Fingerprint[len(r.Fingerprint)-8:]))
+	}
+	msg := "auto-admit " + strings.Join(parts, ", ")
+	if err := AddCommitPush(brainRoot, msg); err != nil {
+		log.Printf("brainsync: auto-admit commit/push %s: %v", brainRoot, err)
+		return
+	}
+	log.Printf("brainsync: %s on %s", msg, brainRoot)
 }
 
 // syncBrainPubkeys runs peerkeys.ImportAllPubkeys for one brain and
