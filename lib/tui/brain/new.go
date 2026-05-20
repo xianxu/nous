@@ -107,15 +107,7 @@ func (m newBrainModel) updatePath(msg tea.Msg) (newBrainModel, tea.Cmd) {
 			if val == "" {
 				return m, nil
 			}
-			// Tilde-expand for ergonomics; nous brain new also does
-			// this, but doing it here means the confirm message
-			// shows the expanded path.
-			if strings.HasPrefix(val, "~/") {
-				if home, err := os.UserHomeDir(); err == nil {
-					val = filepath.Join(home, val[2:])
-				}
-			}
-			m.picked = val
+			m.picked = resolvePath(val)
 			m.stage = newStageConfirm
 			return m, nil
 		}
@@ -123,6 +115,35 @@ func (m newBrainModel) updatePath(msg tea.Msg) (newBrainModel, tea.Cmd) {
 	var cmd tea.Cmd
 	m.path, cmd = m.path.Update(msg)
 	return m, cmd
+}
+
+// resolvePath converts the operator's input into the absolute path
+// that `nous brain new` will actually create. Mirrors the resolution
+// rules nous brain new applies:
+//
+//   - `~/...` expands to $HOME/...
+//   - absolute paths pass through unchanged
+//   - everything else is resolved relative to the current working
+//     directory (NOT the workspace root — relative paths in Go's
+//     filesystem operations are CWD-relative)
+//
+// Returns the input unchanged on any resolution error so the
+// confirm-stage preview still shows what the operator typed.
+func resolvePath(input string) string {
+	if strings.HasPrefix(input, "~/") {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			input = filepath.Join(home, input[2:])
+		}
+	}
+	if filepath.IsAbs(input) {
+		return filepath.Clean(input)
+	}
+	abs, err := filepath.Abs(input)
+	if err != nil {
+		return input
+	}
+	return abs
 }
 
 func (m newBrainModel) updateConfirm(msg tea.Msg) (newBrainModel, tea.Cmd) {
@@ -159,14 +180,28 @@ func (m newBrainModel) View() string {
 
 	switch m.stage {
 	case newStagePath:
-		b.WriteString("Where should the new brain live? Path relative to the workspace\n")
-		b.WriteString("root (or absolute / `~`-prefixed). Examples:\n")
+		cwd, _ := os.Getwd()
+		b.WriteString("Where should the new brain live? Relative paths resolve from\n")
+		b.WriteString("the current working directory ")
+		b.WriteString(mutedStyle.Render("(" + cwd + ")"))
+		b.WriteString(".\n")
+		b.WriteString("Absolute and ")
+		b.WriteString(mutedStyle.Render("`~/`"))
+		b.WriteString("-prefixed paths also work. Examples:\n")
 		b.WriteString(mutedStyle.Render("  ../brain-family"))
 		b.WriteString("\n")
 		b.WriteString(mutedStyle.Render("  ~/workspace/brain-side-project"))
 		b.WriteString("\n\n")
 		b.WriteString(m.path.View())
-		b.WriteString("\n\n")
+		b.WriteString("\n")
+		// Live preview of the resolved absolute path so the operator
+		// sees exactly where the new brain will land — relative-path
+		// confusion was the bug this preview was added to fix.
+		if val := strings.TrimSpace(m.path.Value()); val != "" {
+			b.WriteString(mutedStyle.Render("  → " + resolvePath(val)))
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
 		b.WriteString(helpStyle.Render("enter  continue    esc  cancel"))
 
 	case newStageConfirm:
