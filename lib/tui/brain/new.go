@@ -75,12 +75,26 @@ func (m newBrainModel) Init() tea.Cmd { return textinput.Blink }
 
 func (m newBrainModel) Update(msg tea.Msg) (newBrainModel, tea.Cmd) {
 	// Subprocess completion lands as subprocessCompletedMsg regardless
-	// of stage. Translate to the public newBrainDoneMsg, return to the
-	// list via cancelNewBrainMsg.
+	// of stage.
+	//
+	// Failure path: quit the TUI immediately. tea.ExecProcess released
+	// alt-screen while the subprocess ran (so its output is on the
+	// normal-screen terminal); re-entering alt-screen on resume would
+	// hide that output. tea.Quit drops alt-screen on the way out,
+	// leaving the subprocess output visible in the operator's terminal
+	// where they can read the actual error. The done-stage would have
+	// shown only "exit status N" which is uselessly terse.
+	//
+	// Success path: stay in the done-stage briefly so the operator
+	// gets a tight visual confirmation without needing to scroll
+	// through the subprocess output.
 	if sc, ok := msg.(subprocessCompletedMsg); ok {
-		m.stage = newStageDone
 		m.err = sc.err
-		return m, func() tea.Msg { return newBrainDoneMsg{path: m.picked, err: sc.err} }
+		if sc.err != nil {
+			return m, tea.Quit
+		}
+		m.stage = newStageDone
+		return m, func() tea.Msg { return newBrainDoneMsg{path: m.picked, err: nil} }
 	}
 
 	switch m.stage {
