@@ -68,6 +68,7 @@ Subcommands:
 	cmd.AddCommand(
 		newBrainNewCmd(),
 		newBrainCloneCmd(),
+		newBrainInviteCmd(),
 		newBrainListCmd(),
 		newBrainRecipientCmd(),
 		newBrainResolveCmd(),

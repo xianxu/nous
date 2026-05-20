@@ -273,9 +273,13 @@ if v, ok := verified[login]; ok && v.Fingerprint != fp {
       404 case, PendingInvitations parses (empty slice). Mutating
       ops (AddCollaborator, AcceptInvitation) will be exercised in
       M2.
-- [ ] M2: `cmd/nous/brain_invite.go` + TUI in `lib/tui/brain/invite.go`.
-      Brain discovery (`DiscoverAll`) probably already exists from
-      the `nous brain` TUI — verify and reuse.
+- [x] M2: `cmd/nous/brain_invite.go`. Reused
+      `brain.DiscoverAll()`. Picker is a numbered prompt (not full
+      bubbletea TUI) — same UX as `scripts/new-brain.sh`. Multi-
+      brain path shows kind ([private]/[shared, N]). `--brain PATH`,
+      `--force`, `--yes` flags. Added `lib/brain/url.go` with
+      `GitHubOwnerRepo(remoteURL)` for parsing gcrypt/ssh/https/SCP
+      forms (+ table-driven test).
 - [ ] M3: Auto-admit in `lib/brainsync/pull.go`. Extend the existing
       `PullBrain` post-`ImportAllPubkeys` hook. Tested via the existing
       integration test pattern (add a fourth peer scenario).
