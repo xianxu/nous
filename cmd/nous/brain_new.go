@@ -143,7 +143,12 @@ a second commit + push (gcrypt re-encrypts to all recipients).`,
 				return err
 			}
 			c := exec.Command("bash", script, brainPath)
-			c.Env = os.Environ()
+			// Propagate the resolved anchor fingerprint so the script
+			// doesn't re-prompt for the same identity we already
+			// picked above (CLI's --as flag or the TUI's picker
+			// stage). The script honors NOUS_BRAIN_ANCHOR_FP via
+			// last-8/full-FP match.
+			c.Env = append(os.Environ(), "NOUS_BRAIN_ANCHOR_FP="+ownFp)
 			c.Stdin = os.Stdin
 			c.Stdout = os.Stdout
 			c.Stderr = os.Stderr

@@ -269,6 +269,26 @@ done < <(gpg --list-secret-keys --with-colons 2>/dev/null)
 N_KEYS=$((idx+1))
 if [ "$N_KEYS" -eq 0 ]; then
     die "No GPG secret keys found. Run 'make identity' first."
+fi
+
+# NOUS_BRAIN_ANCHOR_FP lets `nous brain new` pre-resolve the anchor
+# identity in its own picker (CLI flag or TUI stage) and pass the
+# chosen FP through, so the operator doesn't get prompted twice for
+# the same thing. Accepts full 40-char or any uppercase-suffix match
+# of length ≥ 8 (last-8 convention). Falls through to the interactive
+# picker when unset.
+if [ -n "${NOUS_BRAIN_ANCHOR_FP:-}" ]; then
+    want=$(echo "$NOUS_BRAIN_ANCHOR_FP" | tr '[:lower:]' '[:upper:]')
+    FP=""
+    for j in "${!FPS[@]}"; do
+        up=$(echo "${FPS[$j]}" | tr '[:lower:]' '[:upper:]')
+        if [ "$up" = "$want" ] || { [ "${#want}" -ge 8 ] && [ "${up: -${#want}}" = "$want" ]; }; then
+            FP="${FPS[$j]}"
+            info "Using GPG identity (NOUS_BRAIN_ANCHOR_FP): ${UIDS[$j]} [$FP]"
+            break
+        fi
+    done
+    [ -n "$FP" ] || die "NOUS_BRAIN_ANCHOR_FP=$NOUS_BRAIN_ANCHOR_FP matches no secret key in your keyring."
 elif [ "$N_KEYS" -eq 1 ]; then
     FP="${FPS[0]}"
     info "Using only available GPG identity:"
