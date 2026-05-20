@@ -40,6 +40,7 @@ Subcommands:
 
 	cmd.AddCommand(serviceInstallCmdImpl())
 	cmd.AddCommand(serviceUninstallCmdImpl())
+	cmd.AddCommand(serviceReinstallCmdImpl())
 	cmd.AddCommand(serviceStartCmdImpl())
 	cmd.AddCommand(serviceStopCmdImpl())
 	cmd.AddCommand(serviceStatusCmdImpl())
@@ -47,6 +48,55 @@ Subcommands:
 	cmd.AddCommand(newServiceAuditCmd())
 
 	return cmd
+}
+
+// serviceReinstallCmdImpl chains uninstall → install → status. The
+// common operator move after `make nous-build` updates the binary:
+// the running daemon still has the old code loaded, so a clean
+// uninstall + install bounces it onto the new binary, and the
+// status print confirms the cycle.
+//
+// Doesn't include `make nous-build` itself — building is operator-
+// driven (they decide when to commit), this is just the
+// deployment-step trio.
+func serviceReinstallCmdImpl() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reinstall",
+		Short: "uninstall → install → status (refresh plist + bounce daemon)",
+		Long: `Convenience wrapper that runs the three steps an operator
+typically does together after rebuilding the nous binary:
+
+  1. nous service uninstall   (stop + remove plist)
+  2. nous service install     (write plist + load via launchd)
+  3. nous service status      (confirm running)
+
+Each step is idempotent on its own; the chain just saves the
+operator three commands. Bail on the first failure — running
+install against a half-stopped service can land in a confused
+state.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out := cmd.OutOrStdout()
+
+			fmt.Fprintln(out, "==> Uninstalling …")
+			if err := serviceUninstallCmdImpl().RunE(cmd, nil); err != nil {
+				return fmt.Errorf("uninstall: %w", err)
+			}
+
+			fmt.Fprintln(out)
+			fmt.Fprintln(out, "==> Installing …")
+			if err := serviceInstallCmdImpl().RunE(cmd, nil); err != nil {
+				return fmt.Errorf("install: %w", err)
+			}
+
+			fmt.Fprintln(out)
+			fmt.Fprintln(out, "==> Status:")
+			if err := serviceStatusCmdImpl().RunE(cmd, nil); err != nil {
+				return fmt.Errorf("status: %w", err)
+			}
+			return nil
+		},
+	}
 }
 
 func serviceInstallCmdImpl() *cobra.Command {
