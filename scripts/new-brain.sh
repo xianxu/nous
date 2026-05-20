@@ -81,7 +81,7 @@ ${CYAN}What this does${RESET}
   4. seed .brain/config.md (the brain manifest)
   5. initial commit + push — only gcrypt ciphertext touches GitHub
 
-${CYAN}You'll be prompted for${RESET}
+${CYAN}You may be prompted for passphrases${RESET}
   ${bold}GPG passphrase${RESET}  to sign and encrypt the initial push (set during
                   'make nous-bootstrap'). gpg-agent caches it after first
                   use; flush via idle timeout or by ${bold}disarming${RESET}.
