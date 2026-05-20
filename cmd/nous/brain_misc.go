@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -51,7 +50,7 @@ func runBrainList(w io.Writer) error {
 			kind = "shared"
 		}
 		marker := " "
-		if isOperator(b.Path, myLogin) {
+		if brain.IsOperator(b.Path, myLogin) {
 			marker = "*"
 		}
 		// Display directory basename — that's the unambiguous on-disk
@@ -69,37 +68,8 @@ func runBrainList(w io.Writer) error {
 	return nil
 }
 
-// isOperator probes whether the current user can act as operator
-// (invite/remove collaborators) on the brain rooted at brainPath.
-// Returns false for any brain without a parsable github.com remote,
-// any gh outage, or any non-admin/maintain permission level.
-//
-// Best-effort: a slow gh response would block `nous brain list`,
-// but the typical case is local-cache-fast. If we ever need to
-// guarantee bounded latency, this can be moved behind a flag or
-// run in parallel with a cap; for now the simplicity wins.
-func isOperator(brainPath, myLogin string) bool {
-	if myLogin == "" {
-		return false
-	}
-	origin := readBrainOriginURL(brainPath)
-	if origin == "" {
-		return false
-	}
-	owner, repo, err := brain.GitHubOwnerRepo(origin)
-	if err != nil {
-		return false
-	}
-	if strings.EqualFold(owner, myLogin) {
-		// Personal repo owner = operator by definition.
-		return true
-	}
-	perm, err := gh.CollaboratorPermission(owner, repo, myLogin)
-	if err != nil {
-		return false
-	}
-	return perm == "admin" || perm == "maintain"
-}
+// (operator predicate now lives in lib/brain — see brain.IsOperator,
+// shared between this CLI list and the bubbletea TUI's list view.)
 
 func defaultStr(s, fallback string) string {
 	if s == "" {

@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	libbrain "github.com/xianxu/nous/lib/brain"
+	"github.com/xianxu/nous/lib/gh"
 )
 
 // drillInMsg signals "navigate to the detail view for brain at path."
@@ -15,10 +16,15 @@ import (
 type drillInMsg struct{ path string }
 
 type listItem struct {
-	manifest libbrain.Manifest
+	manifest   libbrain.Manifest
+	isOperator bool // true when the auth'd github user is owner/admin/maintain
 }
 
-func (it listItem) label() string {
+// labelInner is the post-marker text — basename, kind, recipient count.
+// The marker prefix (`*` for operator, ` ` otherwise) is added at
+// render time so cursor-row highlighting can include or exclude it
+// consistently with the rest of the row.
+func (it listItem) labelInner() string {
 	kind := "private"
 	if it.manifest.Shared() {
 		kind = "shared"
@@ -33,9 +39,10 @@ func (it listItem) label() string {
 }
 
 type listModel struct {
-	items  []listItem
-	cursor int
-	err    error // shown in View when non-nil; drill-in disabled
+	items   []listItem
+	cursor  int
+	err     error  // shown in View when non-nil; drill-in disabled
+	myLogin string // auth'd github user; "" when gh outage
 }
 
 func newListModel() listModel {
@@ -43,14 +50,21 @@ func newListModel() listModel {
 	if err != nil {
 		return listModel{err: err}
 	}
+	// Resolve auth'd login once for all the IsOperator probes. Empty
+	// on outage — marker just doesn't render, consistent with the CLI
+	// list's behavior.
+	myLogin, _ := gh.AuthLogin()
 	items := make([]listItem, 0, len(manifests))
 	for _, m := range manifests {
-		items = append(items, listItem{manifest: m})
+		items = append(items, listItem{
+			manifest:   m,
+			isOperator: libbrain.IsOperator(m.Path, myLogin),
+		})
 	}
 	sort.Slice(items, func(i, j int) bool {
 		return filepath.Base(items[i].manifest.Path) < filepath.Base(items[j].manifest.Path)
 	})
-	return listModel{items: items}
+	return listModel{items: items, myLogin: myLogin}
 }
 
 func (m listModel) Init() tea.Cmd { return nil }
@@ -105,14 +119,24 @@ func (m listModel) View() string {
 	}
 
 	for i, it := range m.items {
-		row := "  " + it.label()
+		marker := " "
+		if it.isOperator {
+			marker = "*"
+		}
+		body := marker + " " + it.labelInner()
+		row := "  " + body
 		if i == m.cursor {
-			row = cursorRowStyle.Render("▸ " + it.label())
+			row = cursorRowStyle.Render("▸ " + body)
 		}
 		b.WriteString(row)
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
+	if m.myLogin != "" {
+		b.WriteString(mutedStyle.Render(
+			fmt.Sprintf("  (* = you can act as operator — github admin/maintain or owner; current login: %s)", m.myLogin)))
+		b.WriteString("\n")
+	}
 	b.WriteString(helpStyle.Render("↑↓/jk  navigate    enter  drill in    n  new brain    q/esc  quit"))
 	return b.String()
 }
