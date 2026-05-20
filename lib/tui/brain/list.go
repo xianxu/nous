@@ -75,6 +75,11 @@ func (m listModel) Update(msg tea.Msg) (listModel, tea.Cmd) {
 		}
 		path := m.items[m.cursor].manifest.Path
 		return m, func() tea.Msg { return drillInMsg{path: path} }
+	case "n":
+		// Launch the new-brain flow regardless of whether the list
+		// is populated — `n` is a useful entry point even when there
+		// are zero brains yet (first-run experience).
+		return m, func() tea.Msg { return launchNewBrainMsg{} }
 	case "q", "esc", "ctrl+c":
 		return m, tea.Quit
 	}
@@ -95,7 +100,7 @@ func (m listModel) View() string {
 	if len(m.items) == 0 {
 		b.WriteString(mutedStyle.Render("(no brains found under workspace root)"))
 		b.WriteString("\n\n")
-		b.WriteString(helpStyle.Render("q/esc quit"))
+		b.WriteString(helpStyle.Render("n  create one    q/esc  quit"))
 		return b.String()
 	}
 
@@ -108,6 +113,6 @@ func (m listModel) View() string {
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("↑↓/jk  navigate    enter  drill in    q/esc  quit"))
+	b.WriteString(helpStyle.Render("↑↓/jk  navigate    enter  drill in    n  new brain    q/esc  quit"))
 	return b.String()
 }

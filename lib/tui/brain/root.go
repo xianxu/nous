@@ -21,7 +21,15 @@ const (
 	screenConflict
 	screenRecipientAdd
 	screenRecipientRemove
+	screenNewBrain
 )
+
+// cancelNewBrainMsg signals "exit the new-brain flow back to the list,"
+// emitted both on user cancellation AND after the new-brain flow's
+// done-stage is dismissed. Distinct from newBrainDoneMsg (which
+// carries the result) so the result-banner rendering happens before
+// the list re-render takes over.
+type cancelNewBrainMsg struct{}
 
 type rootModel struct {
 	current     screen
@@ -30,6 +38,7 @@ type rootModel struct {
 	conflict    conflictPreviewModel
 	recipAdd    recipientAddModel
 	recipRemove recipientRemoveModel
+	newBrain    newBrainModel
 }
 
 // NewRoot returns the top-level bubbletea model for `nous brain`.
@@ -65,6 +74,21 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.current = screenRecipientRemove
 		m.recipRemove = newRecipientRemoveModel(msg.brainPath, msg.recipients)
 		return m, m.recipRemove.Init()
+	case launchNewBrainMsg:
+		m.current = screenNewBrain
+		m.newBrain = newNewBrainModel()
+		return m, m.newBrain.Init()
+	case newBrainDoneMsg:
+		// The new-brain subprocess returned. The done-stage view in
+		// newBrainModel renders the result; we just stay on that
+		// screen until the operator presses any key (which then emits
+		// cancelNewBrainMsg).
+		_ = msg
+		return m, nil
+	case cancelNewBrainMsg:
+		m.current = screenList
+		m.list = newListModel()
+		return m, m.list.Init()
 	case recipientAddedMsg, recipientRemovedMsg, cancelRecipientFlowMsg:
 		// Recipient flow ended (success/failure/cancel). Return to the
 		// detail view; refresh Status so post-action state shows.
@@ -102,6 +126,8 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recipAdd, cmd = m.recipAdd.Update(msg)
 	case screenRecipientRemove:
 		m.recipRemove, cmd = m.recipRemove.Update(msg)
+	case screenNewBrain:
+		m.newBrain, cmd = m.newBrain.Update(msg)
 	}
 	return m, cmd
 }
@@ -116,6 +142,8 @@ func (m rootModel) View() string {
 		return m.recipAdd.View()
 	case screenRecipientRemove:
 		return m.recipRemove.View()
+	case screenNewBrain:
+		return m.newBrain.View()
 	default:
 		return m.list.View()
 	}
