@@ -2,11 +2,13 @@
 #   -include .tart/Makefile
 #
 # Provides:
-#   make tart        boot $(TART_VM) headless, mount $(CURDIR) into the
-#                    guest at /Volumes/My Shared Files/$(REPO_NAME)
-#                    (read-only), rsync-mirror it into ~/repo
-#                    (writable, always-fresh, includes uncommitted host
-#                    edits), ssh in
+#   make tart        cold-boot $(TART_VM) headless (stops first if
+#                    running), mount $(CURDIR) into the guest at
+#                    /Volumes/My Shared Files/$(REPO_NAME) (read-only),
+#                    rsync-mirror it into ~/repo (writable, always-fresh,
+#                    includes uncommitted host edits), ssh in. Cold-boot
+#                    is the default for mount-cache freshness — see
+#                    ariadne#28 for why.
 #   make tart-gui    same but display via macOS Screen Sharing.app
 #                    (--vnc; built-in UI is broken on macOS Tahoe)
 #   make tart-stop   stop $(TART_VM), preserve disk state
@@ -67,9 +69,11 @@ RUN_FLAGS      ?= --dir=$(REPO_NAME):$(CURDIR):ro
 help-tart:
 	@printf '%s\n' \
 	"Tart (macOS VMs):" \
-	"  make tart           Boot $(TART_VM) headless, mount \$$(CURDIR) at" \
-	"                      /Volumes/My Shared Files/$(REPO_NAME) read-only," \
-	"                      rsync-mirror into ~/repo (writable), ssh in" \
+	"  make tart           Cold-boot $(TART_VM) headless (stops first if running)," \
+	"                      mount \$$(CURDIR) at /Volumes/My Shared Files/$(REPO_NAME)" \
+	"                      read-only, rsync-mirror into ~/repo (writable), ssh in." \
+	"                      Cold-boot is the default for mount-cache freshness — see" \
+	"                      ariadne#28. To attach without restart, ssh directly." \
 	"  make tart-gui       Same but display via macOS Screen Sharing.app" \
 	"  make tart-stop      Stop $(TART_VM), preserve disk state" \
 	"  make tart-clean     Stop + delete $(TART_VM) (base image stays cached)" \
@@ -192,6 +196,22 @@ endef
 tart:
 	$(call _tart_check_others)
 	$(call _tart_ensure_vm)
+	@# Cold-boot for fresh VirtIO-FS mount. macOS's host-guest directory
+	@# share caches dentries/inodes guest-side and diverges from the
+	@# host over time — git's atomic-rename writes are especially
+	@# affected (rename(2) changes the inode; the guest's cached
+	@# dentry still points at the old/deleted inode → stale reads,
+	@# sometimes empty content). Cost: ~30s extra per invocation.
+	@# Benefit: ~/repo on the VM always reflects the host worktree's
+	@# current state. See ariadne#28 for the bug that motivated the
+	@# default. Operators who want to ssh into a running VM without
+	@# restart should `ssh admin@$$(tart ip <name>)` directly rather
+	@# than re-running `make tart`.
+	@if tart list 2>/dev/null | awk -v vm=$(TART_VM) '$$2==vm {print $$NF}' | grep -qx running; then \
+	    echo "==> Cold-restarting VM to refresh host mount (VirtIO-FS cache invalidation)..."; \
+	    tart stop $(TART_VM); \
+	fi
+	$(call _tart_wait_for_stop)
 	@if [ -n "$(RUN_FLAGS)" ]; then \
 	    echo "==> Mount: /Volumes/My Shared Files/$(REPO_NAME) (read-only; rsync source)"; \
 	    echo "    Mirror: ~/repo in the VM (writable, always fresh, wipes on each boot)"; \
