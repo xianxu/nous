@@ -258,5 +258,5 @@ ok "Nous bootstrap complete."
 echo
 echo "Next steps:"
 echo "  - Open a new shell so PATH and shell hooks pick up."
-echo "  - Bootstrap an encrypted brain: make new-brain ../brain"
 echo "  - Build nous binaries:          make nous-build"
+echo "  - Bootstrap an encrypted brain: nous brain new ../brain"
