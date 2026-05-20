@@ -63,7 +63,7 @@ func runBrainList(w io.Writer) error {
 	}
 	if myLogin != "" {
 		fmt.Fprintln(w)
-		fmt.Fprintf(w, "  (* = you can act as operator on this brain — github admin/maintain or owner; current login: %s)\n", myLogin)
+		fmt.Fprintf(w, "  (* = owner; current login: %s)\n", myLogin)
 	}
 	return nil
 }

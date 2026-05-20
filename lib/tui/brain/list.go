@@ -133,8 +133,7 @@ func (m listModel) View() string {
 	}
 	b.WriteString("\n")
 	if m.myLogin != "" {
-		b.WriteString(mutedStyle.Render(
-			fmt.Sprintf("  (* = you can act as operator — github admin/maintain or owner; current login: %s)", m.myLogin)))
+		b.WriteString(mutedStyle.Render(fmt.Sprintf("  (* = owner; current login: %s)", m.myLogin)))
 		b.WriteString("\n")
 	}
 	b.WriteString(helpStyle.Render("↑↓/jk  navigate    enter  drill in    n  new brain    q/esc  quit"))
