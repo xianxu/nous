@@ -607,6 +607,148 @@ func TestEndToEnd_GitHubMediatedOnboarding(t *testing.T) {
 	// idempotence check, but worth pinning explicitly via a comment.)
 }
 
+// TestEndToEnd_OperatorPubkeyMissingThenRepublish pins the recovery
+// path from today's manual repro (2026-05-19): a brain was created
+// without the operator's pubkey landing on the keys branch (either
+// `make new-brain` skipped the publish or it failed silently). When
+// ying joined, PublishOwnPubkeyToRemote orphan-created the keys
+// branch with only her own pubkey. Auto-admit ran and admitted her,
+// but her subsequent `nous brain clone` failed at gcrypt's signature
+// verification — her keyring had no operator pubkey to check the
+// manifest signature against. The fix: operator runs `nous brain join
+// xianxu/<repo>` from their own host, which goes through republish
+// mode and publishes <operator-login>.asc to the keys branch.
+//
+// This test reproduces the failure + asserts the recovery. If
+// PublishOwnPubkeyToRemote's republish path ever regresses, this test
+// fails. If `nous brain new` is later updated to ALWAYS publish
+// operator's pubkey under <login>.asc, the bug scenario becomes
+// impossible — but this test still proves the recovery path works.
+func TestEndToEnd_OperatorPubkeyMissingThenRepublish(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (-short)")
+	}
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skipf("integration test requires POSIX gpg; runtime is %s", runtime.GOOS)
+	}
+	mustHave(t, "gpg")
+	mustHave(t, "git")
+	mustHave(t, "git-remote-gcrypt")
+
+	remoteURL := initBareRepo(t)
+	operator := setupPeer(t, "operator", "operator@test.local")
+	peer := setupPeer(t, "peer", "peer@test.local")
+
+	// === Step 1: Operator provisions brain WITHOUT publishing pubkey ===
+	// Simulates the gap from today's repro — operator's pubkey absent
+	// from the keys branch after brain creation.
+	withPeer(t, operator, func() {
+		operator.brainPath = provisionBrainNoPubkeyPublish(t, operator, remoteURL, []string{operator.fp})
+	})
+
+	// === Step 2: Peer joins — orphan-creates keys branch (only peer's pubkey) ===
+	const peerLogin = "peerJoiner"
+	withPeer(t, peer, func() {
+		if err := brain.PublishOwnPubkeyToRemote(context.Background(), remoteURL, peerLogin, peer.armorPub); err != nil {
+			t.Fatalf("peer PublishOwnPubkeyToRemote: %v", err)
+		}
+	})
+
+	// === Step 3: Operator auto-admits peer (manifest now has 2 recipients) ===
+	withPeer(t, operator, func() {
+		ctx := context.Background()
+		if _, _, err := brain.ImportAllPubkeys(ctx, operator.brainPath); err != nil {
+			t.Fatalf("operator ImportAllPubkeys: %v", err)
+		}
+		added, err := brain.AutoAdmitFromKeysBranch(ctx, operator.brainPath)
+		if err != nil {
+			t.Fatalf("AutoAdmitFromKeysBranch: %v", err)
+		}
+		if len(added) != 1 {
+			t.Fatalf("expected 1 admission, got %d", len(added))
+		}
+		if err := brainsync.AddCommitPush(operator.brainPath, "auto-admit "+peerLogin); err != nil {
+			t.Fatalf("operator push post-auto-admit: %v", err)
+		}
+	})
+
+	// === Step 4: Peer's clone fails — gcrypt can't verify signature ===
+	// Peer's keyring has no operator pubkey. BootstrapPubkeys fetches
+	// from the keys branch and gets only peer's own .asc back.
+	withPeer(t, peer, func() {
+		gcryptURL := "gcrypt::" + remoteURL
+		// Bootstrap is best-effort; it succeeds (imports peer's own
+		// pubkey, which they already have). The failure surfaces in
+		// the gcrypt clone proper.
+		if _, _, err := brain.BootstrapPubkeys(context.Background(), gcryptURL); err != nil {
+			t.Fatalf("BootstrapPubkeys: %v", err)
+		}
+		target := filepath.Join(t.TempDir(), "brain-clone-should-fail")
+		cmd := exec.Command("git", "clone", gcryptURL, target)
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatalf("expected clone to FAIL (operator pubkey missing), but it succeeded:\n%s", out)
+		}
+		// The exact error message comes from gpg via gcrypt — pin on
+		// the substring "No public key" which is gpg's canonical
+		// missing-signer message. Brittle to gpg locale, but every
+		// English-locale gpg I've seen uses this phrasing.
+		if !strings.Contains(string(out), "No public key") {
+			t.Errorf("clone failed but not on signature verification — got:\n%s", out)
+		}
+	})
+
+	// === Step 5: Operator runs the republish path ===
+	// `nous brain join xianxu/<repo>` from the operator's host triggers
+	// PublishOwnPubkeyToRemote with their own login as the filename
+	// stem. We invoke the same library call directly here.
+	withPeer(t, operator, func() {
+		if err := brain.PublishOwnPubkeyToRemote(context.Background(), remoteURL, "operator", operator.armorPub); err != nil {
+			t.Fatalf("operator republish: %v", err)
+		}
+	})
+
+	// === Step 6: Peer's clone now succeeds ===
+	withPeer(t, peer, func() {
+		peer.brainPath = cloneBrainViaPeerkeys(t, peer, remoteURL)
+		assertPubkeyInKeyring(t, peer, operator.fp)
+		manifest := readBrainFile(t, peer.brainPath, ".brain/config.md")
+		if !strings.Contains(strings.ToUpper(manifest), strings.ToUpper(operator.fp)) {
+			t.Errorf("manifest missing operator fp:\n%s", manifest)
+		}
+		if !strings.Contains(strings.ToUpper(manifest), strings.ToUpper(peer.fp)) {
+			t.Errorf("manifest missing peer fp:\n%s", manifest)
+		}
+	})
+}
+
+// provisionBrainNoPubkeyPublish mirrors provisionBrain but skips the
+// brain.PublishPubkey step at the end. Used to simulate the gap in
+// `make new-brain` / scripts/new-brain.sh where operator's pubkey
+// isn't published to the keys branch on creation — the specific bug
+// caught in TestEndToEnd_OperatorPubkeyMissingThenRepublish.
+func provisionBrainNoPubkeyPublish(t *testing.T, p *testPeer, remoteURL string, recipients []string) string {
+	t.Helper()
+	brainDir := filepath.Join(t.TempDir(), "brain-"+p.name)
+	mustGit(t, "", "init", "-q", "-b", "main", brainDir)
+	mustGit(t, brainDir, "config", "user.email", p.name+"@test.local")
+	mustGit(t, brainDir, "config", "user.name", p.name)
+	mustGit(t, brainDir, "remote", "add", "origin", "gcrypt::"+remoteURL)
+	if err := brain.WriteManifest(brainDir, brain.Manifest{
+		Name:       filepath.Base(brainDir),
+		Recipients: recipients,
+	}); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	writeBrainFile(t, brainDir, "README.md", "# brain seed (no operator pubkey publish)\n")
+	if err := brainsync.AddCommitPush(brainDir, "init brain (no pubkey publish)"); err != nil {
+		t.Fatalf("initial push: %v", err)
+	}
+	// INTENTIONALLY skipping brain.PublishPubkey to simulate the bug
+	// scenario. The recovery path is exercised in step 5.
+	return brainDir
+}
+
 // TestPublishOwnPubkeyToRemote_OrphanCreate covers the brand-new-brain
 // edge case from today's manual test (brain-family). The joiner's
 // `nous brain join` runs against a bare repo with no keys branch yet
