@@ -9,6 +9,8 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/xianxu/nous/lib/identity"
 )
 
 // new.go owns the "create a new brain" flow launched from the list
@@ -33,9 +35,10 @@ import (
 type newBrainStage int
 
 const (
-	newStagePath    newBrainStage = iota // textinput for path
-	newStageConfirm                      // "Run nous brain new <path>? [Y/n]"
-	newStageDone                         // result rendered; any key returns
+	newStagePath     newBrainStage = iota // textinput for path
+	newStageIdentity                      // arrow-key picker for anchor key (only when >1 secret key)
+	newStageConfirm                       // "Run nous brain new <path>? [Y/n]"
+	newStageDone                          // result rendered; any key returns
 )
 
 // launchNewBrainMsg signals "open the new-brain flow." Emitted by
@@ -57,8 +60,13 @@ type newBrainModel struct {
 	stage newBrainStage
 	path  textinput.Model
 
-	picked string // path after confirmation; passed through to ExecProcess
-	err    error
+	picked   string         // resolved path; passed to ExecProcess
+	idKeys   []identity.Key // secret keys for the picker (newStageIdentity)
+	idCursor int            // cursor in idKeys
+	idFp     string         // picked anchor fingerprint; "" when single-key
+	err      error
+
+	idErr error // populated when identity.List itself failed
 }
 
 func newNewBrainModel() newBrainModel {
@@ -68,7 +76,16 @@ func newNewBrainModel() newBrainModel {
 	p.CharLimit = 1024
 	p.Width = 64
 	p.Focus()
-	return newBrainModel{stage: newStagePath, path: p}
+	m := newBrainModel{stage: newStagePath, path: p}
+	// Eager-load identity list so the path-stage's `next` decision
+	// (skip-identity vs show-picker) doesn't lag the keystroke.
+	keys, err := identity.List()
+	if err != nil {
+		m.idErr = err
+	} else {
+		m.idKeys = keys
+	}
+	return m
 }
 
 func (m newBrainModel) Init() tea.Cmd { return textinput.Blink }
@@ -100,6 +117,8 @@ func (m newBrainModel) Update(msg tea.Msg) (newBrainModel, tea.Cmd) {
 	switch m.stage {
 	case newStagePath:
 		return m.updatePath(msg)
+	case newStageIdentity:
+		return m.updateIdentity(msg)
 	case newStageConfirm:
 		return m.updateConfirm(msg)
 	case newStageDone:
@@ -131,13 +150,30 @@ func (m newBrainModel) updatePath(msg tea.Msg) (newBrainModel, tea.Cmd) {
 				return m, nil
 			}
 			m.picked = abs
-			m.stage = newStageConfirm
+			// Next stage depends on identity count: skip the picker
+			// when there's a single secret key (or the list failed —
+			// let the subprocess surface that error).
+			if len(m.idKeys) > 1 {
+				m.stage = newStageIdentity
+			} else {
+				m.stage = newStageConfirm
+			}
 			return m, nil
 		}
 	}
 	var cmd tea.Cmd
 	m.path, cmd = m.path.Update(msg)
 	return m, cmd
+}
+
+// shortFingerprint renders the last 8 hex chars of a fingerprint
+// (lowercased) — matches the convention used by `nous identity
+// list` and `nous brain` everywhere else.
+func shortFingerprint(fp string) string {
+	if len(fp) < 8 {
+		return strings.ToLower(fp)
+	}
+	return strings.ToLower(fp[len(fp)-8:])
 }
 
 // pathExists reports whether the absolute path refers to an
@@ -178,6 +214,29 @@ func resolvePath(input string) string {
 	return abs
 }
 
+func (m newBrainModel) updateIdentity(msg tea.Msg) (newBrainModel, tea.Cmd) {
+	km, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+	switch km.String() {
+	case "esc", "ctrl+c":
+		return m, func() tea.Msg { return cancelNewBrainMsg{} }
+	case "up", "k":
+		if m.idCursor > 0 {
+			m.idCursor--
+		}
+	case "down", "j":
+		if m.idCursor < len(m.idKeys)-1 {
+			m.idCursor++
+		}
+	case "enter":
+		m.idFp = m.idKeys[m.idCursor].Fingerprint
+		m.stage = newStageConfirm
+	}
+	return m, nil
+}
+
 func (m newBrainModel) updateConfirm(msg tea.Msg) (newBrainModel, tea.Cmd) {
 	km, ok := msg.(tea.KeyMsg)
 	if !ok {
@@ -194,7 +253,14 @@ func (m newBrainModel) updateConfirm(msg tea.Msg) (newBrainModel, tea.Cmd) {
 		if err != nil {
 			bin = "nous" // fall back to PATH lookup
 		}
-		cmd := exec.Command(bin, "brain", "new", m.picked)
+		args := []string{"brain", "new", m.picked}
+		if m.idFp != "" {
+			// Disambiguate the operator's anchor key (--as flag, added
+			// alongside this TUI stage so the subprocess doesn't bail
+			// with "multiple secret keys" when keyring has >1).
+			args = append(args, "--as", m.idFp)
+		}
+		cmd := exec.Command(bin, args...)
 		// Pass through current env; nous brain new reads gh auth,
 		// GNUPGHOME, etc.
 		cmd.Env = os.Environ()
@@ -234,10 +300,29 @@ func (m newBrainModel) View() string {
 		b.WriteString("\n")
 		b.WriteString(helpStyle.Render("enter  continue    esc  cancel"))
 
+	case newStageIdentity:
+		b.WriteString("Multiple secret keys in your keyring. Which key should anchor\n")
+		b.WriteString("this brain? (You'll be the only recipient at first; admit\n")
+		b.WriteString("others later with `nous brain invite`.)\n\n")
+		for i, k := range m.idKeys {
+			row := fmt.Sprintf("  %s  %s", shortFingerprint(k.Fingerprint), k.UID)
+			if i == m.idCursor {
+				row = cursorRowStyle.Render("▸ " + fmt.Sprintf("%s  %s", shortFingerprint(k.Fingerprint), k.UID))
+			}
+			b.WriteString(row)
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+		b.WriteString(helpStyle.Render("↑↓/jk  navigate    enter  pick    esc  cancel"))
+
 	case newStageConfirm:
 		b.WriteString("About to launch:\n\n")
+		invoc := fmt.Sprintf("nous brain new %s", m.picked)
+		if m.idFp != "" {
+			invoc += " --as " + shortFingerprint(m.idFp)
+		}
 		b.WriteString("  ")
-		b.WriteString(cursorRowStyle.Render(fmt.Sprintf("nous brain new %s", m.picked)))
+		b.WriteString(cursorRowStyle.Render(invoc))
 		b.WriteString("\n\n")
 		b.WriteString(mutedStyle.Render(
 			"That command will prompt for your GPG passphrase and gh\n" +

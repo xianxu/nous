@@ -38,6 +38,7 @@ import (
 func newBrainNewCmd() *cobra.Command {
 	var recipientFiles []string
 	var fingerprints []string
+	var anchorFp string
 
 	cmd := &cobra.Command{
 		Use:   "new BRAIN-PATH",
@@ -48,12 +49,16 @@ With --recipient or --fingerprint, additional GPG keys are admitted —
 each goes through the verify-fingerprint ceremony if it's not already
 in the local keyring.
 
-Flags (repeatable):
+Flags:
+  --as FP                   (when keyring has multiple secret keys)
+                            Which of YOUR keys to anchor this brain on.
+                            Defaults to the only secret key when there's
+                            just one.
   --recipient PUBKEY-FILE   Admit a peer; runs the verify-fingerprint
-                            ceremony before importing.
+                            ceremony before importing. Repeatable.
   --fingerprint FP          Admit an already-imported pubkey by
                             fingerprint. Still runs a confirmation
-                            prompt before admitting.
+                            prompt before admitting. Repeatable.
 
 TTY-only when --recipient or --fingerprint is passed (the ceremony
 needs a human). Pure-private brains (no flags) can run non-TTY.
@@ -81,10 +86,10 @@ a second commit + push (gcrypt re-encrypts to all recipients).`,
 			if len(ownKeys) == 0 {
 				return fmt.Errorf("no secret key in keyring; run `nous identity init` first")
 			}
-			if len(ownKeys) > 1 {
-				return fmt.Errorf("multiple secret keys in keyring (%d); pass --fingerprint to disambiguate which is the brain anchor", len(ownKeys))
+			ownFp, err := pickAnchor(ownKeys, anchorFp)
+			if err != nil {
+				return err
 			}
-			ownFp := ownKeys[0].Fingerprint
 
 			// Collect peers.
 			peers := []identity.Key{}
@@ -254,7 +259,48 @@ a second commit + push (gcrypt re-encrypts to all recipients).`,
 	}
 	cmd.Flags().StringSliceVar(&recipientFiles, "recipient", nil, "pubkey file to admit as recipient (repeatable)")
 	cmd.Flags().StringSliceVar(&fingerprints, "fingerprint", nil, "already-imported pubkey to admit (repeatable)")
+	cmd.Flags().StringVar(&anchorFp, "as", "", "which of your own secret keys to anchor this brain on (full FP or last-8); required when keyring has multiple")
 	return cmd
+}
+
+// pickAnchor resolves which of the operator's secret keys serves as
+// the new brain's anchor identity. Rules:
+//
+//   - exactly one secret key: use it; ignore anchorArg.
+//   - multiple secret keys, anchorArg empty: error with a list of
+//     available keys so the operator can pass --as.
+//   - multiple secret keys, anchorArg present: match against full
+//     fingerprint or last-8 (case-insensitive). Error if no match
+//     or if anchorArg is shorter than 8 chars (typo guard).
+func pickAnchor(keys []identity.Key, anchorArg string) (string, error) {
+	if len(keys) == 1 {
+		return keys[0].Fingerprint, nil
+	}
+	if anchorArg == "" {
+		var b strings.Builder
+		fmt.Fprintf(&b, "multiple secret keys in keyring (%d); pass --as FP to pick which anchors this brain.\n", len(keys))
+		b.WriteString("Available keys:\n")
+		for _, k := range keys {
+			short := k.Fingerprint
+			if len(short) >= 8 {
+				short = strings.ToLower(short[len(short)-8:])
+			}
+			fmt.Fprintf(&b, "  %s  %s\n", short, k.UID)
+		}
+		b.WriteString("Example: nous brain new <path> --as " + strings.ToLower(keys[0].Fingerprint[len(keys[0].Fingerprint)-8:]))
+		return "", fmt.Errorf("%s", b.String())
+	}
+	want := strings.ToUpper(strings.TrimSpace(anchorArg))
+	if len(want) != 40 && len(want) < 8 {
+		return "", fmt.Errorf("--as %q is too short — pass the last 8 hex chars (or full 40-char fingerprint) to avoid accidental matches", anchorArg)
+	}
+	for _, k := range keys {
+		up := strings.ToUpper(k.Fingerprint)
+		if up == want || (len(want) >= 8 && strings.HasSuffix(up, want)) {
+			return k.Fingerprint, nil
+		}
+	}
+	return "", fmt.Errorf("--as %q matches no secret key in your keyring", anchorArg)
 }
 
 func findNewBrainScript() (string, error) {
