@@ -22,6 +22,7 @@ const (
 	screenRecipientAdd
 	screenRecipientRemove
 	screenNewBrain
+	screenInviteCollab
 )
 
 // cancelNewBrainMsg signals "exit the new-brain flow back to the list,"
@@ -32,13 +33,14 @@ const (
 type cancelNewBrainMsg struct{}
 
 type rootModel struct {
-	current     screen
-	list        listModel
-	detail      detailModel
-	conflict    conflictPreviewModel
-	recipAdd    recipientAddModel
-	recipRemove recipientRemoveModel
-	newBrain    newBrainModel
+	current      screen
+	list         listModel
+	detail       detailModel
+	conflict     conflictPreviewModel
+	recipAdd     recipientAddModel
+	recipRemove  recipientRemoveModel
+	newBrain     newBrainModel
+	inviteCollab inviteCollabModel
 }
 
 // NewRoot returns the top-level bubbletea model for `nous brain`.
@@ -74,6 +76,25 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.current = screenRecipientRemove
 		m.recipRemove = newRecipientRemoveModel(msg.brainPath, msg.recipients)
 		return m, m.recipRemove.Init()
+	case launchInviteCollabMsg:
+		m.current = screenInviteCollab
+		m.inviteCollab = newInviteCollabModel(msg.brainPath)
+		return m, m.inviteCollab.Init()
+	case inviteCollabDoneMsg, cancelInviteCollabMsg:
+		// Return to the detail view, refreshing Status so the new
+		// recipient (once auto-admit runs on the operator's side)
+		// shows up. The detail view's own banner shows the result.
+		path := m.detail.path
+		m.current = screenDetail
+		m.detail = newDetailModel(path)
+		if rm, ok := msg.(inviteCollabDoneMsg); ok {
+			if rm.err == nil {
+				m.detail.banner = "✓ invited " + rm.login + " — auto-admit on their join"
+			} else {
+				m.detail.banner = "✗ invite " + rm.login + ": " + rm.err.Error()
+			}
+		}
+		return m, m.detail.Init()
 	case launchNewBrainMsg:
 		m.current = screenNewBrain
 		m.newBrain = newNewBrainModel()
@@ -128,6 +149,8 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recipRemove, cmd = m.recipRemove.Update(msg)
 	case screenNewBrain:
 		m.newBrain, cmd = m.newBrain.Update(msg)
+	case screenInviteCollab:
+		m.inviteCollab, cmd = m.inviteCollab.Update(msg)
 	}
 	return m, cmd
 }
@@ -144,6 +167,8 @@ func (m rootModel) View() string {
 		return m.recipRemove.View()
 	case screenNewBrain:
 		return m.newBrain.View()
+	case screenInviteCollab:
+		return m.inviteCollab.View()
 	default:
 		return m.list.View()
 	}

@@ -88,7 +88,7 @@ func (m detailModel) Update(msg tea.Msg) (detailModel, tea.Cmd) {
 				return m, nil
 			}
 			return m, func() tea.Msg {
-				return launchRecipientAddMsg{brainPath: m.path}
+				return launchInviteCollabMsg{brainPath: m.path}
 			}
 		case "r":
 			if m.loading || m.err != nil {
@@ -236,7 +236,7 @@ func (m detailModel) View() string {
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("a  add recipient    r  remove recipient    c  preview conflicts    esc  back    q  quit"))
+	b.WriteString(helpStyle.Render("a  add collaborator    r  remove recipient    c  preview conflicts    esc  back    q  quit"))
 	return b.String()
 }
 

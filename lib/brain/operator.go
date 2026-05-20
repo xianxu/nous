@@ -48,4 +48,12 @@ func IsOperator(brainRoot, myLogin string) bool {
 	return perm == "admin" || perm == "maintain"
 }
 
-// (readOriginURL lives in status.go — package-private; we just reuse it.)
+// ReadOriginURL returns the brain's configured `remote.origin.url`
+// (e.g., `gcrypt::ssh://git@github.com/owner/brain.git`), or empty
+// when no origin is configured or git fails. Exported wrapper around
+// the same lookup `readOriginURL` does in status.go — kept available
+// for callers outside lib/brain that need the raw URL (TUI flows,
+// the CLI's invite command).
+func ReadOriginURL(brainRoot string) string {
+	return readOriginURL(brainRoot)
+}
