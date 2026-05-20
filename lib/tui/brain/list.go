@@ -2,6 +2,8 @@ package brain
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -15,16 +17,27 @@ import (
 // The root model intercepts and pushes a fresh detail model.
 type drillInMsg struct{ path string }
 
+// listItem represents one row on the brain list. Either a local
+// brain (manifest set, isPending false) or a pending GitHub
+// invitation we haven't accepted yet (invitation set, isPending
+// true). Mutually exclusive.
 type listItem struct {
-	manifest   libbrain.Manifest
-	isOperator bool // true when the auth'd github user is owner/admin/maintain
+	manifest   libbrain.Manifest // local brain
+	invitation gh.Invitation     // pending GitHub invite
+	isPending  bool              // discriminator
+	isOperator bool              // local-brain-only; false for invitations
 }
 
-// labelInner is the post-marker text — basename, kind, recipient count.
-// The marker prefix (`*` for operator, ` ` otherwise) is added at
+// labelInner is the post-marker text — basename, kind, recipient
+// count for local brains; full_name + [invited] for pending. The
+// marker prefix (`*` for operator, ` ` otherwise) is added at
 // render time so cursor-row highlighting can include or exclude it
 // consistently with the rest of the row.
 func (it listItem) labelInner() string {
+	if it.isPending {
+		return fmt.Sprintf("%-22s  (invited — press enter to join)",
+			it.invitation.Repository.FullName)
+	}
 	kind := "private"
 	if it.manifest.Shared() {
 		kind = "shared"
@@ -54,6 +67,7 @@ func newListModel() listModel {
 	// on outage — marker just doesn't render, consistent with the CLI
 	// list's behavior.
 	myLogin, _ := gh.AuthLogin()
+
 	items := make([]listItem, 0, len(manifests))
 	for _, m := range manifests {
 		items = append(items, listItem{
@@ -61,13 +75,65 @@ func newListModel() listModel {
 			isOperator: libbrain.IsOperator(m.Path, myLogin),
 		})
 	}
+	// Local brains sorted by basename for stability.
 	sort.Slice(items, func(i, j int) bool {
 		return filepath.Base(items[i].manifest.Path) < filepath.Base(items[j].manifest.Path)
 	})
+
+	// Append pending brain invitations after local brains. Best-
+	// effort: a gh outage shouldn't block the list view — invitations
+	// just don't render. Filter to brain projects via the same
+	// description/topic markers nous brain join uses (lives in
+	// brain_join.go in package main; we duplicate the predicate
+	// here as `isBrainInvitation` to avoid a TUI → cmd/nous
+	// dependency).
+	if invites, ierr := gh.PendingInvitations(); ierr == nil {
+		brainInvites := make([]gh.Invitation, 0, len(invites))
+		for _, inv := range invites {
+			if isBrainInvitation(inv) {
+				brainInvites = append(brainInvites, inv)
+			}
+		}
+		sort.Slice(brainInvites, func(i, j int) bool {
+			return brainInvites[i].Repository.FullName < brainInvites[j].Repository.FullName
+		})
+		for _, inv := range brainInvites {
+			items = append(items, listItem{invitation: inv, isPending: true})
+		}
+	}
+
 	return listModel{items: items, myLogin: myLogin}
 }
 
+// isBrainInvitation mirrors the filter in cmd/nous/brain_join.go's
+// filterBrainInvitations. Duplicated rather than exported across
+// the package boundary because the predicate is small + stable.
+// Markers: description prefix `nous-brain:`, substring
+// `gcrypt-encrypted brain` (legacy new-brain.sh wording), or topic
+// `nous-brain`.
+func isBrainInvitation(inv gh.Invitation) bool {
+	desc := strings.ToLower(inv.Repository.Description)
+	if strings.HasPrefix(desc, "nous-brain:") {
+		return true
+	}
+	if strings.Contains(desc, "gcrypt-encrypted brain") {
+		return true
+	}
+	for _, t := range inv.Repository.Topics {
+		if strings.EqualFold(t, "nous-brain") {
+			return true
+		}
+	}
+	return false
+}
+
 func (m listModel) Init() tea.Cmd { return nil }
+
+// joinSubprocessDoneMsg signals "the join subprocess returned." Root
+// handles by re-instantiating the list model (so the newly-joined
+// brain disappears from the pending-invitation section and any
+// new local brain shows up after auto-admit + clone).
+type joinSubprocessDoneMsg struct{ err error }
 
 func (m listModel) Update(msg tea.Msg) (listModel, tea.Cmd) {
 	keyMsg, ok := msg.(tea.KeyMsg)
@@ -87,7 +153,24 @@ func (m listModel) Update(msg tea.Msg) (listModel, tea.Cmd) {
 		if m.err != nil || len(m.items) == 0 {
 			return m, nil
 		}
-		path := m.items[m.cursor].manifest.Path
+		it := m.items[m.cursor]
+		if it.isPending {
+			// Pending invitation row → delegate to the CLI's join
+			// flow (which knows how to pick GPG identity, accept
+			// invitation, publish pubkey, etc.). Pass the
+			// owner/repo as positional so we skip the multi-pick
+			// listing and go straight to "join this one."
+			bin, err := os.Executable()
+			if err != nil {
+				bin = "nous"
+			}
+			cmd := exec.Command(bin, "brain", "join")
+			cmd.Env = os.Environ()
+			return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+				return joinSubprocessDoneMsg{err: err}
+			})
+		}
+		path := it.manifest.Path
 		return m, func() tea.Msg { return drillInMsg{path: path} }
 	case "n":
 		// Launch the new-brain flow regardless of whether the list
@@ -131,6 +214,13 @@ func (m listModel) View() string {
 		row := "  " + body
 		if i == m.cursor {
 			row = cursorRowStyle.Render("▸ " + body)
+		} else if it.isPending {
+			// Muted style for pending invitations — visually
+			// distinct from local brains so the operator's eye
+			// knows "not yet mine to drill into, can join with
+			// enter." Cursor row keeps the highlight color for
+			// affordance.
+			row = mutedStyle.Render(row)
 		}
 		b.WriteString(row)
 		b.WriteString("\n")

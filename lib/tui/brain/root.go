@@ -95,6 +95,20 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, m.detail.Init()
+	case joinSubprocessDoneMsg:
+		// Same pattern as new-brain's subprocess: exit cleanly on
+		// failure so the operator sees the subprocess output in
+		// their normal-screen scrollback rather than getting a terse
+		// "exit status N." On success, refresh the list so the
+		// invitation disappears from pending (and any newly-cloned
+		// brain shows up — though typically clone is a separate
+		// step after auto-admit, not part of `nous brain join`).
+		if msg.err != nil {
+			return m, tea.Quit
+		}
+		m.current = screenList
+		m.list = newListModel()
+		return m, m.list.Init()
 	case launchNewBrainMsg:
 		m.current = screenNewBrain
 		m.newBrain = newNewBrainModel()
