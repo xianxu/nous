@@ -69,16 +69,18 @@ NOUS_NOTARYTOOL_PROFILE ?= nous-notary
 # The `nous-` prefix on every target is deliberate: brain repos (and
 # other nous consumers) commonly define their own `make build` for
 # per-brain utilities; namespacing keeps them from colliding.
+#
+# Scope: builds ONLY bin/nous. Other cmd/<name>/* binaries (gmail,
+# oneshot, and any user-authored utilities) are built by the shared
+# `make build` (defined in Makefile.workflow, vendored from ariadne).
+# The split mirrors the user-facing model: `nous-build` is for nous
+# contributors rebuilding the nous binary itself; `build` is for
+# end users + brain-repo authors building their own skill binaries.
 nous-build:
-	@mkdir -p bin
-	@for dir in cmd/*/; do \
-		[ -f "$$dir/main.go" ] || continue; \
-		name=$$(basename "$$dir"); \
-		mkdir -p "$$dir/bin"; \
-		echo "building cmd/$$name/bin/$$name"; \
-		go build -o "$$dir/bin/$$name" "./$$dir"; \
-		ln -sf "../cmd/$$name/bin/$$name" "bin/$$name"; \
-	done
+	@mkdir -p bin cmd/nous/bin
+	@echo "building cmd/nous/bin/nous"
+	@go build -o cmd/nous/bin/nous ./cmd/nous
+	@ln -sf ../cmd/nous/bin/nous bin/nous
 
 # nous-sign adds Developer ID codesigning to bin/nous specifically.
 # Plugins (bin/gmail, bin/oneshot, …) are deliberately left unsigned —
