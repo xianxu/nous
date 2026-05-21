@@ -5,7 +5,14 @@
 # into a consuming repo (e.g., brain/Makefile.nous → ../nous/Makefile.nous).
 # `realpath` follows symlinks; `lastword $(MAKEFILE_LIST)` is the path of the
 # Makefile currently being processed.
-NOUS_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
+# abspath rather than realpath: when nous is accessed via a symlink
+# (e.g., ~/repo in the tart VM points to /Volumes/My Shared Files/nous),
+# we want to PRESERVE the symlink path, not resolve through it. Resolving
+# lands us on a path with spaces ("/Volumes/My Shared Files/..."), which
+# breaks unquoted shell invocations downstream. abspath makes the path
+# absolute without symlink resolution. (Even with the quote-every-NOUS_DIR
+# discipline below, the symlink-preserving variant is the cleaner choice.)
+NOUS_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 .PHONY: nous-build nous-sign nous-notarize nous-dev nous-install nous-install-notarized nous-uninstall test clean trim identity moveto cloneto new-brain nous-bootstrap nous-test-bootstrap nous-test-snapshot nous-test-roundtrip nous-test-brain-sync
 
@@ -290,7 +297,7 @@ test:
 #
 # Spec: workshop/issues/000011-nous-bootstrap.md.
 bootstrap nous-bootstrap:
-	@$(NOUS_DIR)scripts/nous-bootstrap.sh
+	@"$(NOUS_DIR)scripts/nous-bootstrap.sh"
 
 # Run nous-bootstrap end-to-end inside a disposable tart VM, with a gcrypt
 # round-trip verification using a throwaway GPG fixture from
@@ -305,7 +312,7 @@ bootstrap nous-bootstrap:
 #
 # Spec: workshop/issues/000011-nous-bootstrap.md M2.
 nous-test-bootstrap:
-	@$(NOUS_DIR)scripts/nous-test-bootstrap.sh
+	@"$(NOUS_DIR)scripts/nous-test-bootstrap.sh"
 
 # Build the `tahoe-bootstrapped` tart VM — a stopped clone of `tahoe-base`
 # with `nous-bootstrap.sh` already applied. `make nous-test-roundtrip` clones
@@ -317,7 +324,7 @@ nous-test-bootstrap:
 #
 # Spec: workshop/issues/000011-nous-bootstrap.md M3.
 nous-test-snapshot:
-	@$(NOUS_DIR)scripts/nous-test-snapshot.sh
+	@"$(NOUS_DIR)scripts/nous-test-snapshot.sh"
 
 # Fast gcrypt round-trip test using the `tahoe-bootstrapped` snapshot. ~25s.
 # Skips the bootstrap layer — only validates GPG import + encrypt/decrypt
@@ -331,7 +338,7 @@ nous-test-snapshot:
 #
 # Spec: workshop/issues/000011-nous-bootstrap.md M3.
 nous-test-roundtrip:
-	@$(NOUS_DIR)scripts/nous-test-roundtrip.sh
+	@"$(NOUS_DIR)scripts/nous-test-roundtrip.sh"
 
 # Local two-process integration test for brain-sync. Sets up a bare + two
 # clones in $TMPDIR, starts two brain-sync watchers, exercises propagation
@@ -342,7 +349,7 @@ nous-test-roundtrip:
 #
 # Spec: workshop/plans/000004-shared-brain-sync-daemon-plan.md chunk 7.
 nous-test-brain-sync:
-	@$(NOUS_DIR)scripts/test-brain-sync.sh
+	@"$(NOUS_DIR)scripts/test-brain-sync.sh"
 
 # Bootstrap GPG identity for brain encryption. Idempotent: re-running detects
 # an existing key and skips generation. Configures gpg-agent + pinentry-mac so
@@ -354,7 +361,7 @@ nous-test-brain-sync:
 #
 # Spec: nous#3 M1 Step 0; threat model brain/atlas/threat-model-shared-brain.md.
 identity:
-	@$(NOUS_DIR)scripts/identity.sh
+	@"$(NOUS_DIR)scripts/identity.sh"
 
 # Clone the current repo to a new location with full git history. Generic
 # primitive: just clones, strips the auto-created origin, prints next steps.
@@ -364,7 +371,7 @@ identity:
 #   make moveto TARGET=../some-other-path
 moveto:
 	@[ -n "$(TARGET)" ] || { echo "Usage: make moveto TARGET=<target-path>" >&2; exit 1; }
-	@$(NOUS_DIR)scripts/moveto.sh "$(TARGET)"
+	@"$(NOUS_DIR)scripts/moveto.sh" "$(TARGET)"
 
 # Clone the current git repo to a new location AS a gcrypt-encrypted brain.
 # Interactive end-to-end: prompts for target path, creates or confirms-overwrite
@@ -377,7 +384,7 @@ moveto:
 # Prereqs: `make identity` (a usable GPG keypair); `gh auth login`.
 # Spec: nous#3 M1 step 3.
 cloneto:
-	@$(NOUS_DIR)scripts/cloneto.sh
+	@"$(NOUS_DIR)scripts/cloneto.sh"
 
 # Bootstrap a brand-new gcrypt-encrypted brain at a target path. Unlike
 # `cloneto` (which mirrors the current repo's full git history), new-brain
@@ -392,7 +399,7 @@ cloneto:
 #
 # Prereqs: `make identity` (a usable GPG keypair); `gh auth login`.
 new-brain:
-	@$(NOUS_DIR)scripts/new-brain.sh $(filter-out $@,$(MAKECMDGOALS))
+	@"$(NOUS_DIR)scripts/new-brain.sh" $(filter-out $@,$(MAKECMDGOALS))
 
 # Allow positional args after `make new-brain` (e.g. `make new-brain ../brain`)
 # without make complaining "no rule to make target ../brain". Scoped: this
