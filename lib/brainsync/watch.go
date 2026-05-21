@@ -97,6 +97,39 @@ func Watch(ctx context.Context, brains []string, fetchEvery time.Duration, verbo
 	peer := PeerIDFor(brains[0])
 	log.Printf("brainsync: watching %d brain(s) as peer %q", len(brains), peer)
 
+	// Per-brain AutoCommitter for brains whose manifest doesn't
+	// opt out via `autosave: off` (default on). When present, the
+	// committer owns the push side for that brain: RefWatcher events
+	// get routed to its push-debounce timer instead of triggering an
+	// immediate push, so a manual `git commit` from the operator's
+	// shell coalesces with autosave activity in the same window.
+	autocommitters := map[string]*AutoCommitter{}
+	for _, b := range brains {
+		m, err := brain.Read(b)
+		if err != nil {
+			log.Printf("brainsync: read manifest %s: %v (autosave skipped)", b, err)
+			continue
+		}
+		if !m.AutosaveEnabled() {
+			if verbose {
+				log.Printf("brainsync: autosave OFF for %s (manifest opt-out)", b)
+			}
+			continue
+		}
+		ac, err := NewAutoCommitter(b, peer, DefaultCommitDebounce, DefaultPushDebounce, verbose)
+		if err != nil {
+			log.Printf("brainsync: autosave init %s: %v (skipping)", b, err)
+			continue
+		}
+		autocommitters[b] = ac
+		log.Printf("brainsync: autosave ON for %s", b)
+	}
+	defer func() {
+		for _, ac := range autocommitters {
+			ac.Stop()
+		}
+	}()
+
 	rw, err := NewRefWatcher(brains)
 	if err != nil {
 		return err
@@ -124,6 +157,13 @@ func Watch(ctx context.Context, brains []string, fetchEvery time.Duration, verbo
 	for {
 		select {
 		case b := <-rw.Events():
+			// Autosave-enabled brains route through the per-brain
+			// push debouncer so a manual commit doesn't bypass the
+			// 60s window that autosave commits also live under.
+			if ac, ok := autocommitters[b]; ok {
+				ac.NotifyRefChange()
+				continue
+			}
 			pushed, err := PushBrain(b, peer, time.Now)
 			if err != nil {
 				log.Printf("brainsync: push %s: %v", b, err)
