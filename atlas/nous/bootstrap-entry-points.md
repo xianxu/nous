@@ -41,7 +41,7 @@ Runs ten idempotent steps:
 7. **fzf shell hook** — `fzf --update-rc`.
 8. **Verify go on PATH.**
 9. **Build the nous binary** — `make nous-build` produces `nous/bin/nous`. Skippable via `NOUS_BOOTSTRAP_SKIP_BUILD=1`. Future (nous#28): fetch a signed prebuilt binary into `nous/bin/nous` so end users don't need a Go toolchain at all.
-10. **Install + start the nous service** — copies `nous/bin/nous` → `~/.local/bin/nous`; runs `nous service uninstall || true; nous service install; nous service status`. Skippable via `NOUS_BOOTSTRAP_SKIP_SERVICE=1`.
+10. **Add nous/bin to PATH + start the nous service** — appends `export PATH="$NOUS_DIR/bin:$PATH"` to `~/.zshrc` or `~/.bash_profile` (idempotent — skipped if already present); runs `nous service uninstall || true; nous service install; nous service status`. Skippable via `NOUS_BOOTSTRAP_SKIP_SERVICE=1`. The binary stays at the canonical `nous/bin/nous` location — single source of truth. No copy to `~/.local/bin`; PATH wiring handles the "type `nous`" UX.
 
 After step 10, the operator has a running `com.42shots.nous` launchd service, `nous` on PATH, and is ready to `nous brain` to create their first brain.
 

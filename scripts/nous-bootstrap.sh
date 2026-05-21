@@ -70,7 +70,7 @@ ${CYAN}What this does${RESET}
   • connect to your GitHub as storage for your brain extension
       • register an SSH key with GitHub → asks you to set an ${bold}SSH passphrase${RESET}
       • authenticate the GitHub CLI
-  • build the ${bold}nous${RESET} binary, install it to ${bold}~/.local/bin/nous${RESET}
+  • build the ${bold}nous${RESET} binary at ${bold}nous/bin/nous${RESET} and add it to your shell PATH
   • start the ${bold}nous service${RESET} (brain-sync watcher + credential proxy via launchd)
 
 ${CYAN}You'll set two passphrases${RESET}
@@ -318,39 +318,48 @@ else
     warn "    cd $NOUS_DIR && make nous-build"
 fi
 
-# ── 10. Install nous to ~/.local/bin/ + start service ────────────────────────
-# Install (copy) the binary to a stable PATH location so the operator
-# can type `nous` directly, and so the launchd plist points at a
-# location that doesn't move when the source tree moves.
+# ── 10. Add nous/bin to PATH + start service ─────────────────────────────────
+# `nous/bin/nous` is the canonical binary location. Eventually (nous#28)
+# this is where a downloaded signed release lands; for now it's the
+# symlink-to-built-binary that `make nous-build` produces. Either
+# way, single source of truth — no copy to ~/.local/bin needed.
 #
-# Service install is idempotent (uninstall+install handles re-runs).
-# After this, `nous service status` should report "installed, running".
-INSTALL_PREFIX="$HOME/.local/bin"
+# PATH integration: append `$NOUS_DIR/bin` to the user's shell rc if
+# not already there. Idempotent.
+#
+# Service install is run via `$NOUS_DIR/bin/nous`; os.Executable +
+# EvalSymlinks in `nous service install` resolves to
+# cmd/nous/bin/nous (the real binary), which is what gets written
+# into the launchd plist. Stable across rebuilds.
 if [ -f "$NOUS_DIR/bin/nous" ] && [ "${NOUS_BOOTSTRAP_SKIP_SERVICE:-}" != "1" ]; then
-    info "Installing nous → $INSTALL_PREFIX/nous..."
-    mkdir -p "$INSTALL_PREFIX"
-    install -m 0755 "$NOUS_DIR/bin/nous" "$INSTALL_PREFIX/nous"
-    ok "Installed $INSTALL_PREFIX/nous."
+    # PATH wiring — find the right shell rc and append if needed.
+    SHELL_RC=""
+    case "${SHELL:-}" in
+        */zsh)  SHELL_RC="$HOME/.zshrc" ;;
+        */bash) [ -f "$HOME/.bash_profile" ] && SHELL_RC="$HOME/.bash_profile" || SHELL_RC="$HOME/.bashrc" ;;
+    esac
+    if [ -n "$SHELL_RC" ] && ! grep -q "nous/bin" "$SHELL_RC" 2>/dev/null; then
+        info "Adding $NOUS_DIR/bin to PATH in $SHELL_RC..."
+        printf '\n# Added by nous-bootstrap: nous binary location\nexport PATH="%s/bin:$PATH"\n' "$NOUS_DIR" >> "$SHELL_RC"
+        ok "PATH updated. Open a new shell (or run: source $SHELL_RC) to pick it up."
+    fi
 
     info "Starting nous service (uninstall first for hygiene)..."
-    "$INSTALL_PREFIX/nous" service uninstall >/dev/null 2>&1 || true
-    "$INSTALL_PREFIX/nous" service install
-    "$INSTALL_PREFIX/nous" service status
+    "$NOUS_DIR/bin/nous" service uninstall >/dev/null 2>&1 || true
+    "$NOUS_DIR/bin/nous" service install
+    "$NOUS_DIR/bin/nous" service status
 fi
 
 echo
 ok "Nous bootstrap complete."
 echo
 echo "What's installed:"
-echo "  $INSTALL_PREFIX/nous           — the nous CLI binary"
-echo "  com.42shots.nous (launchd)     — brain-sync watcher + credential proxy"
+echo "  $NOUS_DIR/bin/nous     — the nous CLI binary (single canonical location)"
+echo "  com.42shots.nous       — brain-sync watcher + credential proxy (launchd)"
 echo
 echo "Next steps:"
-echo "  1. Open a new shell so PATH picks up $INSTALL_PREFIX (if not already)."
+echo "  1. Open a new shell so PATH picks up $NOUS_DIR/bin."
 echo "  2. Create your first brain:"
-echo "       nous brain                 (TUI; press 'n' for new brain)"
-echo "  3. Open Claude inside that brain:"
+echo "       nous brain         (TUI; press 'n' for new brain)"
+echo "  3. Open Claude inside the brain:"
 echo "       cd \$(your brain dir) && claude"
-echo
-echo "Other repos (charon/parley.nvim/pair/etc.) can build their own skill"
-echo "binaries with 'make build' — auto-discovers cmd/*/main.go."
