@@ -102,6 +102,16 @@ func (m detailModel) Update(msg tea.Msg) (detailModel, tea.Cmd) {
 			return m, func() tea.Msg {
 				return launchRecipientRemoveMsg{brainPath: m.path, recipients: m.status.Recipients}
 			}
+		case "l":
+			// Leave this brain. Refuses are inside LeaveBrain itself
+			// (owner-check, not-a-collaborator, last-collaborator); the
+			// TUI's job is just routing to the confirm screen.
+			if m.loading || m.err != nil {
+				return m, nil
+			}
+			return m, func() tea.Msg {
+				return launchLeaveMsg{brainPath: m.path}
+			}
 		}
 	}
 	return m, nil
@@ -266,7 +276,7 @@ func (m detailModel) View() string {
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("a  add collaborator    r  remove collaborator    c  preview conflicts    esc  back    q  quit"))
+	b.WriteString(helpStyle.Render("a  add collaborator    r  remove collaborator    l  leave brain    c  preview conflicts    esc  back    q  quit"))
 	return b.String()
 }
 

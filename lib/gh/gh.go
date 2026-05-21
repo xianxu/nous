@@ -235,6 +235,21 @@ func UserRepos() ([]UserRepo, error) {
 	return repos, nil
 }
 
+// RemoveCollaborator removes `login` as a collaborator on
+// owner/repo. Used by `nous brain leave` so a collaborator can
+// revoke their own GitHub access as the final step of leaving a
+// shared brain.
+//
+// GitHub allows a collaborator to remove themselves (200 OK).
+// Repo owners can remove any collaborator (other than themselves).
+// 204 NoContent on success; bubbled gh error otherwise.
+func RemoveCollaborator(owner, repo, login string) error {
+	_, err := run("api", "-X", "DELETE",
+		fmt.Sprintf("repos/%s/%s/collaborators/%s", owner, repo, login),
+		"--silent")
+	return err
+}
+
 // RepoInvitation is one pending invitation the operator (or another
 // admin on the repo) sent that the invitee hasn't accepted yet.
 // Mirrors GitHub's response to GET /repos/{owner}/{repo}/invitations.

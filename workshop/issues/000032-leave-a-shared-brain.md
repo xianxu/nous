@@ -158,3 +158,21 @@ default behavior is right.
 - 2026-05-21: opened. Surfaced as a follow-up to the docs
   sweep — `nous brain leave` is the gesture symmetric to the
   TUI's accept-and-clone, and was missing.
+- 2026-05-21: M1+M2 complete in one slice — `gh.RemoveCollaborator`
+  added; leave logic factored into `brainsync.LeaveBrain` so
+  the CLI + TUI both use the same code path. Refuse-checks
+  (owner, not-a-collaborator, last-collaborator) live inside
+  the shared function. Soft-fail on the github-revoke step so
+  manifest-pushed-but-gh-failed is reported cleanly to the
+  operator.
+- 2026-05-21: M3 — `cmd/nous/brain_leave.go` registered;
+  `nous brain leave [--brain PATH] [--delete-local] [-y]`.
+- 2026-05-21: M4 — `lib/tui/brain/leave.go` with confirm /
+  working / done stages; `l` key on detail page; root.go
+  wires the screen and invalidates list cache on
+  leaveDoneMsg.
+- 2026-05-21: M5 — 4 unit tests passing (no-origin,
+  non-github-origin, missing-brain, shortFpLast8). Owner-
+  refuse + happy path tests need gh + gpg, deferred to
+  operator-side e2e on the host.
+- 2026-05-21: status = ready for operator-side e2e.

@@ -24,6 +24,7 @@ const (
 	screenNewBrain
 	screenInviteCollab
 	screenAcceptInvite
+	screenLeave
 )
 
 // cancelNewBrainMsg signals "exit the new-brain flow back to the list,"
@@ -43,6 +44,7 @@ type rootModel struct {
 	newBrain     newBrainModel
 	inviteCollab inviteCollabModel
 	acceptInvite acceptInviteModel
+	leave        leaveModel
 
 	// listCache holds the most recent gh-fetched data (myLogin,
 	// invitations, repos). Re-entering the list page (ESC from
@@ -110,6 +112,21 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.current = screenAcceptInvite
 		m.acceptInvite = newAcceptInviteModel(msg.invitation)
 		return m, m.acceptInvite.Init()
+	case launchLeaveMsg:
+		m.current = screenLeave
+		m.leave = newLeaveModel(msg.brainPath)
+		return m, m.leave.Init()
+	case leaveDoneMsg:
+		// Manifest changed (we're no longer a collaborator) + GitHub
+		// accessible-list may have changed; invalidate cache so the
+		// next list render shows ground truth. On success, this brain
+		// won't appear as a local row anymore (manifest's still on
+		// disk until rm -rf, but our key isn't on it). On
+		// cancel/error, the list re-renders unchanged.
+		m.listCache = nil
+		m.current = screenList
+		m.list = newListModel(nil)
+		return m, m.list.Init()
 	case acceptInviteDoneMsg:
 		// Whether success or failure/cancel, return to the list and
 		// re-render. On success, the invitation moves from pending
@@ -213,6 +230,8 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.inviteCollab, cmd = m.inviteCollab.Update(msg)
 	case screenAcceptInvite:
 		m.acceptInvite, cmd = m.acceptInvite.Update(msg)
+	case screenLeave:
+		m.leave, cmd = m.leave.Update(msg)
 	}
 	return m, cmd
 }
@@ -233,6 +252,8 @@ func (m rootModel) View() string {
 		return m.inviteCollab.View()
 	case screenAcceptInvite:
 		return m.acceptInvite.View()
+	case screenLeave:
+		return m.leave.View()
 	default:
 		return m.list.View()
 	}
