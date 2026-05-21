@@ -106,6 +106,21 @@ func Watch(ctx context.Context, brains []string, fetchEvery time.Duration, verbo
 	ticker := time.NewTicker(fetchEvery)
 	defer ticker.Stop()
 
+	// Startup catch-up: push anything local-ahead-of-origin that was
+	// committed while the daemon was down. Without this pass, a
+	// pre-existing unpushed commit waits for the *next* ref change to
+	// fire RefWatcher — which may be never if the operator commits
+	// rarely. PushBrain is idempotent (no-ops via HasUnpushedCommits),
+	// so this is cheap on a clean repo.
+	for _, b := range brains {
+		pushed, err := PushBrain(b, peer, time.Now)
+		if err != nil {
+			log.Printf("brainsync: startup push %s: %v", b, err)
+		} else if pushed && verbose {
+			log.Printf("brainsync: startup push %s", b)
+		}
+	}
+
 	for {
 		select {
 		case b := <-rw.Events():
