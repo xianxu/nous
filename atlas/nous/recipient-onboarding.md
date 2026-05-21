@@ -52,27 +52,44 @@ guarantees:
 Done. Operator's role ends here. The invitee will be auto-admitted
 once they accept and publish their pubkey.
 
-### Invitee side: `nous brain join`
+### Invitee side: `nous brain` (TUI) — `nous brain join` is the CLI plumbing
 
-(`cmd/nous/brain_join.go`, nous#26 M4)
+The canonical joiner surface is the `nous brain` TUI. It lists
+pending GitHub repository invitations (filtered to brain projects
+via the `nous brain new` markers — description prefix
+`nous-brain:` or topic `nous-brain`) inline with local brains and
+accessible-but-not-cloned repos. The invitee navigates to a
+pending row, presses `enter`, and the inline `accept_invite.go`
+flow handles GPG identity selection, `gh.AcceptInvitation`, and
+the plain-git push of `<login>.asc` to the keys branch — all
+without a subprocess or terminal handoff. After the accept, the
+brain appears as accessible-but-not-cloned; `enter` again
+launches the clone subprocess.
 
-1. Calls `gh.PendingInvitations()` — `/user/repository_invitations`
-   filtered to "brain projects" via the markers `nous brain new`
-   sets (description starting `nous-brain:` OR topic `nous-brain`;
-   nous#26 M5).
-2. TUI prompts the invitee to pick which invitations to accept.
-3. For each picked: `gh.AcceptInvitation(id)` flips the invitation
-   to accepted (no web UI needed). Then
-   `brain.PublishOwnPubkeyToRemote(remoteURL, login, armor)`
-   plain-git clones the keys branch, writes `<login>.asc`, pushes
-   back. If the keys branch doesn't exist yet (brand-new brain),
-   orphan-checkout creates it.
-4. `nous brain join OWNER/REPO` is the republish mode for the case
-   where the invitation was already accepted but publish failed —
-   skips the invitation listing and goes straight to the publish.
+(`lib/tui/brain/accept_invite.go` + `lib/tui/brain/list.go`,
+nous#26 M5 + nous#27.)
 
-GitHub is reduced to "identity provider" in this flow. The invitee
-never opens github.com.
+`cmd/nous/brain_join.go` is the underlying CLI plumbing for the
+same actions. Most operators won't reach it directly; it stays
+exposed because:
+
+- It's the **republish** path: `nous brain join OWNER/REPO`
+  re-pushes the invitee's pubkey to a specific brain's keys
+  branch. Used when an earlier accept succeeded but the publish
+  failed, or after a GPG key rotation.
+- It's the **non-TTY fallback**: scripted environments without
+  an interactive TUI can still bulk-accept via the CLI.
+
+Both paths converge on the same underlying steps:
+
+1. `gh.PendingInvitations()` filtered to brain projects.
+2. `gh.AcceptInvitation(id)` to flip the invitation.
+3. `brain.PublishOwnPubkeyToRemote(remoteURL, login, armor)` to
+   plain-git clone the keys branch, write `<login>.asc`, push back.
+   Orphan-creates the keys branch if it doesn't exist.
+
+GitHub is reduced to "identity provider" in this flow. The
+invitee never opens github.com.
 
 ## Auto-admit
 
@@ -168,7 +185,9 @@ yingtest42 → DC73…B6E9 (verified by xianxu on 2026-05-20)
 | file | purpose |
 |---|---|
 | `cmd/nous/brain_invite.go`        | operator invite CLI |
-| `cmd/nous/brain_join.go`          | invitee join CLI (+ republish mode) |
+| `cmd/nous/brain_join.go`          | invitee join CLI plumbing (+ republish mode); most invitees use the TUI instead |
+| `lib/tui/brain/accept_invite.go`  | TUI inline accept-invite flow (the primary invitee surface) |
+| `lib/tui/brain/list.go`           | renders pending invitations + accessible-but-not-cloned rows |
 | `cmd/nous/brain_recipient.go::Verify` | OOB-ceremony CLI + verified.yaml persistence |
 | `lib/gh/gh.go`                    | thin wrappers over `gh api` |
 | `lib/brain/autoadmit.go`          | auto-admit + drift detection logic |

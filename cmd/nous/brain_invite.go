@@ -135,11 +135,14 @@ func runBrainInvite(w io.Writer, in io.Reader, ghLogin, brainPathFlag string, fo
 	}
 
 	fmt.Fprintf(w, "✓ Invitation sent.\n")
-	fmt.Fprintf(w, "  %s can accept via 'nous brain join' or:\n", ghLogin)
-	fmt.Fprintf(w, "  https://github.com/%s/%s/invitations\n", owner, repo)
+	fmt.Fprintf(w, "  Tell %s to run `nous brain` on their machine — the\n", ghLogin)
+	fmt.Fprintf(w, "  invitation appears in the list with `enter` to accept,\n")
+	fmt.Fprintf(w, "  then `enter` again on the accessible-but-not-cloned row\n")
+	fmt.Fprintf(w, "  to fetch the brain locally. (Web UI as a fallback:\n")
+	fmt.Fprintf(w, "  https://github.com/%s/%s/invitations)\n", owner, repo)
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "Once they accept and run 'nous brain join', brain-sync\n")
-	fmt.Fprintf(w, "will auto-admit them on the next pull cycle.\n")
+	fmt.Fprintf(w, "Once they accept, brain-sync's auto-admit appends them to\n")
+	fmt.Fprintf(w, "the manifest on the next pull cycle.\n")
 	return nil
 }
 

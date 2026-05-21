@@ -236,9 +236,10 @@ func (m inviteCollabModel) View() string {
 			b.WriteString(cursorRowStyle.Render(m.picked))
 			b.WriteString("\n\n")
 			b.WriteString(mutedStyle.Render(
-				"  Once they accept (via `nous brain join` or the github web UI)\n" +
-					"  and publish their pubkey, brain-sync's auto-admit will append\n" +
-					"  them to the manifest on the next pull cycle."))
+				"  Once they open `nous brain` on their machine and accept the\n" +
+					"  invitation from the list, their pubkey is published and\n" +
+					"  brain-sync's auto-admit appends them to the manifest on the\n" +
+					"  next pull cycle."))
 		}
 		b.WriteString("\n\n")
 		b.WriteString(helpStyle.Render("any key  return to brain detail"))

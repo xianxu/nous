@@ -159,7 +159,7 @@ create_repo() {
     # a --topic flag). Best-effort — a topic-set failure doesn't
     # invalidate the brain; the description marker is enough on its own.
     gh api -X PUT "repos/$GH_FULL/topics" -f 'names[]=nous-brain' --silent 2>/dev/null || \
-        warn "Topic set failed (nous brain join will still find this brain via description marker)."
+        warn "Topic set failed (nous brain will still discover this brain via the description marker)."
 }
 
 # Existence check via REST `/repos/<owner>/<name>` rather than `gh repo

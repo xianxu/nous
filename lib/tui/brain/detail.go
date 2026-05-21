@@ -235,22 +235,28 @@ func (m detailModel) View() string {
 		}
 	}
 
-	// Share with peers — surface the one command an operator should
-	// hand to a peer after admitting them as a recipient. Auto-imports
-	// all peer pubkeys from the brain's keys branch (nous#23) before
-	// running gcrypt clone, so the peer doesn't need any pubkey hand-
-	// off beyond the initial fingerprint exchange to verify (opt-in
-	// via `nous brain recipient verify`). Only shown for shared brains
-	// with a configured origin URL.
+	// Share with peers — tell the operator what to say to invitees
+	// they've already admitted as collaborators. The canonical
+	// joiner path is now the `nous brain` TUI itself: pending
+	// GitHub invitations show up in its list with `enter` to
+	// accept, and the brain then appears as accessible-but-not-
+	// cloned with `enter` again to fetch. The legacy `nous brain
+	// clone <gcrypt-url>` and `nous brain join <repo>` commands
+	// still exist as plumbing but operators shouldn't need to
+	// hand them out. Shown only for shared brains with a
+	// configured origin URL.
 	if s.Manifest.Shared() && s.OriginURL != "" {
 		b.WriteString(sectionHeaderStyle.Render("Share with peers"))
 		b.WriteString("\n")
-		b.WriteString(fmt.Sprintf("  nous brain clone %s\n", s.OriginURL))
+		b.WriteString("  Tell each invitee to run ")
+		b.WriteString(cursorRowStyle.Render("nous brain"))
+		b.WriteString(" on their machine.\n")
 		b.WriteString(mutedStyle.Render(
-			"  (run on the peer's machine; their fresh clone auto-imports\n" +
-				"   every recipient's pubkey from the keys branch, then gcrypt-\n" +
-				"   clones the brain. Verify any pubkey out-of-band later with\n" +
-				"   `nous brain recipient verify` if desired.)"))
+			"  Pending GitHub invitations appear in their brain list with\n" +
+				"  `enter` to accept; the brain then shows as accessible with\n" +
+				"  `enter` again to clone. Pubkey exchange happens automatically\n" +
+				"  via the brain's keys branch. Out-of-band verification is\n" +
+				"  optional: `nous brain recipient verify`."))
 		b.WriteString("\n")
 	}
 

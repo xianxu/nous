@@ -54,8 +54,11 @@ branch. Useful when you're already a collaborator (e.g., previous
 when you want to re-publish after rotating your GPG key.
 
 After this command succeeds, wait for the operator's next sync
-cycle (default ~10s) and then run 'nous brain clone <gcrypt-url>'
-to materialize the brain locally.`,
+cycle (default ~10s) and then run 'nous brain' — the brain will
+appear in the list as accessible-but-not-cloned; press 'enter' to
+fetch it locally. (Most operators won't need this CLI directly:
+'nous brain' has an inline accept-invite flow that does the same
+thing.)`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
@@ -171,8 +174,9 @@ func runBrainJoin(ctx context.Context, w io.Writer, in io.Reader) error {
 
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Done. The operator's brain-sync will auto-admit you on its next pull cycle.")
-	fmt.Fprintln(w, "Once admitted, materialize the brain locally with:")
-	fmt.Fprintln(w, "  nous brain clone <gcrypt-url>")
+	fmt.Fprintln(w, "To materialize the brain locally, the easiest path is:")
+	fmt.Fprintln(w, "  nous brain")
+	fmt.Fprintln(w, "and press `enter` on the accessible-but-not-cloned row.")
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "  (your fingerprint: %s)\n", fp)
 	return nil
