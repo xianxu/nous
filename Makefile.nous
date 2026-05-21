@@ -277,10 +277,17 @@ test:
 # fzf shell hook. Idempotent — re-running on a complete machine is a no-op.
 #
 # Usage:
-#   make nous-bootstrap
+#   make bootstrap            (canonical, end-user-facing)
+#   make nous-bootstrap       (backward-compat alias; pre-rename muscle memory)
+#
+# Renamed from `nous-bootstrap` → `bootstrap` because end users shouldn't
+# need to know about the `nous-*` namespace — that's for binary
+# development verbs (nous-build, nous-install, nous-sign, etc.). The
+# alias stays as a soft-deprecation; will go away once the rename has
+# had a few months to settle into operator docs + muscle memory.
 #
 # Spec: workshop/issues/000011-nous-bootstrap.md.
-nous-bootstrap:
+bootstrap nous-bootstrap:
 	@$(NOUS_DIR)scripts/nous-bootstrap.sh
 
 # Run nous-bootstrap end-to-end inside a disposable tart VM, with a gcrypt

@@ -150,7 +150,7 @@ The operator workflow nous targets:
 
 1. `git clone .../nous` — single starting point, sources +
    scaffolding.
-2. `make nous-bootstrap` — installs Homebrew deps, generates
+2. `make bootstrap` — installs Homebrew deps, generates
    GPG + SSH keys, sets up gpg-agent / pinentry.
 3. `make nous-build` — builds `bin/nous`.
 4. `nous service install` — launchd-managed `nous serve`

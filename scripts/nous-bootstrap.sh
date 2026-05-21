@@ -9,7 +9,8 @@
 #   3. Workflow  — delegates to .openshell `bootstrap` (gh auth, openshell, mutagen);
 #                  fzf shell hook; go env verification
 #
-# Used by `make nous-bootstrap` (Makefile.nous).
+# Used by `make bootstrap` (Makefile.nous; also `make nous-bootstrap` as a
+# backward-compat alias).
 #
 # Spec: workshop/issues/000011-nous-bootstrap.md.
 
@@ -61,7 +62,7 @@ splash() {
 ART
     cat >&2 <<EOF
 
-${bold}make nous-bootstrap${RESET} — one-time setup of this machine for nous.
+${bold}make bootstrap${RESET} — one-time setup of this machine for nous.
 
 ${CYAN}What this does${RESET}
   • install the toolchain (Homebrew, Go, GPG, gh, pinentry, claude-code, …)
@@ -181,7 +182,7 @@ if [ "${NOUS_BOOTSTRAP_SKIP_OPENSHELL:-}" = "1" ]; then
     info "Skipping .openshell bootstrap (NOUS_BOOTSTRAP_SKIP_OPENSHELL=1)."
 elif [ -f "$NOUS_DIR/.openshell/Makefile" ]; then
     info "Running .openshell bootstrap (gh auth, openshell CLI)..."
-    (cd "$NOUS_DIR" && make bootstrap)
+    (cd "$NOUS_DIR" && make sandbox-bootstrap)
 else
     warn ".openshell/Makefile not found; skipping openshell bootstrap."
 fi

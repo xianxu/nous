@@ -83,13 +83,13 @@ ${CYAN}What this does${RESET}
 
 ${CYAN}You may be prompted for passphrases${RESET}
   ${bold}GPG passphrase${RESET}  to sign and encrypt the initial push (set during
-                  'make nous-bootstrap'). gpg-agent caches it after first
+                  'make bootstrap'). gpg-agent caches it after first
                   use; flush via idle timeout or by ${bold}disarming${RESET}.
   ${bold}SSH passphrase${RESET}  to authenticate the push to GitHub (also set during
-                  'make nous-bootstrap'). Cached in ssh-agent for the
+                  'make bootstrap'). Cached in ssh-agent for the
                   current login session.
 
-If you haven't run ${bold}make nous-bootstrap${RESET} on this machine, ^C now and do
+If you haven't run ${bold}make bootstrap${RESET} on this machine, ^C now and do
 that first — it generates the GPG keypair and SSH key this script expects.
 
 EOF

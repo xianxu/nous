@@ -5,25 +5,30 @@ Four `make` targets cooperate to take a fresh Mac to a working nous + brain stac
 ## The four targets
 
 ```
-nous/Makefile.nous → make nous-bootstrap
+nous/Makefile.nous → make bootstrap         (alias: make nous-bootstrap, deprecated)
 nous/Makefile.nous → make identity
 nous/Makefile.nous → make new-brain [target-path]
-nous/.openshell/Makefile → make bootstrap   (called transitively from nous-bootstrap)
+nous/.openshell/Makefile → make sandbox-bootstrap   (called transitively from bootstrap)
 ```
+
+(`make nous-bootstrap` stays as a backward-compat alias for
+operators who still type the old name. `make sandbox-bootstrap`
+was previously `make bootstrap` until nous wanted that name —
+ariadne renamed in early 2026-05-20.)
 
 ## Order on a fresh Mac
 
 ```
 git clone https://github.com/xianxu/nous && cd nous
-make nous-bootstrap         # 1. installs everything; calls identity + .openshell bootstrap
-make new-brain ../brain     # 2. provisions an encrypted brain repo
+make bootstrap              # 1. installs everything; calls identity + .openshell sandbox-bootstrap
+nous brain new ../brain     # 2. provisions an encrypted brain repo
 ```
 
-Two commands cover the cold start. The other targets are usually invoked by `nous-bootstrap` rather than by hand.
+Two commands cover the cold start. The other targets are usually invoked by `bootstrap` rather than by hand.
 
 ## Per-target responsibility
 
-### `make nous-bootstrap` — the umbrella
+### `make bootstrap` — the umbrella
 
 Runs eight idempotent steps:
 
@@ -31,7 +36,7 @@ Runs eight idempotent steps:
 2. **Homebrew** — official installer if missing.
 3. **Brewfile** — `brew bundle install --file=Brewfile`. The package set is the source of truth for what nous expects on a Mac.
 4. **GPG identity** — delegates to `scripts/identity.sh`. Skippable via `NOUS_BOOTSTRAP_SKIP_IDENTITY=1`.
-5. **Workflow tools** — delegates to `.openshell/Makefile`'s `bootstrap` (`gh auth login`, openshell CLI, mutagen tap). Skippable via `NOUS_BOOTSTRAP_SKIP_OPENSHELL=1`.
+5. **Workflow tools** — delegates to `.openshell/Makefile`'s `sandbox-bootstrap` (`gh auth login`, openshell CLI, mutagen tap). Skippable via `NOUS_BOOTSTRAP_SKIP_OPENSHELL=1`.
 6. **GitHub SSH key** — generates `~/.ssh/id_ed25519` if missing; registers via `gh ssh-key add` if not already on the account. Required for `gcrypt::ssh://...` brain remotes.
 7. **fzf shell hook** — `fzf --update-rc`.
 8. **Verify go on PATH.**
@@ -54,13 +59,13 @@ Interactive end-to-end. Prompts for GitHub owner+repo (creates the repo via `gh 
 
 Output: a working private brain at `<path>` with full encryption-at-rest. The first plaintext commit lives only on the local clone; only ciphertext touches GitHub.
 
-Prereqs: `make identity` (GPG keypair); `gh auth login` (HTTPS); a GitHub SSH key registered (`make nous-bootstrap` step 6).
+Prereqs: `make identity` (GPG keypair); `gh auth login` (HTTPS); a GitHub SSH key registered (`make bootstrap` step 6).
 
-### `.openshell/Makefile` `bootstrap` — workflow tools
+### `.openshell/Makefile` `sandbox-bootstrap` — workflow tools
 
-Vendored from NVIDIA/OpenShell. Installs `gh`, `mutagen`, the `openshell` CLI, runs `gh auth login`. Called transitively by `make nous-bootstrap` step 5; can also run standalone via `make bootstrap` from the nous root (which is wired via `-include .openshell/Makefile`).
+Vendored from NVIDIA/OpenShell (via ariadne). Installs `gh`, `mutagen`, the `openshell` CLI, runs `gh auth login`. Called transitively by `make bootstrap` step 5; can also run standalone via `make sandbox-bootstrap` from the nous root (which is wired via `-include .openshell/Makefile`).
 
-The naming collision between `bootstrap` (openshell sandbox) and the umbrella we wanted led to `make nous-bootstrap` getting the explicit prefix.
+Was named `bootstrap` until 2026-05-20; renamed to `sandbox-bootstrap` so nous could claim `make bootstrap` as its end-user umbrella. The other openshell verbs (sandbox, sandbox-build, sandbox-clean, etc.) already use the `sandbox-` prefix; this brings naming in line.
 
 ## Test infrastructure
 
