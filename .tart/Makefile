@@ -68,7 +68,16 @@ GRAPHICS_FLAG  ?= --no-graphics
 # regardless of repo size, and VM writes diverge into the clone via
 # COW without touching the source. Replaces the previous rsync-into-
 # VM-local-fs workflow.
-TART_CLONE_DIR ?= /tmp/$(TART_VM)-clone
+#
+# Path choice: ~/.tart/clones/ rather than /tmp. macOS's Virtualization
+# framework + tart's app sandbox refuse to expose paths under
+# /private/tmp (the canonical /tmp target) as VirtIO-FS shares — boot
+# fails with "A directory sharing device configuration is invalid /
+# No such file or directory" even when the path concretely exists.
+# ~/.tart is already a tart-managed directory (used for cached OCI
+# images + VM disks) and is on the framework's whitelist by virtue of
+# tart's TCC permissions for its own state dir.
+TART_CLONE_DIR ?= $(HOME)/.tart/clones/$(TART_VM)-clone
 
 # Bind-mount the clone (writable) into the VM at the canonical tag.
 # Overridable to empty on the command line for a no-mount boot.
@@ -119,6 +128,7 @@ endef
 # clonefile fails for any reason (rare; non-APFS volume, etc.).
 define _tart_prepare_clone
 	@echo "==> Preparing APFS clone at $(TART_CLONE_DIR) (write-isolated; replaces rsync)..."
+	@mkdir -p "$(dir $(TART_CLONE_DIR))"
 	@rm -rf "$(TART_CLONE_DIR)"
 	@if ! cp -cR "$(CURDIR)" "$(TART_CLONE_DIR)" 2>/dev/null; then \
 	    echo "  [warn] cp -cR (clonefile) failed; falling back to plain cp -R"; \
@@ -129,16 +139,18 @@ define _tart_prepare_clone
 	@echo "  cloned + stripped build artifacts"
 endef
 
-# _tart_gc_orphan_clones: remove any /tmp/*-clone older than 7 days.
-# Safety net for the force-kill case (operator ^C's tart mid-boot,
-# tart-stop doesn't fire, the clone leaks). 7d threshold is
+# _tart_gc_orphan_clones: remove any ~/.tart/clones/*-clone older than
+# 7 days. Safety net for the force-kill case (operator ^C's tart
+# mid-boot, tart-stop doesn't fire, the clone leaks). 7d threshold is
 # conservative — a legitimately-active VM's clone gets refreshed on
 # every cold-boot so its mtime stays current. mtime works on
 # directories created by cp -cR; APFS preserves it as the clone
 # instant.
 define _tart_gc_orphan_clones
-	@find /tmp -maxdepth 1 -name '*-clone' -type d -mtime +7 -prune 2>/dev/null \
-	    -exec rm -rf {} \; 2>/dev/null || true
+	@if [ -d "$(HOME)/.tart/clones" ]; then \
+	    find "$(HOME)/.tart/clones" -maxdepth 1 -name '*-clone' -type d -mtime +7 -prune 2>/dev/null \
+	        -exec rm -rf {} \; 2>/dev/null || true; \
+	fi
 endef
 
 # _tart_cleanup_clone: remove the specific clone for $(TART_VM).
