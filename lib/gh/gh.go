@@ -54,6 +54,30 @@ type Invitation struct {
 	Inviter struct{ Login string } `json:"inviter"`
 }
 
+// AsUserRepo converts an Invitation's embedded repository view into
+// a UserRepo. Used by the TUI to splice a just-accepted repo into
+// the visible list right after the operator presses `enter` on a
+// pending row — GitHub's /user/repos endpoint lags
+// invitation-acceptance by tens of seconds, so without this splice
+// the brain disappears from the list during that gap.
+//
+// SSHURL is fabricated from FullName when the Repository view omits
+// it (the MinimalRepository case that /user/repository_invitations
+// actually returns), matching CloneSSHURL's fallback.
+func (i Invitation) AsUserRepo() UserRepo {
+	r := UserRepo{
+		FullName:    i.Repository.FullName,
+		Name:        i.Repository.Name,
+		Private:     i.Repository.Private,
+		Description: i.Repository.Description,
+		Topics:      i.Repository.Topics,
+		SSHURL:      i.Repository.SSHURL,
+		CloneURL:    i.Repository.CloneURL,
+	}
+	r.Owner.Login = i.Repository.Owner.Login
+	return r
+}
+
 // CloneSSHURL returns the SSH clone URL for the invitation's repo.
 // Uses the embedded ssh_url if present (full Repository object);
 // otherwise constructs it from full_name (MinimalRepository case,

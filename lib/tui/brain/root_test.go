@@ -69,10 +69,10 @@ func TestRoot_DetailEscPopsToList(t *testing.T) {
 func TestList_NewListModel_DoesNotBlockOnGh(t *testing.T) {
 	t.Setenv("WORKSPACE_ROOT", t.TempDir()) // empty workspace
 	start := time.Now()
-	m := newListModel(nil)
+	m := newListModel(nil, nil)
 	elapsed := time.Since(start)
 	if elapsed > 200*time.Millisecond {
-		t.Errorf("newListModel(nil) took %v — likely doing synchronous gh calls; should be filesystem-only", elapsed)
+		t.Errorf("newListModel(nil, nil) took %v — likely doing synchronous gh calls; should be filesystem-only", elapsed)
 	}
 	if !m.loadingRemote {
 		t.Error("expected loadingRemote=true when cache is nil")
@@ -85,7 +85,7 @@ func TestList_NewListModel_DoesNotBlockOnGh(t *testing.T) {
 // must populate myLogin + flip loadingRemote off.
 func TestList_LoadedMsg_FoldsRemoteDataIn(t *testing.T) {
 	t.Setenv("WORKSPACE_ROOT", t.TempDir())
-	m := newListModel(nil)
+	m := newListModel(nil, nil)
 	if !m.loadingRemote {
 		t.Fatal("precondition: loadingRemote should be true")
 	}
@@ -158,5 +158,82 @@ func TestRoot_AcceptInviteDoneInvalidatesCache(t *testing.T) {
 	}
 	if !root.list.loadingRemote {
 		t.Error("expected new list to be loadingRemote=true after cache invalidation")
+	}
+}
+
+// TestRoot_AcceptInviteSplicesJustAccepted pins the post-accept
+// visibility fix: after Emma accepts an invitation, the brain
+// should appear as accessible-but-not-cloned even if /user/repos
+// hasn't caught up yet. We assert that the invitation's repo
+// lands in rootModel.justAccepted, and that a subsequent
+// listLoadedMsg with empty UserRepos still produces an item for
+// the just-accepted repo on the rebuilt list.
+//
+// Bypasses launchAcceptInviteMsg (which would invoke
+// newAcceptInviteModel → real gh subprocess) by directly seeding
+// rootModel.acceptInvite with the invitation. The
+// acceptInviteDoneMsg handler reads m.acceptInvite.invitation, so
+// this gets us the same effect without spawning gh.
+func TestRoot_AcceptInviteSplicesJustAccepted(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", t.TempDir())
+	root := NewRoot().(rootModel)
+
+	// Construct an invitation that meets the brain-marker filter
+	// (description prefix `nous-brain:`).
+	inv := gh.Invitation{ID: 42}
+	inv.Repository.FullName = "owner/brain1"
+	inv.Repository.Name = "brain1"
+	inv.Repository.Owner.Login = "owner"
+	inv.Repository.Description = "nous-brain: test"
+	inv.Repository.SSHURL = "git@github.com:owner/brain1.git"
+
+	// Seed acceptInvite directly so we don't spawn gh subprocesses.
+	root.acceptInvite = acceptInviteModel{invitation: inv}
+
+	r3, _ := root.Update(acceptInviteDoneMsg{err: nil})
+	root = r3.(rootModel)
+
+	if len(root.justAccepted) != 1 || root.justAccepted[0].FullName != "owner/brain1" {
+		t.Fatalf("justAccepted should hold the invitation repo after a successful accept; got %+v",
+			root.justAccepted)
+	}
+
+	// Simulate /user/repos lag: load returns no repos and no
+	// pending invitations. The rebuilt list should still include
+	// brain1 as accessible-but-not-cloned via the splice.
+	r4, _ := root.Update(listLoadedMsg{data: listLoadedData{
+		myLogin: "emma", invitations: nil, repos: nil,
+	}})
+	root = r4.(rootModel)
+
+	found := false
+	for _, it := range root.list.items {
+		if it.isUncloned && it.uncloned.FullName == "owner/brain1" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("post-accept list should contain owner/brain1 as accessible-but-not-cloned via splice; got items %+v",
+			root.list.items)
+	}
+}
+
+// TestMergeUserReposDedup_CaseInsensitive pins the dedup contract
+// — case-insensitive FullName, preserves order of `a`, appends
+// only non-duplicate `b`.
+func TestMergeUserReposDedup_CaseInsensitive(t *testing.T) {
+	a := []gh.UserRepo{{FullName: "Owner/One"}, {FullName: "owner/two"}}
+	b := []gh.UserRepo{{FullName: "OWNER/ONE"}, {FullName: "owner/three"}}
+	out := mergeUserReposDedup(a, b)
+	if len(out) != 3 {
+		t.Fatalf("expected 3 items after dedup, got %d: %+v", len(out), out)
+	}
+	got := []string{out[0].FullName, out[1].FullName, out[2].FullName}
+	want := []string{"Owner/One", "owner/two", "owner/three"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("merge[%d] = %q, want %q", i, got[i], want[i])
+		}
 	}
 }

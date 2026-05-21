@@ -2,6 +2,8 @@ package brain
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/xianxu/nous/lib/gh"
 )
 
 // rootModel owns the screen stack for the brain TUI: list ⇄ detail ⇄
@@ -54,13 +56,24 @@ type rootModel struct {
 	// change gh state (accept-invite success, clone success) so
 	// the next list render re-fetches.
 	listCache *listLoadedData
+
+	// justAccepted holds repos the operator accepted invitations
+	// for during this session. GitHub's /user/repos lags behind
+	// invitation acceptance (tens of seconds, sometimes more), so
+	// the just-accepted brain would briefly disappear from the
+	// list — accepted → not in PendingInvitations, not yet in
+	// UserRepos, not yet local. We splice these in alongside
+	// UserRepos at render time. Dedup by FullName means UserRepos
+	// catching up doesn't double-render; localFullNames suppresses
+	// post-clone duplication.
+	justAccepted []gh.UserRepo
 }
 
 // NewRoot returns the top-level bubbletea model for `nous brain`.
 func NewRoot() tea.Model {
 	return rootModel{
 		current: screenList,
-		list:    newListModel(nil),
+		list:    newListModel(nil, nil),
 	}
 }
 
@@ -125,7 +138,7 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// cancel/error, the list re-renders unchanged.
 		m.listCache = nil
 		m.current = screenList
-		m.list = newListModel(nil)
+		m.list = newListModel(nil, m.justAccepted)
 		return m, m.list.Init()
 	case acceptInviteDoneMsg:
 		// Whether success or failure/cancel, return to the list and
@@ -135,9 +148,21 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// cache either way — the invitation set may have changed
 		// (success consumes it) and we want the next render to
 		// reflect ground truth.
+		//
+		// On success, also capture the just-accepted invitation's
+		// repo into justAccepted so the brain renders as accessible-
+		// but-not-cloned during the /user/repos consistency-lag
+		// window. Without this splice, brain disappears entirely
+		// between accept and UserRepos catching up.
+		if msg.err == nil {
+			repo := m.acceptInvite.invitation.AsUserRepo()
+			if repo.FullName != "" {
+				m.justAccepted = append(m.justAccepted, repo)
+			}
+		}
 		m.listCache = nil
 		m.current = screenList
-		m.list = newListModel(nil)
+		m.list = newListModel(nil, m.justAccepted)
 		return m, m.list.Init()
 	case cloneSubprocessDoneMsg:
 		// Same shape as joinSubprocessDoneMsg. On success the
@@ -150,9 +175,12 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Local manifests changed; remote uncloned-set may also no
 		// longer include this repo. Invalidate the cache.
+		// justAccepted is left alone — buildAllItems' localFullNames
+		// suppression handles the dedup automatically once the brain
+		// has a local manifest.
 		m.listCache = nil
 		m.current = screenList
-		m.list = newListModel(nil)
+		m.list = newListModel(nil, m.justAccepted)
 		return m, m.list.Init()
 	case launchNewBrainMsg:
 		m.current = screenNewBrain
@@ -172,7 +200,7 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// new brain's origin URL).
 		m.listCache = nil
 		m.current = screenList
-		m.list = newListModel(nil)
+		m.list = newListModel(nil, m.justAccepted)
 		return m, m.list.Init()
 	case recipientAddedMsg, recipientRemovedMsg, cancelRecipientFlowMsg:
 		// Recipient flow ended (success/failure/cancel). Return to the
@@ -199,16 +227,21 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// always re-discovered, so a newly-created brain still
 		// shows. This is the win that makes ESC instant.
 		m.current = screenList
-		m.list = newListModel(m.listCache)
+		m.list = newListModel(m.listCache, m.justAccepted)
 		return m, m.list.Init()
 	case listLoadedMsg:
-		// Capture the async-load payload as the cache before
-		// dispatching to the list model. The list's own Update
-		// will fold it into items.
+		// Splice justAccepted into the freshly-loaded repos before
+		// caching + forwarding. Dedup in mergeUserReposDedup keeps
+		// it harmless once /user/repos catches up; localFullNames
+		// suppression in buildAllItems handles the post-clone case.
+		// We don't trim justAccepted explicitly — entries become
+		// no-ops once the brain is local or once /user/repos
+		// surfaces the repo on its own.
 		data := msg.data
+		data.repos = mergeUserReposDedup(data.repos, m.justAccepted)
 		m.listCache = &data
 		var cmd tea.Cmd
-		m.list, cmd = m.list.Update(msg)
+		m.list, cmd = m.list.Update(listLoadedMsg{data: data})
 		return m, cmd
 	}
 

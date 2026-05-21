@@ -102,28 +102,66 @@ type listLoadedMsg struct {
 // newListModel builds the list model. When `cache` is non-nil
 // (re-entering the list via popToListMsg with a prior load in
 // hand), the items are computed immediately from local manifests +
-// the cached gh data and Init returns nil. When `cache` is nil
-// (first entry to the TUI, or after explicit refresh / cache
-// invalidation), only local-brain items are built synchronously;
-// Init returns the async load Cmd, and listLoadedMsg later folds
-// in the remote rows.
+// the cached gh data + `extraRepos` and Init returns nil. When
+// `cache` is nil (first entry to the TUI, or after explicit
+// refresh / cache invalidation), only local-brain items plus the
+// extraRepos are built synchronously; Init returns the async load
+// Cmd, and listLoadedMsg later folds in the rest of the remote rows.
+//
+// extraRepos is the session-scoped "I just accepted these" splice
+// that papers over GitHub's /user/repos lag — see rootModel's
+// justAccepted field for the rationale.
 //
 // Splitting the model this way keeps the constructor filesystem-
 // only (DiscoverAll is fast) and pushes the slow `gh` subprocess
 // calls off the bubbletea event loop.
-func newListModel(cache *listLoadedData) listModel {
+func newListModel(cache *listLoadedData, extraRepos []gh.UserRepo) listModel {
 	manifests, err := libbrain.DiscoverAll()
 	if err != nil {
 		return listModel{err: err}
 	}
 	if cache == nil {
-		// Render immediately with just local brains; the async load
-		// completes via Init() and folds in invitations + uncloned.
-		items := buildLocalItems(manifests, "")
+		// Render immediately with local brains and any
+		// just-accepted-but-not-yet-on-/user/repos uncloned rows.
+		// The async load completes via Init() and folds in
+		// invitations + the rest of the uncloned set.
+		data := listLoadedData{repos: extraRepos}
+		items := buildAllItems(manifests, data)
 		return listModel{items: items, loadingRemote: true}
 	}
-	items := buildAllItems(manifests, *cache)
+	merged := *cache
+	merged.repos = mergeUserReposDedup(cache.repos, extraRepos)
+	items := buildAllItems(manifests, merged)
 	return listModel{items: items, myLogin: cache.myLogin}
+}
+
+// mergeUserReposDedup returns the union of a and b, deduped by
+// case-insensitive FullName. Used to splice rootModel.justAccepted
+// into the visible list without producing duplicates once
+// /user/repos catches up.
+func mergeUserReposDedup(a, b []gh.UserRepo) []gh.UserRepo {
+	if len(b) == 0 {
+		return a
+	}
+	seen := make(map[string]bool, len(a)+len(b))
+	out := make([]gh.UserRepo, 0, len(a)+len(b))
+	for _, r := range a {
+		key := strings.ToLower(r.FullName)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, r)
+	}
+	for _, r := range b {
+		key := strings.ToLower(r.FullName)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, r)
+	}
+	return out
 }
 
 // buildLocalItems builds list items for the local brains only,
