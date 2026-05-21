@@ -98,6 +98,52 @@ func TestFindWorkspaceViaRepoMarker_InstalledBin(t *testing.T) {
 	}
 }
 
+// TestFindWorkspaceViaRepoMarker_AcrossSymlinkedRepo pins the tart-VM
+// case: when the repo is reached through a symlink (e.g.,
+// ~/repo → /Volumes/.../nous), the walk-up must NOT resolve through
+// the symlink. The operator's workspace is the parent of the symlink
+// (`/Users/admin/`), not the parent of the underlying path
+// (`/Volumes/My Shared Files/`).
+//
+// Achieved by NOT calling EvalSymlinks on os.Executable() before the
+// walk-up — os.Stat on the marker check follows the symlink for the
+// marker-existence test, but the walk's directory path stays in the
+// caller's namespace.
+func TestFindWorkspaceViaRepoMarker_AcrossSymlinkedRepo(t *testing.T) {
+	// Layout:
+	//   <tmp>/operator-home/                  ← operator's effective workspace root
+	//   <tmp>/operator-home/repo              ← symlink → <tmp>/share/nous
+	//   <tmp>/share/nous/go.mod
+	//   <tmp>/share/nous/bin/                 ← walk starts here
+	tmp := t.TempDir()
+	operatorHome := filepath.Join(tmp, "operator-home")
+	share := filepath.Join(tmp, "share")
+	realRepo := filepath.Join(share, "nous")
+	binDir := filepath.Join(realRepo, "bin")
+	if err := os.MkdirAll(operatorHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(realRepo, "go.mod"), []byte("module example.com/nous\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Symlink operator-home/repo → share/nous (the VM case).
+	if err := os.Symlink(realRepo, filepath.Join(operatorHome, "repo")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Walk starts at operator-home/repo/bin (the *symlink-relative* path,
+	// which is what os.Executable returns without EvalSymlinks).
+	binViaSymlink := filepath.Join(operatorHome, "repo", "bin")
+	got := findWorkspaceViaRepoMarker(binViaSymlink)
+	if got != operatorHome {
+		t.Errorf("findWorkspaceViaRepoMarker(%q) = %q, want %q (symlink path preserved)",
+			binViaSymlink, got, operatorHome)
+	}
+}
+
 // TestFindWorkspaceViaRepoMarker_GitMarker verifies that a .git/
 // directory (not just go.mod) counts as a repo marker — useful for
 // repos that aren't Go-based.

@@ -48,9 +48,15 @@ func Root() (string, error) {
 		return filepath.Dir(strings.TrimRight(d, string(os.PathSeparator))), nil
 	}
 	if exe, err := os.Executable(); err == nil {
-		if real, err := filepath.EvalSymlinks(exe); err == nil {
-			exe = real
-		}
+		// Deliberately do NOT EvalSymlinks here. The bin/nous symlink
+		// (→ cmd/nous/bin/nous) does NOT need resolution: walking up
+		// from bin/nous lands at the repo root directly (via os.Stat
+		// auto-following symlinks on the marker check). And in the
+		// tart VM case, EvalSymlinks would resolve ~/repo through to
+		// /Volumes/My Shared Files/nous, making workspace root =
+		// /Volumes/My Shared Files/ — wrong; the operator's actual
+		// brain workspace is ~/ which contains ~/repo + sibling
+		// brain dirs.
 		if root := findWorkspaceViaRepoMarker(filepath.Dir(exe)); root != "" {
 			return root, nil
 		}
