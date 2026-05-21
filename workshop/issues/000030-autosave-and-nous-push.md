@@ -142,3 +142,29 @@ Semantics:
   plist, startup catch-up push, 5s fetch default. These remove
   the most painful sharp edges in the current pull-driven model
   before we layer autosave on top.
+- 2026-05-21: M1 complete — `brain.EnclosingBrain(cwd)` walks up
+  from cwd to find `.brain/config.md`; manifest gains
+  `Autosave` field + `AutosaveEnabled()` method (default on).
+- 2026-05-21: M2 complete — `brainsync.AutoCommitter` ships
+  with recursive fsnotify watcher, 5s commit debounce, 60s
+  push debounce, skip-during-merge/rebase/cherry-pick,
+  untracked/deleted-hint with dedup, and wired into
+  `brainsync.Watch`: per-brain committer for autosave-enabled
+  brains; RefWatcher events route to its push debouncer so
+  manual commits coalesce. 8 unit tests + 5 manifest/enclosing
+  tests passing.
+- 2026-05-21: M3 complete — `nous push [msg]` lands in
+  `cmd/nous/push.go` and registered in main.go. EnclosingBrain
+  + commit + push, with untracked/deleted hint, merge/rebase
+  refusal, and the "no empty commits in v1" rule (msg ignored
+  if nothing uncommitted). 7 CLI tests passing.
+- 2026-05-21: M4 complete — atlas/nous/autosave-and-
+  checkpoint.md describes the new surface; pointers from there
+  to all the relevant code files.
+- 2026-05-21: verification status — all touched-package tests
+  green (lib/brain, lib/brainsync, cmd/nous; total of 20 new
+  tests + full existing suites). Sandbox-pre-existing failures
+  in lib/identity (hardcoded /tmp paths + gpg-agent
+  unavailability) are unrelated. End-to-end on a live brain
+  with the daemon running requires operator-side verification
+  on a real VM — not exercisable in this sandbox.
