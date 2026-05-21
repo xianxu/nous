@@ -3,16 +3,19 @@
 #
 # Provides:
 #   make tart        cold-boot $(TART_VM) headless (stops first if
-#                    running), mount $(CURDIR) into the guest at
-#                    /Volumes/My Shared Files/$(REPO_NAME) (read-only),
-#                    rsync-mirror it into ~/repo (writable, always-fresh,
-#                    includes uncommitted host edits), ssh in. Cold-boot
-#                    is the default for mount-cache freshness — see
-#                    ariadne#28 for why.
+#                    running), prepare an APFS clone of $(CURDIR) at
+#                    /tmp/$(TART_VM)-clone (cp -cR; O(1) on APFS),
+#                    mount it writable at /Volumes/My Shared
+#                    Files/$(REPO_NAME), ssh in. ~/repo in the VM is
+#                    a symlink to the writable share. Cold-boot is
+#                    the default for mount-cache freshness — see
+#                    ariadne#28 for why. Clone-based share is the
+#                    successor to rsync — see ariadne#29.
 #   make tart-gui    same but display via macOS Screen Sharing.app
 #                    (--vnc; built-in UI is broken on macOS Tahoe)
-#   make tart-stop   stop $(TART_VM), preserve disk state
-#   make tart-clean  stop + delete $(TART_VM) (base image stays cached)
+#   make tart-stop   stop $(TART_VM); remove its clone
+#   make tart-clean  stop + delete $(TART_VM) + remove its clone
+#                    (base image stays cached)
 #
 # Mount is on by default in every boot target. The mount serves only as
 # the rsync source — `tart-vm-setup.sh` mirrors it into ~/repo on every
@@ -60,9 +63,16 @@ TART_VM        ?= $(REPO_NAME)-$(or $(TART_SUFFIX),test)
 # can be removed by setting GRAPHICS_FLAG := (empty) for tart-gui.
 GRAPHICS_FLAG  ?= --no-graphics
 
-# Always bind-mount $(CURDIR) into the VM at the canonical tag.
+# Host-side APFS clone of the repo, used as the VM's writable share
+# (ariadne#29). cp -cR is metadata-only on APFS — initial cost is O(1)
+# regardless of repo size, and VM writes diverge into the clone via
+# COW without touching the source. Replaces the previous rsync-into-
+# VM-local-fs workflow.
+TART_CLONE_DIR ?= /tmp/$(TART_VM)-clone
+
+# Bind-mount the clone (writable) into the VM at the canonical tag.
 # Overridable to empty on the command line for a no-mount boot.
-RUN_FLAGS      ?= --dir=$(REPO_NAME):$(CURDIR):ro
+RUN_FLAGS      ?= --dir=$(REPO_NAME):$(TART_CLONE_DIR):rw
 
 .PHONY: tart tart-gui tart-stop tart-clean help-tart
 
@@ -70,22 +80,22 @@ help-tart:
 	@printf '%s\n' \
 	"Tart (macOS VMs):" \
 	"  make tart           Cold-boot $(TART_VM) headless (stops first if running)," \
-	"                      mount \$$(CURDIR) at /Volumes/My Shared Files/$(REPO_NAME)" \
-	"                      read-only, rsync-mirror into ~/repo (writable), ssh in." \
-	"                      Cold-boot is the default for mount-cache freshness — see" \
-	"                      ariadne#28. To attach without restart, ssh directly." \
+	"                      prepare APFS clone of \$$(CURDIR) at /tmp/$(TART_VM)-clone," \
+	"                      mount it writable at /Volumes/My Shared Files/$(REPO_NAME)," \
+	"                      ssh in. ~/repo in the VM symlinks to the writable share." \
+	"                      Cold-boot is the default for mount-cache freshness (ariadne#28)." \
+	"                      Clone-based share is the successor to rsync (ariadne#29)." \
+	"                      To attach without restart, ssh directly." \
 	"  make tart-gui       Same but display via macOS Screen Sharing.app" \
-	"  make tart-stop      Stop $(TART_VM), preserve disk state" \
-	"  make tart-clean     Stop + delete $(TART_VM) (base image stays cached)" \
+	"  make tart-stop      Stop $(TART_VM) + remove its clone" \
+	"  make tart-clean     Stop + delete $(TART_VM) + remove its clone (base stays cached)" \
 	"" \
-	"  Mount + mirror happen on every boot — VM's ~/repo is a byte-for-" \
-	"  byte copy of the host worktree (including uncommitted edits)." \
-	"  VM-local changes to ~/repo are wiped on next boot; keep persistent" \
-	"  work outside ~/repo. Skip both entirely with 'make tart RUN_FLAGS='" \
-	"  for a vanilla boot." \
+	"  Writes in the VM diverge into the APFS clone via COW; host source" \
+	"  ($(CURDIR)) stays untouched. Clone wipes on tart-stop / next boot." \
+	"  Skip the mount entirely with 'make tart RUN_FLAGS=' for a vanilla boot." \
 	"" \
 	"  Parallel VMs per repo: 'make tart TART_SUFFIX=emma' → $(REPO_NAME)-emma" \
-	"  (cleanup also takes the suffix: 'make tart-stop TART_SUFFIX=emma')." \
+	"  (each VM gets its own clone at /tmp/$(REPO_NAME)-emma-clone)." \
 	""
 
 # Interactive multi-select to stop OTHER running tart VMs (4-8 GB
@@ -96,6 +106,46 @@ help-tart:
 # Esc, both keep all VMs running.
 define _tart_check_others
 	@bash $(CURDIR)/.tart/scripts/tart-stop-others.sh $(TART_VM) $(TART_BASE)
+endef
+
+# _tart_prepare_clone: APFS-clone $(CURDIR) → $(TART_CLONE_DIR) and
+# strip the dirs that would carry codesign / provenance xattrs (the
+# previous rsync did this via --exclude). Also strips ariadne-local
+# state files (.nous-mode, .nous-plugins) that are operator-host-
+# specific and shouldn't propagate to the VM.
+#
+# cp -cR uses clonefile(2) under the hood on APFS — metadata-only,
+# O(1) regardless of repo size. Falls back to plain cp -R if
+# clonefile fails for any reason (rare; non-APFS volume, etc.).
+define _tart_prepare_clone
+	@echo "==> Preparing APFS clone at $(TART_CLONE_DIR) (write-isolated; replaces rsync)..."
+	@rm -rf "$(TART_CLONE_DIR)"
+	@if ! cp -cR "$(CURDIR)" "$(TART_CLONE_DIR)" 2>/dev/null; then \
+	    echo "  [warn] cp -cR (clonefile) failed; falling back to plain cp -R"; \
+	    cp -R "$(CURDIR)" "$(TART_CLONE_DIR)"; \
+	fi
+	@rm -rf "$(TART_CLONE_DIR)/bin" "$(TART_CLONE_DIR)"/cmd/*/bin
+	@rm -f  "$(TART_CLONE_DIR)/.nous-mode" "$(TART_CLONE_DIR)/.nous-plugins"
+	@echo "  cloned + stripped build artifacts"
+endef
+
+# _tart_gc_orphan_clones: remove any /tmp/*-clone older than 7 days.
+# Safety net for the force-kill case (operator ^C's tart mid-boot,
+# tart-stop doesn't fire, the clone leaks). 7d threshold is
+# conservative — a legitimately-active VM's clone gets refreshed on
+# every cold-boot so its mtime stays current. mtime works on
+# directories created by cp -cR; APFS preserves it as the clone
+# instant.
+define _tart_gc_orphan_clones
+	@find /tmp -maxdepth 1 -name '*-clone' -type d -mtime +7 -prune 2>/dev/null \
+	    -exec rm -rf {} \; 2>/dev/null || true
+endef
+
+# _tart_cleanup_clone: remove the specific clone for $(TART_VM).
+# Called from tart-stop / tart-clean. Idempotent (silent no-op
+# when the clone doesn't exist).
+define _tart_cleanup_clone
+	@rm -rf "$(TART_CLONE_DIR)"
 endef
 
 # `tart stop` returns after sending shutdown, but tart list's State
@@ -212,9 +262,12 @@ tart:
 	    tart stop $(TART_VM); \
 	fi
 	$(call _tart_wait_for_stop)
+	$(call _tart_gc_orphan_clones)
+	$(call _tart_prepare_clone)
 	@if [ -n "$(RUN_FLAGS)" ]; then \
-	    echo "==> Mount: /Volumes/My Shared Files/$(REPO_NAME) (read-only; rsync source)"; \
-	    echo "    Mirror: ~/repo in the VM (writable, always fresh, wipes on each boot)"; \
+	    echo "==> Share: /Volumes/My Shared Files/$(REPO_NAME) (writable; APFS clone)"; \
+	    echo "    VM-side ~/repo symlinks to it. Writes diverge into the clone via APFS"; \
+	    echo "    COW; host source ($(CURDIR)) untouched. Clone wipes on tart-stop / next boot."; \
 	fi
 	$(call _tart_boot_and_ssh)
 
@@ -230,9 +283,10 @@ tart-gui:
 	    tart stop $(TART_VM); \
 	fi
 	$(call _tart_wait_for_stop)
-	@echo "==> Booting with VNC display + local tree mirror"
-	@echo "    Mount: /Volumes/My Shared Files/$(REPO_NAME) (read-only; rsync source)"
-	@echo "    Mirror: ~/repo in the VM (writable, always fresh, wipes on each boot)"
+	$(call _tart_gc_orphan_clones)
+	$(call _tart_prepare_clone)
+	@echo "==> Booting with VNC display + APFS-cloned share"
+	@echo "    Share: /Volumes/My Shared Files/$(REPO_NAME) (writable; APFS clone at $(TART_CLONE_DIR))"
 	@echo "    First-time Screen Sharing: choose 'Standard' in the"
 	@echo "    network-type dialog — 'High Performance' is incompatible"
 	@echo "    with tart's VNC stream on Tahoe (Screen Sharing remembers"
@@ -241,8 +295,10 @@ tart-gui:
 
 tart-stop:
 	@if tart ip $(TART_VM) >/dev/null 2>&1; then tart stop $(TART_VM); fi
+	$(call _tart_cleanup_clone)
 
 tart-clean: tart-stop
 	@if tart list --source local -q 2>/dev/null | grep -qx $(TART_VM); then \
 	    tart delete $(TART_VM); \
 	fi
+	$(call _tart_cleanup_clone)
