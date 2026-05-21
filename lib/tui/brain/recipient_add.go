@@ -407,7 +407,7 @@ func (m recipientAddModel) applyCmd() tea.Cmd {
 		}
 		// gcrypt-participants derives from the manifest at push time
 		// (nous#24); AddCommitPush below handles the sync.
-		if err := brainsync.AddCommitPush(brainPath, fmt.Sprintf("recipient: admit %s", last8)); err != nil {
+		if err := brainsync.AddCommitPush(brainPath, fmt.Sprintf("collaborator: admit %s", last8)); err != nil {
 			return addApplyResultMsg{err: fmt.Errorf("push: %w", err)}
 		}
 		return addApplyResultMsg{last8: last8}
@@ -416,7 +416,7 @@ func (m recipientAddModel) applyCmd() tea.Cmd {
 
 func (m recipientAddModel) View() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render(fmt.Sprintf("admit recipient — %s", m.brainPath)))
+	b.WriteString(titleStyle.Render(fmt.Sprintf("admit collaborator — %s", m.brainPath)))
 	b.WriteString("\n\n")
 
 	switch m.stage {

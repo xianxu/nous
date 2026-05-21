@@ -142,7 +142,7 @@ func (m recipientRemoveModel) updatePick(msg tea.Msg) (recipientRemoveModel, tea
 		}
 		// Hard-fail on last-recipient. Banner-only — operator must esc.
 		if len(m.recipients) <= 1 {
-			m.banner = "refusing to remove the only recipient — would orphan the brain"
+			m.banner = "refusing to remove the only collaborator — would orphan the brain"
 			return m, nil
 		}
 		ri := m.recipients[m.cursor]
@@ -277,7 +277,7 @@ func (m recipientRemoveModel) applyCmd() tea.Cmd {
 		}
 		// gcrypt-participants derives from the manifest at push time
 		// (nous#24); AddCommitPush below handles the sync.
-		if err := brainsync.AddCommitPush(brainPath, fmt.Sprintf("recipient: revoke %s", short)); err != nil {
+		if err := brainsync.AddCommitPush(brainPath, fmt.Sprintf("collaborator: revoke %s", short)); err != nil {
 			return removeApplyResultMsg{err: fmt.Errorf("push: %w", err)}
 		}
 		return removeApplyResultMsg{last8: short}
@@ -286,12 +286,12 @@ func (m recipientRemoveModel) applyCmd() tea.Cmd {
 
 func (m recipientRemoveModel) View() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render(fmt.Sprintf("revoke recipient — %s", m.brainPath)))
+	b.WriteString(titleStyle.Render(fmt.Sprintf("revoke collaborator — %s", m.brainPath)))
 	b.WriteString("\n\n")
 
 	switch m.stage {
 	case removeStagePick:
-		b.WriteString("Pick a recipient to revoke:\n\n")
+		b.WriteString("Pick a collaborator to revoke:\n\n")
 		if len(m.recipients) == 0 {
 			b.WriteString(mutedStyle.Render("  (none)"))
 			b.WriteString("\n")
@@ -336,7 +336,7 @@ func (m recipientRemoveModel) View() string {
 	case removeStageCaveatConfirm:
 		b.WriteString(warnStyle.Render("REVOCATION CAVEAT"))
 		b.WriteString("\n")
-		b.WriteString("  gcrypt re-encrypts on push, so future commits will exclude this recipient.\n")
+		b.WriteString("  gcrypt re-encrypts on push, so future commits will exclude this collaborator.\n")
 		b.WriteString("  However: any gcrypt blob currently in the remote (or in their local clone)\n")
 		b.WriteString("  remains readable to them with their existing key material. True revocation\n")
 		b.WriteString("  requires re-keying the brain (rotate the operator's key + re-encrypt all\n")

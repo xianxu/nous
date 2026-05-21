@@ -96,7 +96,7 @@ func (m detailModel) Update(msg tea.Msg) (detailModel, tea.Cmd) {
 				return m, nil
 			}
 			if len(m.status.Recipients) == 0 {
-				m.banner = "no recipients to remove"
+				m.banner = "no collaborators to remove"
 				return m, nil
 			}
 			return m, func() tea.Msg {
@@ -135,7 +135,7 @@ func (m detailModel) View() string {
 	// "git+gcrypt only" — which IS the sync mechanism — so showing it
 	// in the header was misleading ("am I not syncing?"). Surface only
 	// when a substrate is actually configured.
-	headerLine := fmt.Sprintf("%s · %d recipient(s)", kind, len(s.Manifest.Recipients))
+	headerLine := fmt.Sprintf("%s · %d collaborator(s)", kind, len(s.Manifest.Recipients))
 	if sub := s.Manifest.SyncSubstrate; sub != "" && sub != "none" {
 		headerLine += fmt.Sprintf(" · sync_substrate: %s", sub)
 	}
@@ -144,12 +144,12 @@ func (m detailModel) View() string {
 
 	if s.Mismatch {
 		b.WriteString(warnStyle.Render(
-			"⚠ manifest recipients and gcrypt-participants disagree — run `nous brain recipient list` to inspect"))
+			"⚠ manifest collaborators and gcrypt-participants disagree — run `nous brain recipient list` to inspect"))
 		b.WriteString("\n")
 	}
 
-	// Recipients
-	b.WriteString(sectionHeaderStyle.Render("Recipients"))
+	// Collaborators
+	b.WriteString(sectionHeaderStyle.Render("Collaborators"))
 	b.WriteString("\n")
 	if len(s.Recipients) == 0 {
 		b.WriteString(mutedStyle.Render("  (none)"))
@@ -266,7 +266,7 @@ func (m detailModel) View() string {
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("a  add collaborator    r  remove recipient    c  preview conflicts    esc  back    q  quit"))
+	b.WriteString(helpStyle.Render("a  add collaborator    r  remove collaborator    c  preview conflicts    esc  back    q  quit"))
 	return b.String()
 }
 

@@ -302,7 +302,7 @@ func (m newBrainModel) View() string {
 
 	case newStageIdentity:
 		b.WriteString("Multiple secret keys in your keyring. Which key should anchor\n")
-		b.WriteString("this brain? (You'll be the only recipient at first; admit\n")
+		b.WriteString("this brain? (You'll be the only collaborator at first; admit\n")
 		b.WriteString("others later with `nous brain invite`.)\n\n")
 		for i, k := range m.idKeys {
 			row := fmt.Sprintf("  %s  %s", shortFingerprint(k.Fingerprint), k.UID)
