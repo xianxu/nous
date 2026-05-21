@@ -34,6 +34,12 @@ type Manifest struct {
 	Recipients    []string // GPG fingerprints (full 40-char uppercase hex)
 	SyncSubstrate string   // "syncthing" | "git-daemon" | "none"
 
+	// Autosave controls whether the brainsync daemon auto-commits
+	// tracked-file edits in this brain (debounced) and pushes them on
+	// a slower debounce. Values: "" (unset → on), "on", "off". Use
+	// AutosaveEnabled() instead of comparing the string.
+	Autosave string
+
 	// LegacyMode holds the value of the deprecated `mode:` field when an
 	// existing manifest carries it. Readers don't act on it (shared-vs-
 	// private is derived from len(Recipients)); kept here only so the
@@ -48,6 +54,15 @@ type Manifest struct {
 // AGENTS.md §1's brain-identification block for the rationale.
 func (m Manifest) Shared() bool {
 	return len(m.Recipients) > 1
+}
+
+// AutosaveEnabled reports whether the brainsync daemon should
+// auto-commit + auto-push this brain. Default on — only an explicit
+// `autosave: off` in the manifest disables it. Any other value
+// (including the empty string from a manifest that predates the
+// field) means enabled.
+func (m Manifest) AutosaveEnabled() bool {
+	return strings.ToLower(strings.TrimSpace(m.Autosave)) != "off"
 }
 
 // Read parses the manifest at <brainRoot>/.brain/config.md. Returns an
@@ -135,6 +150,8 @@ func parseManifest(content string) (Manifest, error) {
 			m.SyncSubstrate = unquote(val)
 		case "recipients":
 			m.Recipients = parseList(val)
+		case "autosave":
+			m.Autosave = unquote(val)
 		}
 	}
 	return m, nil
