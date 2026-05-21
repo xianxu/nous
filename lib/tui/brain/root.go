@@ -23,6 +23,7 @@ const (
 	screenRecipientRemove
 	screenNewBrain
 	screenInviteCollab
+	screenAcceptInvite
 )
 
 // cancelNewBrainMsg signals "exit the new-brain flow back to the list,"
@@ -33,14 +34,15 @@ const (
 type cancelNewBrainMsg struct{}
 
 type rootModel struct {
-	current      screen
-	list         listModel
-	detail       detailModel
-	conflict     conflictPreviewModel
-	recipAdd     recipientAddModel
-	recipRemove  recipientRemoveModel
-	newBrain     newBrainModel
-	inviteCollab inviteCollabModel
+	current       screen
+	list          listModel
+	detail        detailModel
+	conflict      conflictPreviewModel
+	recipAdd      recipientAddModel
+	recipRemove   recipientRemoveModel
+	newBrain      newBrainModel
+	inviteCollab  inviteCollabModel
+	acceptInvite  acceptInviteModel
 }
 
 // NewRoot returns the top-level bubbletea model for `nous brain`.
@@ -95,18 +97,15 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, m.detail.Init()
-	case joinSubprocessDoneMsg:
-		// Same pattern as new-brain's subprocess: exit cleanly on
-		// failure so the operator sees the subprocess output in
-		// their normal-screen scrollback rather than getting a terse
-		// "exit status N." On success, refresh the list — the
-		// invitation moves from "pending" to "uncloned" (since join
-		// publishes pubkey but doesn't materialize the brain
-		// locally; the clone is a separate step that the uncloned
-		// row's Enter handler offers).
-		if msg.err != nil {
-			return m, tea.Quit
-		}
+	case launchAcceptInviteMsg:
+		m.current = screenAcceptInvite
+		m.acceptInvite = newAcceptInviteModel(msg.invitation)
+		return m, m.acceptInvite.Init()
+	case acceptInviteDoneMsg:
+		// Whether success or failure/cancel, return to the list and
+		// re-render. On success, the invitation moves from pending
+		// to (collaborator — press enter to clone). On failure,
+		// stays pending; the operator can retry.
 		m.current = screenList
 		m.list = newListModel()
 		return m, m.list.Init()
@@ -178,6 +177,8 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.newBrain, cmd = m.newBrain.Update(msg)
 	case screenInviteCollab:
 		m.inviteCollab, cmd = m.inviteCollab.Update(msg)
+	case screenAcceptInvite:
+		m.acceptInvite, cmd = m.acceptInvite.Update(msg)
 	}
 	return m, cmd
 }
@@ -196,6 +197,8 @@ func (m rootModel) View() string {
 		return m.newBrain.View()
 	case screenInviteCollab:
 		return m.inviteCollab.View()
+	case screenAcceptInvite:
+		return m.acceptInvite.View()
 	default:
 		return m.list.View()
 	}

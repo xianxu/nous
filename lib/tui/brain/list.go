@@ -210,12 +210,6 @@ func isBrainInvitation(inv gh.Invitation) bool {
 
 func (m listModel) Init() tea.Cmd { return nil }
 
-// joinSubprocessDoneMsg signals "the join subprocess returned." Root
-// handles by re-instantiating the list model (so the newly-joined
-// brain disappears from the pending-invitation section and any
-// new local brain shows up after auto-admit + clone).
-type joinSubprocessDoneMsg struct{ err error }
-
 // cloneSubprocessDoneMsg signals "the clone subprocess returned"
 // (Enter on an uncloned-row). Same handling as joinSubprocessDoneMsg:
 // refresh list on success, exit TUI cleanly on failure so the
@@ -243,18 +237,15 @@ func (m listModel) Update(msg tea.Msg) (listModel, tea.Cmd) {
 		it := m.items[m.cursor]
 		switch {
 		case it.isPending:
-			// Pending invitation row → delegate to the CLI's join
-			// flow (which knows how to pick GPG identity, accept
-			// invitation, publish pubkey, etc.).
-			bin, err := os.Executable()
-			if err != nil {
-				bin = "nous"
+			// Pending invitation row → launch the inline accept-
+			// invite TUI flow (no subprocess, no flicker). The
+			// flow handles GPG identity pick, gh.AcceptInvitation,
+			// and the plain-git push of <login>.asc to the keys
+			// branch. No pinentry-using subprocess in the flow, so
+			// safe to inline regardless of SSH session.
+			return m, func() tea.Msg {
+				return launchAcceptInviteMsg{invitation: it.invitation}
 			}
-			cmd := exec.Command(bin, "brain", "join")
-			cmd.Env = os.Environ()
-			return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
-				return joinSubprocessDoneMsg{err: err}
-			})
 		case it.isUncloned:
 			// Accessible-but-not-cloned row → delegate to
 			// `nous brain clone <gcrypt-url> <target>`. Target is
