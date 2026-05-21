@@ -203,9 +203,11 @@ elif command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
     if [ -z "$SSH_PUB" ]; then
         if [ -t 0 ]; then
             email=$(git config --global user.email 2>/dev/null || echo "$(whoami)@$(hostname -s)")
-            info "No SSH key found. Generating ed25519 key with no passphrase..."
+            info "No SSH key found. Generating ed25519 key..."
+            info "ssh-keygen will prompt for a passphrase. Recommended: use the"
+            info "  same passphrase as your GPG key (mentioned in the splash)."
             mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
-            ssh-keygen -t ed25519 -C "$email" -f "$HOME/.ssh/id_ed25519" -N "" >/dev/null
+            ssh-keygen -t ed25519 -C "$email" -f "$HOME/.ssh/id_ed25519"
             SSH_PUB="$HOME/.ssh/id_ed25519.pub"
             ok "SSH key generated at $SSH_PUB."
         else
@@ -213,6 +215,50 @@ elif command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
         fi
     else
         ok "SSH key found: $SSH_PUB."
+    fi
+
+    # Cache the SSH passphrase in macOS Keychain so the brain-sync
+    # daemon can fetch + push to gcrypt::ssh:// remotes without
+    # prompting. `ssh-add --apple-use-keychain` adds the key to the
+    # running ssh-agent AND stores its passphrase in Keychain;
+    # subsequent logins auto-load via the UseKeychain / AddKeysToAgent
+    # ssh-config directives we set below.
+    #
+    # For passphrase-less keys (legacy bootstrap behavior), the
+    # ssh-add is still useful — it loads the key into the agent for
+    # the current session. Idempotent.
+    SSH_KEY="${SSH_PUB%.pub}"
+    if [ -f "$SSH_KEY" ] && command -v ssh-add >/dev/null 2>&1; then
+        info "Loading SSH key into agent + Keychain (so the daemon can use it without prompting)..."
+        if [ "$(uname -s)" = "Darwin" ]; then
+            # macOS: --apple-use-keychain stores passphrase persistently
+            ssh-add --apple-use-keychain "$SSH_KEY" 2>&1 | sed 's/^/  /' || \
+                warn "ssh-add failed (key may already be added; check 'ssh-add -l')."
+        else
+            ssh-add "$SSH_KEY" 2>&1 | sed 's/^/  /' || \
+                warn "ssh-add failed (key may already be added; check 'ssh-add -l')."
+        fi
+        # Ensure ~/.ssh/config has UseKeychain + AddKeysToAgent so
+        # subsequent logins auto-load from Keychain (and the
+        # brain-sync daemon, started by launchd in the user's GUI
+        # session, inherits the ssh-agent socket with the key
+        # already loaded).
+        SSH_CONFIG="$HOME/.ssh/config"
+        if [ "$(uname -s)" = "Darwin" ] && ! grep -q "UseKeychain yes" "$SSH_CONFIG" 2>/dev/null; then
+            info "Adding UseKeychain + AddKeysToAgent to ~/.ssh/config (Host *)..."
+            touch "$SSH_CONFIG"
+            chmod 600 "$SSH_CONFIG"
+            cat >> "$SSH_CONFIG" <<'EOF'
+
+# Added by nous-bootstrap: load SSH keys from macOS Keychain into ssh-agent
+# on session start so launchd-managed daemons (like com.42shots.nous) can
+# use them without interactive passphrase prompts.
+Host *
+  UseKeychain yes
+  AddKeysToAgent yes
+EOF
+            ok "~/.ssh/config updated."
+        fi
     fi
 
     # Check whether the local pubkey is already registered with GitHub.
