@@ -57,6 +57,27 @@ func TestMergeRecipients_SingleRecipientNoGcryptIsNotMismatch(t *testing.T) {
 	}
 }
 
+func TestMergeRecipients_FreshClonedMultiRecipientIsNotMismatch(t *testing.T) {
+	// The ying-on-brain1 case from operator manual test
+	// 2026-05-20: after gcrypt clone of a shared brain, the
+	// local remote.origin.gcrypt-participants is empty even
+	// though the manifest has multiple recipients. The push
+	// wrapper (or nous brain clone's post-clone sync) populates
+	// it; until then both sides legitimately disagree but the
+	// state is harmless and self-healing. Don't warn.
+	out, mismatch := mergeRecipients(
+		[]string{"AAA", "BBB"},
+		nil, // gcrypt-participants empty (fresh clone)
+		nil,
+	)
+	if len(out) != 2 {
+		t.Fatalf("want 2 recipients, got %d: %+v", len(out), out)
+	}
+	if mismatch {
+		t.Errorf("empty gcrypt-participants is not real drift; got mismatch=true")
+	}
+}
+
 func TestMergeRecipients_CaseInsensitiveDedup(t *testing.T) {
 	out, _ := mergeRecipients(
 		[]string{"deadbeef"},

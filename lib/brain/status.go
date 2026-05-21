@@ -237,16 +237,30 @@ func mergeRecipients(manifestFps, gcryptFps []string, annotate func(string) stri
 			InGcrypt:    true,
 		})
 	}
+	// Don't warn when gcrypt-participants is empty: that's either a
+	// single-recipient brain (substrate doesn't need the config) OR
+	// a freshly-cloned shared brain whose local config hasn't been
+	// populated from the manifest yet. In both cases the discrepancy
+	// is harmless and self-healing — the next push (via the #24
+	// push wrapper) will sync from manifest, and a freshly-cloned
+	// brain post-#nous-brain-clone-#853c416 syncs at clone time.
+	// Warning the operator about it just because they haven't
+	// pushed yet is misleading.
+	//
+	// Real drift = both sides non-empty AND they disagree. That's
+	// the case worth surfacing (manifest hand-edited; remote.origin
+	// .gcrypt-participants hand-edited; corruption).
+	if len(gcryptFps) == 0 {
+		return out, false
+	}
 	mismatch := false
 	for _, r := range out {
 		if r.InManifest != r.InGcrypt {
 			// Single-recipient brains commonly have empty gcrypt config
-			// (substrate doesn't need it). Only flag mismatch when there
-			// are 2+ recipients in either source.
-			if len(manifestFps) > 1 || len(gcryptFps) > 1 {
-				mismatch = true
-				break
-			}
+			// (handled above); for non-empty gcrypt, any one-sided
+			// entry is a real divergence.
+			mismatch = true
+			break
 		}
 	}
 	return out, mismatch
