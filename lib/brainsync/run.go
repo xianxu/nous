@@ -30,7 +30,7 @@ import (
 func Run(ctx context.Context, opts RunOptions) error {
 	fetchEvery := opts.FetchEvery
 	if fetchEvery == 0 {
-		fetchEvery = 30 * time.Second
+		fetchEvery = 5 * time.Second
 	}
 	if len(opts.Brains) > 0 {
 		log.Printf("brainsync: static mode — watching %d brain(s)", len(opts.Brains))
@@ -50,7 +50,7 @@ type RunOptions struct {
 	// periodically rescan for new ones.
 	Brains []string
 
-	// FetchEvery is the periodic fetch interval per brain. Zero → 30s.
+	// FetchEvery is the periodic fetch interval per brain. Zero → 5s.
 	FetchEvery time.Duration
 
 	// DiscoverEvery is the auto-mode rescan interval (the cadence at

@@ -108,7 +108,7 @@ nous serve has no TUI.`,
 	cmd.Flags().StringVar(&addr, "addr", charoncli.DefaultListenAddr, "credential proxy listen address")
 	cmd.Flags().StringVar(&auditPath, "audit-log", "", "proxy audit log path (default: stderr)")
 	cmd.Flags().StringSliceVar(&brainPaths, "brain", nil, "absolute path to a shared brain (repeatable; default: auto-discover)")
-	cmd.Flags().DurationVar(&fetchEvery, "fetch-every", 30*time.Second, "brain-sync periodic fetch interval")
+	cmd.Flags().DurationVar(&fetchEvery, "fetch-every", 5*time.Second, "brain-sync periodic fetch interval")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "enable debug logging on both daemons")
 	return cmd
 }
