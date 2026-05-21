@@ -70,6 +70,8 @@ ${CYAN}What this does${RESET}
   • connect to your GitHub as storage for your brain extension
       • register an SSH key with GitHub → asks you to set an ${bold}SSH passphrase${RESET}
       • authenticate the GitHub CLI
+  • build the ${bold}nous${RESET} binary, install it to ${bold}~/.local/bin/nous${RESET}
+  • start the ${bold}nous service${RESET} (brain-sync watcher + credential proxy via launchd)
 
 ${CYAN}You'll set two passphrases${RESET}
   Pick ones you can remember — losing them means losing access. Store in a
@@ -300,10 +302,55 @@ else
     warn "Go not on PATH after bootstrap. Open a new shell and re-check."
 fi
 
+# ── 9. Build the nous binary ─────────────────────────────────────────────────
+# Future: when signed nous releases exist (nous#28), this step will
+# fetch the prebuilt binary into nous/bin/nous instead of compiling
+# from source. For now (and as a developer fallback always),
+# `make nous-build` compiles cmd/nous → nous/bin/nous.
+if [ "${NOUS_BOOTSTRAP_SKIP_BUILD:-}" = "1" ]; then
+    info "Skipping nous binary build (NOUS_BOOTSTRAP_SKIP_BUILD=1)."
+elif command -v go >/dev/null 2>&1; then
+    info "Building nous binary..."
+    (cd "$NOUS_DIR" && make nous-build) || die "make nous-build failed."
+    ok "Built $NOUS_DIR/bin/nous."
+else
+    warn "Go not on PATH; can't build nous binary. After 'brew install go' (in a fresh shell), run:"
+    warn "    cd $NOUS_DIR && make nous-build"
+fi
+
+# ── 10. Install nous to ~/.local/bin/ + start service ────────────────────────
+# Install (copy) the binary to a stable PATH location so the operator
+# can type `nous` directly, and so the launchd plist points at a
+# location that doesn't move when the source tree moves.
+#
+# Service install is idempotent (uninstall+install handles re-runs).
+# After this, `nous service status` should report "installed, running".
+INSTALL_PREFIX="$HOME/.local/bin"
+if [ -f "$NOUS_DIR/bin/nous" ] && [ "${NOUS_BOOTSTRAP_SKIP_SERVICE:-}" != "1" ]; then
+    info "Installing nous → $INSTALL_PREFIX/nous..."
+    mkdir -p "$INSTALL_PREFIX"
+    install -m 0755 "$NOUS_DIR/bin/nous" "$INSTALL_PREFIX/nous"
+    ok "Installed $INSTALL_PREFIX/nous."
+
+    info "Starting nous service (uninstall first for hygiene)..."
+    "$INSTALL_PREFIX/nous" service uninstall >/dev/null 2>&1 || true
+    "$INSTALL_PREFIX/nous" service install
+    "$INSTALL_PREFIX/nous" service status
+fi
+
 echo
 ok "Nous bootstrap complete."
 echo
+echo "What's installed:"
+echo "  $INSTALL_PREFIX/nous           — the nous CLI binary"
+echo "  com.42shots.nous (launchd)     — brain-sync watcher + credential proxy"
+echo
 echo "Next steps:"
-echo "  - Open a new shell so PATH and shell hooks pick up."
-echo "  - Build nous binaries:          make nous-build"
-echo "  - Bootstrap an encrypted brain: nous brain new ../brain"
+echo "  1. Open a new shell so PATH picks up $INSTALL_PREFIX (if not already)."
+echo "  2. Create your first brain:"
+echo "       nous brain                 (TUI; press 'n' for new brain)"
+echo "  3. Open Claude inside that brain:"
+echo "       cd \$(your brain dir) && claude"
+echo
+echo "Other repos (charon/parley.nvim/pair/etc.) can build their own skill"
+echo "binaries with 'make build' — auto-discovers cmd/*/main.go."

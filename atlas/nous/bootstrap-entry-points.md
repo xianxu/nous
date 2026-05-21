@@ -30,16 +30,20 @@ Two commands cover the cold start. The other targets are usually invoked by `boo
 
 ### `make bootstrap` — the umbrella
 
-Runs eight idempotent steps:
+Runs ten idempotent steps:
 
 1. **Xcode CLT** — `xcode-select --install` if missing; polls for completion (up to 20 min).
 2. **Homebrew** — official installer if missing.
 3. **Brewfile** — `brew bundle install --file=Brewfile`. The package set is the source of truth for what nous expects on a Mac.
 4. **GPG identity** — delegates to `scripts/identity.sh`. Skippable via `NOUS_BOOTSTRAP_SKIP_IDENTITY=1`.
 5. **Workflow tools** — delegates to `.openshell/Makefile`'s `sandbox-bootstrap` (`gh auth login`, openshell CLI, mutagen tap). Skippable via `NOUS_BOOTSTRAP_SKIP_OPENSHELL=1`.
-6. **GitHub SSH key** — generates `~/.ssh/id_ed25519` if missing; registers via `gh ssh-key add` if not already on the account. Required for `gcrypt::ssh://...` brain remotes.
+6. **GitHub SSH key** — generates `~/.ssh/id_ed25519` (prompting for passphrase) if missing; registers via `gh ssh-key add` if not already on the account; runs `ssh-add --apple-use-keychain` to cache the passphrase in macOS Keychain; appends `UseKeychain yes`/`AddKeysToAgent yes` to `~/.ssh/config`. Required for `gcrypt::ssh://...` brain remotes; the Keychain hookup is what lets the brain-sync daemon push without prompting.
 7. **fzf shell hook** — `fzf --update-rc`.
 8. **Verify go on PATH.**
+9. **Build the nous binary** — `make nous-build` produces `nous/bin/nous`. Skippable via `NOUS_BOOTSTRAP_SKIP_BUILD=1`. Future (nous#28): fetch a signed prebuilt binary into `nous/bin/nous` so end users don't need a Go toolchain at all.
+10. **Install + start the nous service** — copies `nous/bin/nous` → `~/.local/bin/nous`; runs `nous service uninstall || true; nous service install; nous service status`. Skippable via `NOUS_BOOTSTRAP_SKIP_SERVICE=1`.
+
+After step 10, the operator has a running `com.42shots.nous` launchd service, `nous` on PATH, and is ready to `nous brain` to create their first brain.
 
 Re-running on a complete machine is a no-op. Spec: `workshop/issues/000011-nous-bootstrap.md`.
 
