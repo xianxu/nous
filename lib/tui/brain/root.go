@@ -34,22 +34,31 @@ const (
 type cancelNewBrainMsg struct{}
 
 type rootModel struct {
-	current       screen
-	list          listModel
-	detail        detailModel
-	conflict      conflictPreviewModel
-	recipAdd      recipientAddModel
-	recipRemove   recipientRemoveModel
-	newBrain      newBrainModel
-	inviteCollab  inviteCollabModel
-	acceptInvite  acceptInviteModel
+	current      screen
+	list         listModel
+	detail       detailModel
+	conflict     conflictPreviewModel
+	recipAdd     recipientAddModel
+	recipRemove  recipientRemoveModel
+	newBrain     newBrainModel
+	inviteCollab inviteCollabModel
+	acceptInvite acceptInviteModel
+
+	// listCache holds the most recent gh-fetched data (myLogin,
+	// invitations, repos). Re-entering the list page (ESC from
+	// detail, post-acceptInvite flow, etc.) reuses this cache so
+	// the operator gets an instant render instead of waiting for
+	// 2-3 gh subprocess round-trips. Cleared after operations that
+	// change gh state (accept-invite success, clone success) so
+	// the next list render re-fetches.
+	listCache *listLoadedData
 }
 
 // NewRoot returns the top-level bubbletea model for `nous brain`.
 func NewRoot() tea.Model {
 	return rootModel{
 		current: screenList,
-		list:    newListModel(),
+		list:    newListModel(nil),
 	}
 }
 
@@ -105,9 +114,13 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Whether success or failure/cancel, return to the list and
 		// re-render. On success, the invitation moves from pending
 		// to (collaborator — press enter to clone). On failure,
-		// stays pending; the operator can retry.
+		// stays pending; the operator can retry. Invalidate the
+		// cache either way — the invitation set may have changed
+		// (success consumes it) and we want the next render to
+		// reflect ground truth.
+		m.listCache = nil
 		m.current = screenList
-		m.list = newListModel()
+		m.list = newListModel(nil)
 		return m, m.list.Init()
 	case cloneSubprocessDoneMsg:
 		// Same shape as joinSubprocessDoneMsg. On success the
@@ -118,8 +131,11 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			return m, tea.Quit
 		}
+		// Local manifests changed; remote uncloned-set may also no
+		// longer include this repo. Invalidate the cache.
+		m.listCache = nil
 		m.current = screenList
-		m.list = newListModel()
+		m.list = newListModel(nil)
 		return m, m.list.Init()
 	case launchNewBrainMsg:
 		m.current = screenNewBrain
@@ -133,8 +149,13 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		_ = msg
 		return m, nil
 	case cancelNewBrainMsg:
+		// New brain may have been created; local manifests changed.
+		// Invalidate cache so the next render re-fetches gh data
+		// (and recomputes the localFullNames exclusion against the
+		// new brain's origin URL).
+		m.listCache = nil
 		m.current = screenList
-		m.list = newListModel()
+		m.list = newListModel(nil)
 		return m, m.list.Init()
 	case recipientAddedMsg, recipientRemovedMsg, cancelRecipientFlowMsg:
 		// Recipient flow ended (success/failure/cancel). Return to the
@@ -156,9 +177,22 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.detail.Init()
 	case popToListMsg:
+		// Plain back-navigation (ESC from detail / conflict preview).
+		// Use the cached gh data when present — local manifests
+		// always re-discovered, so a newly-created brain still
+		// shows. This is the win that makes ESC instant.
 		m.current = screenList
-		m.list = newListModel()
+		m.list = newListModel(m.listCache)
 		return m, m.list.Init()
+	case listLoadedMsg:
+		// Capture the async-load payload as the cache before
+		// dispatching to the list model. The list's own Update
+		// will fold it into items.
+		data := msg.data
+		m.listCache = &data
+		var cmd tea.Cmd
+		m.list, cmd = m.list.Update(msg)
+		return m, cmd
 	}
 
 	var cmd tea.Cmd

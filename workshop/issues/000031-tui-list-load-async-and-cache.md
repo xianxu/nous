@@ -121,3 +121,21 @@ Two changes, no new conceptual surface:
   noticed slow ESC from detail; root cause was three synchronous
   gh subprocess calls in newListModel + full reload on every
   navigation.
+- 2026-05-21: M1+M2 complete in one slice — list.go split:
+  newListModel(cache) is now filesystem-only; loadRemoteCmd()
+  runs the three gh calls and produces listLoadedMsg; Update
+  folds in the data + flips loadingRemote off. rootModel gains
+  listCache field; popToListMsg passes the cache (instant render
+  on ESC); acceptInviteDoneMsg / cloneSubprocessDoneMsg /
+  cancelNewBrainMsg invalidate the cache before reconstruction.
+  'r' key triggers manual refresh.
+- 2026-05-21: M3 complete — 4 new tests pinning the contract:
+  newListModel(nil) doesn't block on gh (wall-clock asserted at
+  <200ms); listLoadedMsg flips loadingRemote off and populates
+  myLogin; popToListMsg with cache present renders instantly;
+  acceptInviteDoneMsg clears the cache. The original
+  TestRoot_DetailEscPopsToList from main now runs in 0.00s
+  instead of 2.88s — concrete evidence the gh-subprocess block
+  is gone.
+- 2026-05-21: status = ready to ship. Operator-side verification
+  (instant ESC on real `nous brain`) requires rebuild.

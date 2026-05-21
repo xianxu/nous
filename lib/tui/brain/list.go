@@ -72,29 +72,84 @@ type listModel struct {
 	cursor  int
 	err     error  // shown in View when non-nil; drill-in disabled
 	myLogin string // auth'd github user; "" when gh outage
+
+	// loadingRemote is true while the async fetch of gh data is in
+	// flight (initial-load with no cache, or 'r' refresh). The view
+	// renders a subtle "loading collaborators..." line while true so
+	// the operator knows more rows may appear shortly.
+	loadingRemote bool
 }
 
-func newListModel() listModel {
+// listLoadedData carries the gh-fetched data that we cache on
+// rootModel so navigating back to the list (e.g. ESC from detail)
+// doesn't re-run the network. Holds the raw remote data, not
+// rebuilt list items — local manifests can change between
+// navigations (operator created/deleted a brain), so items must be
+// recomputed against the fresh local set on each list construction.
+type listLoadedData struct {
+	myLogin     string
+	invitations []gh.Invitation
+	repos       []gh.UserRepo
+}
+
+// listLoadedMsg is the result of the async load triggered by Init
+// (or 'r' refresh). The list model folds the payload into its
+// items; the root model captures it as the new cache.
+type listLoadedMsg struct {
+	data listLoadedData
+}
+
+// newListModel builds the list model. When `cache` is non-nil
+// (re-entering the list via popToListMsg with a prior load in
+// hand), the items are computed immediately from local manifests +
+// the cached gh data and Init returns nil. When `cache` is nil
+// (first entry to the TUI, or after explicit refresh / cache
+// invalidation), only local-brain items are built synchronously;
+// Init returns the async load Cmd, and listLoadedMsg later folds
+// in the remote rows.
+//
+// Splitting the model this way keeps the constructor filesystem-
+// only (DiscoverAll is fast) and pushes the slow `gh` subprocess
+// calls off the bubbletea event loop.
+func newListModel(cache *listLoadedData) listModel {
 	manifests, err := libbrain.DiscoverAll()
 	if err != nil {
 		return listModel{err: err}
 	}
-	// Resolve auth'd login once for all the IsOperator probes. Empty
-	// on outage — marker just doesn't render, consistent with the CLI
-	// list's behavior.
-	myLogin, _ := gh.AuthLogin()
+	if cache == nil {
+		// Render immediately with just local brains; the async load
+		// completes via Init() and folds in invitations + uncloned.
+		items := buildLocalItems(manifests, "")
+		return listModel{items: items, loadingRemote: true}
+	}
+	items := buildAllItems(manifests, *cache)
+	return listModel{items: items, myLogin: cache.myLogin}
+}
 
+// buildLocalItems builds list items for the local brains only,
+// applying the operator marker if myLogin is non-empty.
+func buildLocalItems(manifests []libbrain.Manifest, myLogin string) []listItem {
 	items := make([]listItem, 0, len(manifests))
 	for _, m := range manifests {
-		items = append(items, listItem{
-			manifest:   m,
-			isOperator: libbrain.IsOperator(m.Path, myLogin),
-		})
+		isOp := false
+		if myLogin != "" {
+			isOp = libbrain.IsOperator(m.Path, myLogin)
+		}
+		items = append(items, listItem{manifest: m, isOperator: isOp})
 	}
-	// Local brains sorted by basename for stability.
 	sort.Slice(items, func(i, j int) bool {
 		return filepath.Base(items[i].manifest.Path) < filepath.Base(items[j].manifest.Path)
 	})
+	return items
+}
+
+// buildAllItems builds the full item list: local brains (with
+// IsOperator marker), then pending invitations, then accessible-
+// but-not-cloned repos. Pure function over local manifests + the
+// cached remote payload — called from newListModel (cache hit
+// path) and from listLoadedMsg handling (post-async-load path).
+func buildAllItems(manifests []libbrain.Manifest, data listLoadedData) []listItem {
+	items := buildLocalItems(manifests, data.myLogin)
 
 	// Build a set of github full_names for local brains so we can
 	// exclude them from the uncloned probe below. Local-brain remotes
@@ -109,60 +164,67 @@ func newListModel() listModel {
 		}
 	}
 
-	// Append pending brain invitations after local brains. Best-
-	// effort: a gh outage shouldn't block the list view — invitations
-	// just don't render. Filter to brain projects via the same
-	// description/topic markers nous brain join uses (lives in
-	// brain_join.go in package main; we duplicate the predicate
-	// here as `isBrainInvitation` to avoid a TUI → cmd/nous
-	// dependency).
+	// Pending brain invitations. Filter to brain projects via the
+	// description/topic markers nous brain join uses.
 	pendingFullNames := map[string]bool{}
-	if invites, ierr := gh.PendingInvitations(); ierr == nil {
-		brainInvites := make([]gh.Invitation, 0, len(invites))
-		for _, inv := range invites {
-			if isBrainInvitation(inv) {
-				brainInvites = append(brainInvites, inv)
-				pendingFullNames[strings.ToLower(inv.Repository.FullName)] = true
-			}
+	brainInvites := make([]gh.Invitation, 0, len(data.invitations))
+	for _, inv := range data.invitations {
+		if isBrainInvitation(inv) {
+			brainInvites = append(brainInvites, inv)
+			pendingFullNames[strings.ToLower(inv.Repository.FullName)] = true
 		}
-		sort.Slice(brainInvites, func(i, j int) bool {
-			return brainInvites[i].Repository.FullName < brainInvites[j].Repository.FullName
-		})
-		for _, inv := range brainInvites {
-			items = append(items, listItem{invitation: inv, isPending: true})
-		}
+	}
+	sort.Slice(brainInvites, func(i, j int) bool {
+		return brainInvites[i].Repository.FullName < brainInvites[j].Repository.FullName
+	})
+	for _, inv := range brainInvites {
+		items = append(items, listItem{invitation: inv, isPending: true})
 	}
 
 	// Accessible-but-not-cloned: brain repos the operator has github
 	// access to but doesn't have a local manifest for. Catches the
-	// interim state between "I accepted the invitation" (consumed
-	// from PendingInvitations) and "I ran nous brain clone." Without
-	// this, brains visually disappear at that exact transition —
-	// exactly what bit ying in nous#27's first manual repro.
-	if repos, rerr := gh.UserRepos(); rerr == nil {
-		brainRepos := make([]gh.UserRepo, 0, len(repos))
-		for _, r := range repos {
-			if !isBrainRepo(r) {
-				continue
-			}
-			fullLower := strings.ToLower(r.FullName)
-			if localFullNames[fullLower] {
-				continue // already a local brain
-			}
-			if pendingFullNames[fullLower] {
-				continue // still pending invite; rendered above
-			}
-			brainRepos = append(brainRepos, r)
+	// interim state between "I accepted the invitation" and "I ran
+	// nous brain clone." Without this, brains visually disappear at
+	// that exact transition — exactly what bit ying in nous#27.
+	brainRepos := make([]gh.UserRepo, 0, len(data.repos))
+	for _, r := range data.repos {
+		if !isBrainRepo(r) {
+			continue
 		}
-		sort.Slice(brainRepos, func(i, j int) bool {
-			return brainRepos[i].FullName < brainRepos[j].FullName
-		})
-		for _, r := range brainRepos {
-			items = append(items, listItem{uncloned: r, isUncloned: true})
+		fullLower := strings.ToLower(r.FullName)
+		if localFullNames[fullLower] {
+			continue
 		}
+		if pendingFullNames[fullLower] {
+			continue
+		}
+		brainRepos = append(brainRepos, r)
 	}
+	sort.Slice(brainRepos, func(i, j int) bool {
+		return brainRepos[i].FullName < brainRepos[j].FullName
+	})
+	for _, r := range brainRepos {
+		items = append(items, listItem{uncloned: r, isUncloned: true})
+	}
+	return items
+}
 
-	return listModel{items: items, myLogin: myLogin}
+// loadRemoteCmd is the async fetch of gh data that previously
+// blocked newListModel. Returns a tea.Cmd suitable for Init() or
+// for an explicit 'r' refresh. Errors are absorbed into empty
+// payloads — a gh outage shouldn't break the list view, it should
+// just mean invitations / uncloned rows don't render.
+func loadRemoteCmd() tea.Cmd {
+	return func() tea.Msg {
+		myLogin, _ := gh.AuthLogin()
+		invites, _ := gh.PendingInvitations()
+		repos, _ := gh.UserRepos()
+		return listLoadedMsg{data: listLoadedData{
+			myLogin:     myLogin,
+			invitations: invites,
+			repos:       repos,
+		}}
+	}
 }
 
 // isBrainRepo applies the same brain-marker filter to a UserRepo as
@@ -208,7 +270,12 @@ func isBrainInvitation(inv gh.Invitation) bool {
 	return false
 }
 
-func (m listModel) Init() tea.Cmd { return nil }
+func (m listModel) Init() tea.Cmd {
+	if m.loadingRemote {
+		return loadRemoteCmd()
+	}
+	return nil
+}
 
 // cloneSubprocessDoneMsg signals "the clone subprocess returned"
 // (Enter on an uncloned-row). Same handling as joinSubprocessDoneMsg:
@@ -217,11 +284,42 @@ func (m listModel) Init() tea.Cmd { return nil }
 type cloneSubprocessDoneMsg struct{ err error }
 
 func (m listModel) Update(msg tea.Msg) (listModel, tea.Cmd) {
+	if lm, ok := msg.(listLoadedMsg); ok {
+		// Fold remote data into items. Re-discover local manifests
+		// rather than relying on m.items so a newly-created brain
+		// during the load window shows up correctly.
+		manifests, derr := libbrain.DiscoverAll()
+		if derr != nil {
+			m.err = derr
+			m.loadingRemote = false
+			return m, nil
+		}
+		m.items = buildAllItems(manifests, lm.data)
+		m.myLogin = lm.data.myLogin
+		m.loadingRemote = false
+		// Clamp cursor if items shrank (unlikely on load, but cheap).
+		if m.cursor >= len(m.items) {
+			m.cursor = len(m.items) - 1
+		}
+		if m.cursor < 0 {
+			m.cursor = 0
+		}
+		return m, nil
+	}
 	keyMsg, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return m, nil
 	}
 	switch keyMsg.String() {
+	case "r":
+		// Manual refresh: re-issue the async load. Keeps current
+		// items rendered until the new data arrives — operator gets
+		// a non-blank screen while the gh calls run.
+		if !m.loadingRemote {
+			m.loadingRemote = true
+			return m, loadRemoteCmd()
+		}
+		return m, nil
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
@@ -303,7 +401,11 @@ func (m listModel) View() string {
 		return b.String()
 	}
 	if len(m.items) == 0 {
-		b.WriteString(mutedStyle.Render("(no brains found under workspace root)"))
+		if m.loadingRemote {
+			b.WriteString(mutedStyle.Render("loading collaborators..."))
+		} else {
+			b.WriteString(mutedStyle.Render("(no brains found under workspace root)"))
+		}
 		b.WriteString("\n\n")
 		b.WriteString(helpStyle.Render("n  create one    q/esc  quit"))
 		return b.String()
@@ -330,10 +432,14 @@ func (m listModel) View() string {
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
+	if m.loadingRemote {
+		b.WriteString(mutedStyle.Render("  loading collaborators..."))
+		b.WriteString("\n")
+	}
 	if m.myLogin != "" {
 		b.WriteString(mutedStyle.Render("  (* = owner)"))
 		b.WriteString("\n")
 	}
-	b.WriteString(helpStyle.Render("↑↓/jk  navigate    enter  drill in    n  new brain    q/esc  quit"))
+	b.WriteString(helpStyle.Render("↑↓/jk  navigate    enter  drill in    n  new brain    r  refresh    q/esc  quit"))
 	return b.String()
 }
