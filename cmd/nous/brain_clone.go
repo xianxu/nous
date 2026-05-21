@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -130,10 +131,27 @@ Args:
 				}
 				return fmt.Errorf("git clone: %w", err)
 			}
-			// No explicit gcrypt-participants sync needed here: the
-			// brainsync push wrapper syncs from the manifest before
-			// every push (nous#24). The local config is stale until
-			// the first push, but nothing reads it before then.
+			// Sync gcrypt-participants from the freshly-cloned
+			// manifest. The push wrapper (nous#24) would do this on
+			// the first push, but the brain detail TUI reads the
+			// local gcrypt-participants config to compute its
+			// "manifest and gcrypt-participants disagree" warning —
+			// which fires noisily on a freshly-cloned shared brain
+			// that hasn't pushed yet. One-shot sync at clone time
+			// quiets the cosmetic warning AND leaves the local
+			// state internally consistent.
+			cloneTarget := targetDir
+			if cloneTarget == "" {
+				// git clone default: basename of URL minus `.git`.
+				plainURL := strings.TrimPrefix(gcryptURL, "gcrypt::")
+				cloneTarget = strings.TrimSuffix(filepath.Base(plainURL), ".git")
+			}
+			if err := brain.SyncGcryptParticipantsFromManifest(cloneTarget); err != nil {
+				// Best-effort: a sync failure post-clone shouldn't
+				// fail the clone (brain is functional; warning is
+				// cosmetic). Surface for visibility though.
+				fmt.Fprintf(out, "  warning: sync gcrypt-participants from manifest: %v\n", err)
+			}
 			return nil
 		},
 	}
