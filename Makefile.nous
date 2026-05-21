@@ -5,14 +5,19 @@
 # into a consuming repo (e.g., brain/Makefile.nous → ../nous/Makefile.nous).
 # `realpath` follows symlinks; `lastword $(MAKEFILE_LIST)` is the path of the
 # Makefile currently being processed.
-# abspath rather than realpath: when nous is accessed via a symlink
-# (e.g., ~/repo in the tart VM points to /Volumes/My Shared Files/nous),
-# we want to PRESERVE the symlink path, not resolve through it. Resolving
-# lands us on a path with spaces ("/Volumes/My Shared Files/..."), which
-# breaks unquoted shell invocations downstream. abspath makes the path
-# absolute without symlink resolution. (Even with the quote-every-NOUS_DIR
-# discipline below, the symlink-preserving variant is the cleaner choice.)
-NOUS_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+# Compute NOUS_DIR via a shell subprocess rather than make's built-in
+# path functions (abspath/realpath/dir). Reason: make's path functions
+# operate on whitespace-tokenized values; any path with a space in it
+# (notably the tart VM's `/Volumes/My Shared Files/<repo>/` mount point,
+# which ~/repo symlinks through) gets fragmented and produces garbage
+# like `/Volumes/ ./ Files/...`.
+#
+# The shell version: cd into the dir-of-Makefile.nous (quoted, handles
+# spaces) and emit pwd -L. pwd -L preserves the symlink path the operator
+# cd'd through (vs `pwd -P` which resolves) — so inside the VM, NOUS_DIR
+# becomes ~/repo/ (no spaces) rather than the underlying mount path. On
+# the host (no symlinks involved) it's identical to the previous result.
+NOUS_DIR := $(shell cd '$(dir $(lastword $(MAKEFILE_LIST)))' && pwd -L)/
 
 .PHONY: nous-build nous-sign nous-notarize nous-dev nous-install nous-install-notarized nous-uninstall test clean trim identity moveto cloneto new-brain nous-bootstrap nous-test-bootstrap nous-test-snapshot nous-test-roundtrip nous-test-brain-sync
 
