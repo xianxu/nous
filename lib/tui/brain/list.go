@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	libbrain "github.com/xianxu/nous/lib/brain"
 	"github.com/xianxu/nous/lib/gh"
+	"github.com/xianxu/nous/lib/workspace"
 )
 
 // drillInMsg signals "navigate to the detail view for brain at path."
@@ -256,15 +257,26 @@ func (m listModel) Update(msg tea.Msg) (listModel, tea.Cmd) {
 			})
 		case it.isUncloned:
 			// Accessible-but-not-cloned row → delegate to
-			// `nous brain clone <gcrypt-url>`. CLI handles
-			// BootstrapPubkeys + the gcrypt clone + the
-			// missing-operator-pubkey diagnostic from nous#27 M2.
+			// `nous brain clone <gcrypt-url> <target>`. Target is
+			// always <workspace-root>/<repo-basename> — brains live
+			// as peers of nous, never inside the CWD where the TUI
+			// happened to launch. The repo-basename mirrors github's
+			// default clone behavior; workspace.Root resolves
+			// $WORKSPACE_ROOT → $NOUS_DIR's parent → $HOME/workspace.
 			bin, err := os.Executable()
 			if err != nil {
 				bin = "nous"
 			}
+			target := ""
+			if root, rerr := workspace.Root(); rerr == nil {
+				target = filepath.Join(root, it.uncloned.Name)
+			}
 			gcryptURL := "gcrypt::" + it.uncloned.CloneSSHURL()
-			cmd := exec.Command(bin, "brain", "clone", gcryptURL)
+			args := []string{"brain", "clone", gcryptURL}
+			if target != "" {
+				args = append(args, target)
+			}
+			cmd := exec.Command(bin, args...)
 			cmd.Env = os.Environ()
 			return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
 				return cloneSubprocessDoneMsg{err: err}
