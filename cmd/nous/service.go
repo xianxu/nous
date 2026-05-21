@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/xianxu/nous/lib/brainsync"
 	"github.com/xianxu/nous/lib/service"
+	"github.com/xianxu/nous/lib/workspace"
 )
 
 // serviceCmdImpl is the `nous service` cluster. One install/start/stop
@@ -150,14 +151,26 @@ func runServiceInstall(out io.Writer) error {
 	// The brief M4-era com.xianxu.nous label (renamed to
 	// com.42shots.nous before any operator ran it for real, but
 	// belt-and-braces in case anyone did).
-	if oldUnified, mgrErr := service.NewLabeled("com.xianxu.nous", "nous.log", ""); mgrErr == nil {
+	if oldUnified, mgrErr := service.NewLabeled("com.xianxu.nous", "nous.log", nil); mgrErr == nil {
 		_ = oldUnified.Stop()
 		if err := oldUnified.Uninstall(); err == nil {
 			fmt.Fprintln(out, "  [ok] pre-rename com.xianxu.nous plist removed")
 		}
 	}
 
-	unifiedMgr, err := service.NewUnified()
+	// Resolve workspace root in the operator's interactive context
+	// (where ~/repo symlinks preserve correctly, the binary path
+	// reflects what the operator typed, etc.) and persist into the
+	// plist. The daemon at launch reads WORKSPACE_ROOT from the
+	// plist's EnvironmentVariables — bypasses workspace.Root's
+	// binary-path heuristic, which lands on the wrong dir when the
+	// binary is launched by launchd at its fully-resolved absolute
+	// path (tart-VM case where ~/repo points into /Volumes/...).
+	extraEnv := map[string]string{}
+	if root, err := workspace.Root(); err == nil {
+		extraEnv["WORKSPACE_ROOT"] = root
+	}
+	unifiedMgr, err := service.NewUnifiedWithEnv(extraEnv)
 	if err != nil {
 		return fmt.Errorf("unified service manager: %w", err)
 	}
@@ -249,7 +262,7 @@ real failures surface.`,
 			brainSyncMgr, mgrErr := brainsync.NewServiceManager()
 			tryUninstall("com.xianxu.brain-sync", brainSyncMgr, mgrErr)
 
-			oldUnified, mgrErr := service.NewLabeled("com.xianxu.nous", "nous.log", "")
+			oldUnified, mgrErr := service.NewLabeled("com.xianxu.nous", "nous.log", nil)
 			tryUninstall("com.xianxu.nous (pre-rename)", oldUnified, mgrErr)
 
 			return firstErr
@@ -319,7 +332,7 @@ func serviceStatusCmdImpl() *cobra.Command {
 			}{
 				{"com.charon.proxy (legacy)", service.New},
 				{"com.xianxu.nous (pre-rename)", func() (service.Manager, error) {
-					return service.NewLabeled("com.xianxu.nous", "nous.log", "")
+					return service.NewLabeled("com.xianxu.nous", "nous.log", nil)
 				}},
 			}
 			for _, l := range legacy {

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/template"
 )
@@ -30,15 +31,13 @@ const plistTpl = `<?xml version="1.0" encoding="UTF-8"?>
     <string>{{.LogPath}}</string>
     <key>StandardErrorPath</key>
     <string>{{.LogPath}}</string>
-{{- if .EnvPath}}
+{{- if .EnvKeys}}
     <key>EnvironmentVariables</key>
     <dict>
-        <!-- launchd's default PATH lacks /opt/homebrew/bin; without it
-             git can't find git-remote-gcrypt, gnupg, etc. Needed by the
-             unified nous serve (which runs brainsync as a goroutine)
-             and by brain-sync standalone. -->
-        <key>PATH</key>
-        <string>{{.EnvPath}}</string>
+{{- range .EnvKeys}}
+        <key>{{.}}</key>
+        <string>{{index $.Env .}}</string>
+{{- end}}
     </dict>
 {{- end}}
 </dict>
@@ -53,8 +52,8 @@ const plistTpl = `<?xml version="1.0" encoding="UTF-8"?>
 // (com.xianxu.nous, M5).
 type launchdManager struct {
 	Label   string
-	LogName string // basename in ~/Library/Logs/
-	EnvPath string // optional PATH override; empty → omit EnvironmentVariables block
+	LogName string            // basename in ~/Library/Logs/
+	Env     map[string]string // EnvironmentVariables block; empty/nil → omit
 }
 
 func (l *launchdManager) plistPath() string {
@@ -87,18 +86,27 @@ func (l *launchdManager) Install(binary string, args []string) error {
 	}
 	defer f.Close()
 
+	// Sorted env keys so the rendered plist is deterministic across
+	// runs (helpful for diffing the plist + cache-friendliness).
+	envKeys := make([]string, 0, len(l.Env))
+	for k := range l.Env {
+		envKeys = append(envKeys, k)
+	}
+	sort.Strings(envKeys)
 	data := struct {
 		Label   string
 		Binary  string
 		Args    []string
 		LogPath string
-		EnvPath string
+		Env     map[string]string
+		EnvKeys []string
 	}{
 		Label:   l.Label,
 		Binary:  absBinary,
 		Args:    args,
 		LogPath: l.logPath(),
-		EnvPath: l.EnvPath,
+		Env:     l.Env,
+		EnvKeys: envKeys,
 	}
 	if err := tmpl.Execute(f, data); err != nil {
 		return err
@@ -148,7 +156,11 @@ func (l *launchdManager) Status() (string, error) {
 		if strings.Contains(line, "PID") {
 			parts := strings.SplitN(line, "=", 2)
 			if len(parts) == 2 {
-				pid := strings.TrimSpace(parts[1])
+				// launchctl list emits a plist-ish dict: `"PID" = 1234;`.
+				// Strip whitespace plus the trailing `;` (and any quotes
+				// for value-side quoting, though PID is unquoted in
+				// practice) so the displayed status is a bare integer.
+				pid := strings.Trim(strings.TrimSpace(parts[1]), `;" `)
 				if pid != "0" && pid != "" {
 					return fmt.Sprintf("running (PID %s)", pid), nil
 				}
