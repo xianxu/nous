@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/xianxu/nous/lib/gh"
 )
 
 // Status aggregates the state a human wants to see when they drill into
@@ -52,6 +54,17 @@ type Status struct {
 	// brainsync conflict-file convention (`*.conflict-<peer>-<utc>.<ext>`).
 	// Empty slice = no conflicts.
 	ConflictFiles []string
+
+	// PendingInvitations lists GitHub repo invitations the operator
+	// (or another admin) has sent that the invitee hasn't accepted
+	// yet. Visible only when the operator has admin/push access on
+	// the repo (GitHub gates the endpoint); empty otherwise.
+	//
+	// Surfaces the limbo state between `nous brain` "invite
+	// collaborator" succeeding and the invitee actually accepting +
+	// auto-admit running on this peer. Without this, the operator
+	// has no in-TUI signal that "I invited X" actually landed.
+	PendingInvitations []gh.RepoInvitation
 }
 
 // RecipientInfo describes one recipient slot for the drill-in.
@@ -101,6 +114,18 @@ func LoadStatus(brainRoot string) (Status, error) {
 
 	// Conflict files.
 	s.ConflictFiles = findConflictFiles(abs)
+
+	// Pending GitHub invitations the operator sent on this repo.
+	// Best-effort: only attempt when origin is a github URL we can
+	// parse; swallow gh errors (no auth / not an admin / outage) so
+	// status load still succeeds with PendingInvitations==nil.
+	if s.OriginURL != "" {
+		if owner, repo, err := GitHubOwnerRepo(s.OriginURL); err == nil {
+			if invs, err := gh.RepoPendingInvitations(owner, repo); err == nil {
+				s.PendingInvitations = invs
+			}
+		}
+	}
 
 	return s, nil
 }
@@ -177,7 +202,7 @@ func readLastCommit(brainRoot string) CommitInfo {
 			ci.When = time.Unix(secs, 0)
 		}
 	}
-	ci.RelTime = humanizeDuration(time.Since(ci.When))
+	ci.RelTime = HumanizeDuration(time.Since(ci.When))
 	return ci
 }
 
@@ -267,10 +292,13 @@ func mergeRecipients(manifestFps, gcryptFps []string, annotate func(string) stri
 }
 
 // humanizeDuration renders a duration as a coarse human string:
+// HumanizeDuration formats a time.Duration as a coarse "X ago" string:
 // "12s ago", "5m ago", "3h ago", "2d ago", "3w ago". Coarseness
 // matches what operators want at a glance — exact timestamps are
-// in CommitInfo.When for callers that need them.
-func humanizeDuration(d time.Duration) string {
+// in CommitInfo.When for callers that need them. Exported so the
+// brain TUI (and any future consumer that wants the same look-and-
+// feel) can format other timestamps consistently.
+func HumanizeDuration(d time.Duration) string {
 	if d < 0 {
 		d = -d
 	}

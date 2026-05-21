@@ -3,6 +3,7 @@ package brain
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	libbrain "github.com/xianxu/nous/lib/brain"
@@ -159,6 +160,29 @@ func (m detailModel) View() string {
 		annot = styledAnnotation(annot)
 		flags := recipientFlags(r)
 		b.WriteString(fmt.Sprintf("  %s  %s %s\n", shortFP(r.Fingerprint), annot, flags))
+	}
+
+	// Pending invitations the operator sent that aren't yet
+	// accepted. Rendered only when there's at least one — keeps the
+	// detail page quiet on the common (no-pending) path. Suppressed
+	// entirely when the gh probe couldn't see the endpoint (no admin
+	// access on the repo, gh outage, non-github origin).
+	if len(s.PendingInvitations) > 0 {
+		b.WriteString(sectionHeaderStyle.Render("Pending invitations"))
+		b.WriteString("\n")
+		for _, inv := range s.PendingInvitations {
+			line := "  " + inv.Invitee.Login
+			if inv.CreatedAt != "" {
+				if t, err := time.Parse(time.RFC3339, inv.CreatedAt); err == nil {
+					line += "  " + mutedStyle.Render("(invited "+libbrain.HumanizeDuration(time.Since(t))+")")
+				}
+			}
+			if inv.Expired {
+				line += "  " + warnStyle.Render("[expired]")
+			}
+			b.WriteString(line)
+			b.WriteString("\n")
+		}
 	}
 
 	// Sync

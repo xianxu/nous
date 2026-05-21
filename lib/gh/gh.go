@@ -235,6 +235,38 @@ func UserRepos() ([]UserRepo, error) {
 	return repos, nil
 }
 
+// RepoInvitation is one pending invitation the operator (or another
+// admin on the repo) sent that the invitee hasn't accepted yet.
+// Mirrors GitHub's response to GET /repos/{owner}/{repo}/invitations.
+type RepoInvitation struct {
+	ID        int                    `json:"id"`
+	Invitee   struct{ Login string } `json:"invitee"`
+	Inviter   struct{ Login string } `json:"inviter"`
+	CreatedAt string                 `json:"created_at"`
+	Expired   bool                   `json:"expired"`
+}
+
+// RepoPendingInvitations lists invitations the operator (or other
+// repo admins) has sent for this repo that haven't been
+// accepted/declined yet. Surfaces the operator-side limbo state
+// between "I invited X" and "X accepted + auto-admit ran" so the
+// brain TUI can show invited-but-not-yet-collaborating peers.
+//
+// Requires push or admin access on the repo (GitHub returns 404
+// otherwise). Errors are returned to the caller; nil slice means
+// the call succeeded with no pending invitations.
+func RepoPendingInvitations(owner, repo string) ([]RepoInvitation, error) {
+	out, err := run("api", "--paginate", fmt.Sprintf("repos/%s/%s/invitations", owner, repo))
+	if err != nil {
+		return nil, err
+	}
+	var invs []RepoInvitation
+	if err := json.Unmarshal(out, &invs); err != nil {
+		return nil, fmt.Errorf("parse repo invitations: %w", err)
+	}
+	return invs, nil
+}
+
 // DeclineInvitation declines an invitation. Symmetric with
 // AcceptInvitation. Not used in the happy-path flow but useful for
 // the operator-tooling cases where an invite shouldn't actually be

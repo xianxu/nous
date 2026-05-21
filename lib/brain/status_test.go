@@ -105,8 +105,8 @@ func TestHumanizeDuration_BoundaryUnits(t *testing.T) {
 		{-5 * time.Minute, "5m ago"}, // negatives absolute
 	}
 	for _, c := range cases {
-		if got := humanizeDuration(c.d); got != c.want {
-			t.Errorf("humanizeDuration(%v) = %q, want %q", c.d, got, c.want)
+		if got := HumanizeDuration(c.d); got != c.want {
+			t.Errorf("HumanizeDuration(%v) = %q, want %q", c.d, got, c.want)
 		}
 	}
 }
