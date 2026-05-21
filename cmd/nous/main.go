@@ -46,6 +46,7 @@ specific docs.`,
 	root.AddCommand(serviceCmdImpl())
 	root.AddCommand(newServeCmd())
 	root.AddCommand(newStatusCmd())
+	root.AddCommand(newPushCmd())
 	root.AddCommand(charoncli.RunCmd())
 	root.AddCommand(charoncli.ArmCmd())
 	root.AddCommand(charoncli.DisarmCmd())
