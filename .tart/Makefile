@@ -79,9 +79,13 @@ GRAPHICS_FLAG  ?= --no-graphics
 # tart's TCC permissions for its own state dir.
 TART_CLONE_DIR ?= $(HOME)/.tart/clones/$(TART_VM)-clone
 
-# Bind-mount the clone (writable) into the VM at the canonical tag.
+# Bind-mount the clone into the VM at the canonical tag. Writable by
+# default — tart's `--dir` syntax is `<name>:<path>` (writable) or
+# `<name>:<path>:ro` (read-only). There's no `:rw` suffix; passing one
+# makes tart treat ":rw" as part of the path, which then fails to
+# resolve (VZErrorDomain Code=2 "No such file or directory").
 # Overridable to empty on the command line for a no-mount boot.
-RUN_FLAGS      ?= --dir=$(REPO_NAME):$(TART_CLONE_DIR):rw
+RUN_FLAGS      ?= --dir=$(REPO_NAME):$(TART_CLONE_DIR)
 
 .PHONY: tart tart-gui tart-stop tart-clean help-tart
 
