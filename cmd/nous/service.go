@@ -179,10 +179,15 @@ func runServiceInstall(out io.Writer) error {
 	// binary path.
 	_ = unifiedMgr.Stop()
 	_ = unifiedMgr.Uninstall()
-	if err := unifiedMgr.Install(nousBin, []string{"serve"}); err != nil {
+	// `-v` by default while autosave + auto-push are being
+	// de-bugged. Cheap (a few log lines per change-burst per brain)
+	// and the daemon log is the only window we have when push/pull
+	// misbehave silently. Revisit once the system is stable enough
+	// that the noise outweighs the diagnostic value.
+	if err := unifiedMgr.Install(nousBin, []string{"serve", "-v"}); err != nil {
 		return fmt.Errorf("install com.42shots.nous: %w", err)
 	}
-	fmt.Fprintf(out, "  [ok] com.42shots.nous installed (%s serve) — started by launchd\n", nousBin)
+	fmt.Fprintf(out, "  [ok] com.42shots.nous installed (%s serve -v) — started by launchd\n", nousBin)
 	fmt.Fprintln(out, "Use 'nous service status' to verify.")
 	return nil
 }

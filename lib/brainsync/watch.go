@@ -59,9 +59,17 @@ func PushBrain(repo, peer string, now func() time.Time) (pushed bool, err error)
 	return false, errors.New("exceeded retries")
 }
 
-// PullBrain fetches and fast-forwards if possible. Skips if working tree
-// is dirty (lets the user commit first; resolve happens on push). Returns
-// true if a fast-forward pull actually happened.
+// PullBrain fetches and fast-forwards if possible. Skips when there
+// are modified-tracked or staged changes that a fast-forward might
+// collide with — UNTRACKED files are tolerated (they're not in the
+// index, and `git pull --ff-only` won't touch them). Returns true
+// if a fast-forward pull actually happened.
+//
+// Historical note: prior to #30 follow-up, this used CleanWorkingTree
+// which counted untracked files as dirty. That blocked pulls
+// indefinitely on brains carrying long-lived untracked drafts —
+// "remote never seen as ahead" was the operator-visible symptom.
+// Replaced with SafeToFastForward (= `git diff-index --quiet HEAD`).
 //
 // Doesn't sync gcrypt-participants — that's the push wrapper's job
 // (AddCommitPush / Push) per nous#24. The manifest update from the
@@ -73,8 +81,8 @@ func PullBrain(repo string) (pulled bool, err error) {
 	if err := Fetch(repo); err != nil {
 		return false, err
 	}
-	clean, err := CleanWorkingTree(repo)
-	if err != nil || !clean {
+	safe, err := SafeToFastForward(repo)
+	if err != nil || !safe {
 		return false, err
 	}
 	behind, err := IsStrictlyBehind(repo)

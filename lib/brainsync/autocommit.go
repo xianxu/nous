@@ -118,6 +118,9 @@ func (a *AutoCommitter) Stop() {
 
 func (a *AutoCommitter) loop() {
 	defer close(a.done)
+	defer log.Printf("autocommit %s: loop exiting", a.brain)
+	log.Printf("autocommit %s: loop started (commit-debounce=%v, push-debounce=%v)",
+		a.brain, a.commitDebounce, a.pushDebounce)
 
 	// Timers start as nil; we lazy-create them on the first event so
 	// a freshly-started AutoCommitter doesn't immediately fire a commit
@@ -175,10 +178,20 @@ func (a *AutoCommitter) loop() {
 		select {
 		case ev, ok := <-a.fs.Events:
 			if !ok {
+				log.Printf("autocommit %s: fsnotify Events channel closed — watcher dead, AutoCommitter exiting",
+					a.brain)
 				return
 			}
 			if a.shouldIgnoreEvent(ev) {
+				if a.verbose {
+					log.Printf("autocommit %s: ignored event %s on %s",
+						a.brain, ev.Op, ev.Name)
+				}
 				continue
+			}
+			if a.verbose {
+				log.Printf("autocommit %s: event %s on %s",
+					a.brain, ev.Op, ev.Name)
 			}
 			// New directory under the brain → recurse so we keep
 			// watching content as the operator creates new subtrees.
@@ -192,36 +205,60 @@ func (a *AutoCommitter) loop() {
 			armCommit()
 			armPush()
 
+		case err, ok := <-a.fs.Errors:
+			if !ok {
+				log.Printf("autocommit %s: fsnotify Errors channel closed", a.brain)
+				return
+			}
+			// Always log — fsnotify errors usually mean dropped events
+			// or watch-add failures, both of which the operator wants
+			// to know about.
+			log.Printf("autocommit %s: fsnotify error: %v", a.brain, err)
+
 		case <-commitC():
 			commitTimer = nil
+			if a.verbose {
+				log.Printf("autocommit %s: commit timer fired", a.brain)
+			}
 			committed, err := a.performAutocommit()
 			if err != nil {
 				log.Printf("autocommit %s: %v", a.brain, err)
 				continue
 			}
 			if committed {
-				if a.verbose {
-					log.Printf("autocommit %s: committed", a.brain)
-				}
+				// Always log commits — operator-visible state change.
+				log.Printf("autocommit %s: committed", a.brain)
 				// Fresh commit → restart push debounce so we wait
 				// the full window for any follow-up activity before
 				// going to the network.
 				armPush()
+			} else if a.verbose {
+				log.Printf("autocommit %s: timer fired but nothing to commit", a.brain)
 			}
 
 		case <-pushC():
 			pushTimer = nil
+			// Always log the attempt — without this, a hung push
+			// (gpg-agent waiting on pinentry, network stall, etc.)
+			// produces zero log output until the next event arrives.
+			// Operator-visible "I am about to talk to the network."
+			log.Printf("autocommit %s: push debounce fired, attempting push", a.brain)
 			pushed, err := PushBrain(a.brain, a.peer, time.Now)
 			if err != nil {
 				log.Printf("autocommit push %s: %v", a.brain, err)
 				continue
 			}
-			if pushed && a.verbose {
-				log.Printf("autocommit push %s", a.brain)
+			if pushed {
+				log.Printf("autocommit %s: push complete", a.brain)
+			} else if a.verbose {
+				log.Printf("autocommit %s: push checked, nothing to send", a.brain)
 			}
 
 		case <-a.refChanged:
 			// Manual commit / RefWatcher event — push, but debounced.
+			if a.verbose {
+				log.Printf("autocommit %s: ref-changed signal, re-arming push", a.brain)
+			}
 			armPush()
 
 		case <-a.stop:

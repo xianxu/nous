@@ -129,13 +129,45 @@ func HasUnpushedCommits(repo string) (bool, error) {
 	return strings.TrimSpace(string(out)) != "0", nil
 }
 
-// CleanWorkingTree returns true iff there are no uncommitted changes.
+// CleanWorkingTree returns true iff there are no uncommitted changes,
+// including untracked files. Strict definition — used by callers
+// who need a "nothing on disk that isn't already committed" check.
 func CleanWorkingTree(repo string) (bool, error) {
 	out, err := RunGit(repo, "status", "--porcelain")
 	if err != nil {
 		return false, err
 	}
 	return strings.TrimSpace(string(out)) == "", nil
+}
+
+// SafeToFastForward returns true iff a `git pull --ff-only` would
+// succeed on the next ref motion — i.e., no modified-tracked or
+// staged changes that a fast-forward might collide with. Untracked
+// files are deliberately tolerated: they're not in the index, and
+// `git pull --ff-only` won't touch them.
+//
+// Distinct from CleanWorkingTree because brain workflows often
+// carry long-lived untracked files (operator drafts they haven't
+// `git add`'d yet); blocking pulls on those produces a silent
+// "remote never seen as ahead" failure mode — see #30 follow-up.
+//
+// Uses `git diff-index --quiet HEAD --` which exits non-zero iff
+// the index or working tree differs from HEAD on tracked paths.
+// `--quiet` suppresses output; we only care about the exit code.
+func SafeToFastForward(repo string) (bool, error) {
+	cmd := exec.Command("git", "-C", repo, "diff-index", "--quiet", "HEAD", "--")
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	// Exit code 1 = differences exist (the only non-error result we
+	// expect to see from diff-index --quiet). Any other error
+	// (couldn't run git, HEAD doesn't exist, etc.) is a real failure.
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, err
 }
 
 // IsStrictlyBehind returns true iff origin/main is ahead of HEAD AND HEAD
