@@ -2,8 +2,9 @@
 id: 000032
 status: working
 deps: []
+target: shared-brain-infrastructure-and-ui
 created: 2026-05-21
-updated: 2026-05-21
+updated: 2026-05-22
 estimate_hours: 4
 ---
 
