@@ -117,6 +117,25 @@ func (l *launchdManager) Install(binary string, args []string) error {
 		return fmt.Errorf("launchctl load failed: %w", err)
 	}
 
+	// Force-start the agent. On modern macOS (Big Sur+) `launchctl
+	// load` doesn't reliably honor RunAtLoad for user-level
+	// LaunchAgents — the job stays in "speculative" state and
+	// never actually spawns until something triggers it (login,
+	// manual `start`, etc.). Empirically observed via `launchctl
+	// print` showing `runs = 0, pended nondemand spawn =
+	// speculative, last exit code = (never exited)` after a clean
+	// install. Explicit kickstart bypasses that throttle.
+	//
+	// kickstart errors are non-fatal: the load succeeded, so the
+	// plist is in place; worst case the operator triggers a start
+	// manually. We surface the error if any so the install output
+	// flags the partial success.
+	uid := os.Getuid()
+	target := fmt.Sprintf("gui/%d/%s", uid, l.Label)
+	if err := exec.Command("launchctl", "kickstart", "-k", target).Run(); err != nil {
+		return fmt.Errorf("launchctl kickstart %s: %w (plist loaded, but daemon didn't start)", target, err)
+	}
+
 	return nil
 }
 
