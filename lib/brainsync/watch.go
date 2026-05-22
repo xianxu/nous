@@ -77,22 +77,39 @@ func PushBrain(repo, peer string, now func() time.Time) (pushed bool, err error)
 // gcrypt-participants from it. Pull-side sync would be belt-and-
 // suspenders; the push-side single sync point is sufficient for the
 // "manifest is canonical" property.
-func PullBrain(repo string) (pulled bool, err error) {
+// PullBrainResult describes the outcome of a PullBrain call so the
+// caller (Watch's ticker loop) can surface why a tick was a no-op.
+// Pulled/skip cases were previously indistinguishable (both
+// returned (false, nil)) — "remote never seen as ahead" had no
+// breadcrumb. With this, the daemon log shows the precise reason
+// each tick.
+type PullBrainResult struct {
+	Pulled     bool
+	SkipReason string // "" when Pulled is true or err non-nil.
+}
+
+func PullBrain(repo string) (PullBrainResult, error) {
 	if err := Fetch(repo); err != nil {
-		return false, err
+		return PullBrainResult{}, err
 	}
 	safe, err := SafeToFastForward(repo)
-	if err != nil || !safe {
-		return false, err
+	if err != nil {
+		return PullBrainResult{}, err
+	}
+	if !safe {
+		return PullBrainResult{SkipReason: "tracked-file changes in working tree"}, nil
 	}
 	behind, err := IsStrictlyBehind(repo)
-	if err != nil || !behind {
-		return false, err
+	if err != nil {
+		return PullBrainResult{}, err
+	}
+	if !behind {
+		return PullBrainResult{SkipReason: "not strictly behind origin"}, nil
 	}
 	if err := PullFF(repo); err != nil {
-		return false, err
+		return PullBrainResult{}, err
 	}
-	return true, nil
+	return PullBrainResult{Pulled: true}, nil
 }
 
 // Watch ties RefWatcher events + a periodic fetch ticker to push/pull.
@@ -180,11 +197,17 @@ func Watch(ctx context.Context, brains []string, fetchEvery time.Duration, verbo
 			}
 		case <-ticker.C:
 			for _, b := range brains {
-				pulled, err := PullBrain(b)
-				if err != nil {
+				res, err := PullBrain(b)
+				switch {
+				case err != nil:
 					log.Printf("brainsync: pull %s: %v", b, err)
-				} else if pulled && verbose {
+				case res.Pulled:
+					// Always log — operator-visible state change.
 					log.Printf("brainsync: pulled %s", b)
+				case verbose && res.SkipReason != "":
+					// Skip-with-reason only at verbose; otherwise
+					// every quiet tick spams the log.
+					log.Printf("brainsync: pull %s skipped (%s)", b, res.SkipReason)
 				}
 				// Also refresh peer pubkeys from the keys branch
 				// (nous#23). A peer added by anyone on this brain

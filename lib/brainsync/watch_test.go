@@ -74,12 +74,12 @@ func TestPullBrain_FastForward(t *testing.T) {
 	mustGit(t, peerA, "commit", "-q", "-m", "A: tokyo")
 	mustGit(t, peerA, "push", "-q", "origin", "main")
 
-	pulled, err := PullBrain(peerB)
+	res, err := PullBrain(peerB)
 	if err != nil {
 		t.Fatalf("PullBrain: %v", err)
 	}
-	if !pulled {
-		t.Error("expected pulled=true (remote was strictly ahead)")
+	if !res.Pulled {
+		t.Errorf("expected Pulled=true (remote was strictly ahead); skip reason: %q", res.SkipReason)
 	}
 	if _, err := os.Stat(filepath.Join(peerB, "tokyo.md")); err != nil {
 		t.Errorf("tokyo.md should be present after PullBrain: %v", err)
@@ -96,12 +96,15 @@ func TestPullBrain_DirtyWorkTree_Skips(t *testing.T) {
 
 	must(t, os.WriteFile(filepath.Join(peerB, "paris.md"), []byte("draft B\n"), 0o644))
 
-	pulled, err := PullBrain(peerB)
+	res, err := PullBrain(peerB)
 	if err != nil {
 		t.Fatalf("PullBrain: %v", err)
 	}
-	if pulled {
-		t.Error("expected pulled=false (dirty work tree)")
+	if res.Pulled {
+		t.Error("expected Pulled=false (tracked-file change in working tree)")
+	}
+	if res.SkipReason == "" {
+		t.Error("expected a SkipReason explaining why pull was a no-op")
 	}
 	if _, err := os.Stat(filepath.Join(peerB, "tokyo.md")); err == nil {
 		t.Error("tokyo.md should NOT be present (PullBrain should skip on dirty work tree)")
