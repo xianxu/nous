@@ -172,6 +172,54 @@ else
     "$NOUS_DIR/scripts/identity.sh"
 fi
 
+# ── 4b. GPG agent + pinentry-mac ─────────────────────────────────────────────
+# Without pinentry-mac configured, gpg-agent falls back to pinentry-curses
+# which fails inside a LaunchAgent (no TTY) with the cryptic message
+# "Inappropriate ioctl for device" — gcrypt push/pull then hangs until the
+# operator manually unblocks. Pinentry-mac displays a Cocoa dialog AND
+# offers a "Save in Keychain" checkbox; once checked, gpg-agent fetches the
+# passphrase from Keychain transparently for subsequent (including daemon)
+# operations.
+#
+# Cache TTLs (8h / 24h) reduce how often pinentry has to show at all on
+# daily use; Keychain integration covers the longer gap.
+if [ "${NOUS_BOOTSTRAP_SKIP_IDENTITY:-}" = "1" ]; then
+    info "Skipping pinentry-mac config (NOUS_BOOTSTRAP_SKIP_IDENTITY=1)."
+else
+    info "Configuring gpg-agent to use pinentry-mac..."
+    PINENTRY_MAC="$(brew --prefix 2>/dev/null)/bin/pinentry-mac"
+    if [ ! -x "$PINENTRY_MAC" ]; then
+        warn "pinentry-mac not found at $PINENTRY_MAC (Brewfile should install it; skipping config)."
+    else
+        mkdir -p "$HOME/.gnupg"
+        chmod 700 "$HOME/.gnupg"
+        AGENT_CONF="$HOME/.gnupg/gpg-agent.conf"
+        touch "$AGENT_CONF"
+        chmod 600 "$AGENT_CONF"
+        CHANGED=0
+        # Append-if-missing pattern — never overwrite existing operator config.
+        for line in \
+            "pinentry-program $PINENTRY_MAC" \
+            "default-cache-ttl 28800" \
+            "max-cache-ttl 86400"; do
+            key="${line%% *}"
+            if ! grep -q "^${key}" "$AGENT_CONF" 2>/dev/null; then
+                echo "$line" >> "$AGENT_CONF"
+                CHANGED=1
+            fi
+        done
+        if [ "$CHANGED" -eq 1 ]; then
+            info "  Reloading gpg-agent to pick up new config..."
+            gpg-connect-agent reloadagent /bye >/dev/null 2>&1 || true
+            ok "gpg-agent configured with pinentry-mac + 8h cache."
+            info "  On the next gpg operation, check 'Save in Keychain' in the dialog."
+            info "  Future daemon-driven decryptions then use the cached passphrase."
+        else
+            ok "gpg-agent already configured with pinentry-program."
+        fi
+    fi
+fi
+
 # ── 5. Workflow tools (gh auth, openshell, mutagen) ──────────────────────────
 # `.openshell/Makefile`'s `bootstrap` runs `gh auth login` if not authenticated,
 # installs the openshell CLI, and ensures mutagen is present. Overlap with the

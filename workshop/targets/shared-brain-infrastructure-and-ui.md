@@ -11,41 +11,34 @@ sources:
 
 # Target: shared brain infrastructure and user interface
 
-A shared brain is the substrate by which two or more people maintain a common workbench: durable notes, agentic interactions, decisions, drafts — kept in sync across machines and accessible to each operator's AI agents. We want this to be a daily-driver for ourselves first, then for collaborators (family, team), then for whoever else can use the conventions.
+A `brain` is a git repo containing `.brain/config.md`; `nous` is the binary + ecosystem of glue (skills, conventions, scripts) that operates on brains. Until now brains have been single-recipient (private). Now it's a good time to introduce shared brains, where multiple collaborators read and write a common workbench. The default substrate is git for synchronization + gcrypt for encryption + GitHub as the remote, though the manifest schema also allows other substrates (`syncthing`, `git-daemon`, `none`) for future use. The key issues we want to solve are:
 
-The infrastructure pieces are in flight (gcrypt-encrypted git on GitHub as substrate, autocommit + auto-push + auto-pull via brainsync, GitHub-mediated trust admission for adding collaborators, drift detection as the safety floor). The user interface pieces are catching up (`nous brain` TUI for join + accept + clone + leave, `nous push` for explicit checkpoints, the diagnostic logging that surfaces what the daemon is doing). What we want is to get to a state where the substrate is invisible during daily use — the operator just saves files, the sync handles itself, and the only operator gestures needed are first-time setup, inviting a collaborator, and leaving when done.
+1. How do we synchronize the shared brain among several collaborators securely? 
+    * Our answer is to use gcrypt to encrypt data and use GitHub as the substrate for synchronization. Specifically, each shared brain will have two branches, a `main` branch of encrypted data; and a `keys` branch of public keys of participants.
+2. How do we resolve conflict when multiple collaborators' edit conflict with each other. 
+    * Our answer is semantic merge, essentially relying on agents to rewrite files in conflict. 
 
-The shared brain is the engineering instantiation of the workbench bet: methods + substrate above the model layer, owned by the operator, portable across agents. If we can run this for ourselves daily and pull family/team onto it, the conventions get tested at the only scale that matters early — small.
+The canonical example we use is I, as Xian, want to work with my wife (Ying), on a travel plan this summer to Europe. We need a place where both of us, and our agents can change shared state, thus shared brain.
 
-## Why now
+From end user's POV, the current nous deployment works as:
 
-Models are commoditizing faster than expected; the durable lock-in points are above the model. Owning the workbench (data + methods + conventions) is where the value moves. We've been building the pieces; this is the moment to insist they cohere as a daily-driver experience rather than a developer demo.
+1. User clones `nous` repo and runs `make bootstrap`. This gets the `nous` ecosystem into an operational state.
+    * Today only one mode exists: build from source via `make nous-build`. A future release mode that downloads a pre-compiled signed-and-notarized binary is planned (tracked in nous#28); for now everyone compiles locally. The locally-built binary is signed (via `make nous-install`, not by `make nous-build` itself) but not notarized — Gatekeeper accepts a Developer-ID-signed binary from the same Apple ID on the operator's own Mac. Notarization is reserved for cross-Mac distribution (`make nous-install-notarized`).
+    * Bootstrap also starts up the local `nous` service, which provides two key functions: a credential proxy (the `charon` lineage) as a gateway to external services; and brain-sync to facilitate synchronization using GitHub as substrate.
+2. Then, user use `nous brain` TUI to operate their brains, for example, they can:
+    1. create new private brain.
+    2. invite collaborators to a brain (private or already shared), using their GitHub user name. 
+    3. accept invitation to a shared brain and clone it locally. 
+    4. leave a shared repo.
 
-Concretely: Emma + Xian's testing this week (autocommit, auto-push, leave, gpg-pinentry on VMs, launchd kickstart) surfaced the rough edges that block non-author operators from using the system. Each rough edge fixed teaches us something the next operator won't have to hit. The infrastructure has matured; the UI hasn't quite. Closing that gap is the next push.
+That's it. Once a brain is shared — or is single-recipient but has a gcrypt-backed GitHub remote configured (the "provisioned for sharing, not yet admitted any collaborator" interim state) — the `nous` service watches the git repo directory and:
 
-## What this is NOT
+1. auto-commits with a debounced timer (currently 5 seconds of idle since the last file change).
+2. auto-pushes with a debounced timer (currently 60 seconds of idle since the last commit or file change).
+3. auto-pulls on a periodic ticker (currently every 5 seconds; pull happens only when the working tree has no modified-tracked files — untracked files are tolerated).
 
-- **Not a hosted product.** The whole point is operator-controlled substrate. No central server, no SaaS dependency beyond what's already implicit (GitHub as dumb storage; that's it).
-- **Not real-time collaborative editing.** This isn't Google Docs. The sync is eventual-consistency via git; conflict resolution happens through rebase + the file-level conflict-file convention. Multiple operators on the same file at the same second is not the use case.
-- **Not multi-tenant inside a single workbench.** One operator per machine; brains can be shared across operators but each operator has their own machine with their own workbench. Single-threaded-human assumption stays.
-- **Not a brand-new sync protocol.** git + gcrypt + GitHub. Don't invent a new substrate; use what's there.
-- **Not mobile / iOS access.** The substrate doesn't preclude it, but it's not in scope. CLI + TUI on macOS first, Linux next if the operators run there.
-- **Not solving the "what if the brain's contents are huge" problem yet.** Large-binary handling, partial clones, sparse checkouts — defer. Get the conventions right for text-heavy brains first.
+One thing to note is the two crypto passphrases, one guarding the GPG private key and one guarding the SSH key used between host and GitHub. The operator can store both in Keychain so they're supplied automatically. Currently we do not support removal of those passphrases from Keychain — a follow-up item.
 
-## Why this target is broader than any one issue
+- **SSH passphrase**: `make bootstrap` invokes `ssh-add --apple-use-keychain` for the standard SSH key path and writes `UseKeychain yes` + `AddKeysToAgent yes` into `~/.ssh/config` (Host *). After bootstrap the passphrase is in Keychain. A subsequent SSH key rotation (new key, new passphrase) requires re-running `ssh-add --apple-use-keychain <new-key>` once; bootstrap doesn't re-run automatically.
+- **GPG passphrase**: Stored in Keychain via pinentry-mac's "Save in Keychain" checkbox on the first prompt. Today this requires pinentry-mac to be configured manually in `~/.gnupg/gpg-agent.conf` (`pinentry-program /opt/homebrew/bin/pinentry-mac`); a follow-up makes bootstrap do this automatically.
 
-Earlier sessions treated this as a stack of issues — autosave (#30), TUI list async (#31), leave (#32), the docs sweeps, the launchd fixes. Each issue made progress on its own slice. But the cumulative arc — "make a shared brain into a daily-driver UI" — wasn't legible from any single issue. That's the work this target is naming.
-
-Future work that should reference this target: anything that touches the shared-brain operator experience. Anything *purely* about internal mechanics (e.g., a refactor of `lib/brainsync/`) probably doesn't need to. The target is the operator's view; pure internals advance it indirectly but don't need explicit linkage.
-
-## Open questions
-
-- **Cross-brain references.** An operator who has both a personal brain and a family brain may want to link from one to the other. Need a convention for `@brain:family/<path>` references that resolves both for the operator (knows about both brains) and for collaborators in only one (sees a broken link with context). Not committed yet.
-- **Notifications.** When a collaborator pushes, does the operator's `nous brain` TUI surface it? A notification on the macOS notification center? A subtle indicator in the list view? Defer until the basic flow is dailied-driven; let the actual annoyance teach us what's needed.
-- **The first non-author operator.** Beyond Emma + Xian, who's the first? A family member who isn't a software engineer? That tests UX assumptions we haven't even named yet. Worth lining up before declaring this target `achieved`.
-- **Mobile / iOS read-only access.** Sometimes operators want to *read* their brain on a phone, not edit. Read-only iOS could be a small slice that doesn't require a full mobile workbench. Open.
-- **Brain hygiene.** As brains grow, when do we archive old content? Move old projects to a sub-brain? The "brain as durable extension of mind" framing implies *don't delete*, but eventually the bytes pile up. Deferred for now.
-
-## Revisions
-
-(none yet — this is the initial seed.)
