@@ -194,8 +194,8 @@ func runServiceInstall(out io.Writer) error {
 
 // resolveSelfBinary returns the absolute path of the running nous
 // binary. Used by the unified install path so the plist points at
-// whatever binary the operator ran — typically `~/.local/bin/nous`
-// after a `make nous-install` run.
+// whatever binary the operator ran — typically `nous/bin/nous`
+// after `make nous-build` + `make nous-sign`.
 func resolveSelfBinary() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {

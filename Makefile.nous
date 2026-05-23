@@ -19,13 +19,13 @@
 # the host (no symlinks involved) it's identical to the previous result.
 NOUS_DIR := $(shell cd '$(dir $(lastword $(MAKEFILE_LIST)))' && pwd -L)/
 
-.PHONY: nous-build nous-sign nous-notarize nous-dev nous-install nous-install-notarized nous-uninstall test clean trim identity moveto cloneto new-brain nous-bootstrap nous-test-bootstrap nous-test-snapshot nous-test-roundtrip nous-test-brain-sync
+.PHONY: nous-build nous-sign nous-notarize nous-dev nous-install-notarized nous-uninstall test clean trim identity moveto cloneto new-brain nous-bootstrap nous-test-bootstrap nous-test-snapshot nous-test-roundtrip nous-test-brain-sync
 
 # Where installed binaries land. PATH-stable on most operator
 # machines; no sudo; survives Homebrew rebuilds.
 NOUS_INSTALL_PREFIX ?= $(HOME)/.local/bin
 
-# Codesign identity for `make nous-sign` / `make nous-install`. Unset →
+# Codesign identity for `make nous-sign`. Unset →
 # scripts/sign.sh auto-detects a single "Developer ID Application"
 # identity from the codesigning keychain. Set to override (cert
 # rotation, multi-team operator). No ad-hoc fallback: ad-hoc emits a
@@ -44,19 +44,19 @@ NOUS_NOTARYTOOL_PROFILE ?= nous-notary
 
 # Codesigning posture (post nous#16 ACL realization + nous#20
 # single-binary + nous#20 side-quest "drop ad-hoc"):
-# `make nous-install` signs the unified `nous` binary with a
-# Developer ID Application cert so it identifies as the production
-# `charon` keychain namespace + binds ACLs to its cert-anchored
-# Designated Requirement. Closes the agent-bypass gap where an
-# agent-written script could `security find-generic-password ...`
-# and exfiltrate raw OAuth tokens — bypassing the proxy's audit
-# trail.
+# `make nous-sign` signs the unified `nous` binary with a Developer
+# ID Application cert so it identifies as the production `charon`
+# keychain namespace + binds ACLs to its cert-anchored Designated
+# Requirement. Closes the agent-bypass gap where an agent-written
+# script could `security find-generic-password ...` and exfiltrate
+# raw OAuth tokens — bypassing the proxy's audit trail.
 #
 # Two postures only:
-#   `make nous-dev`     — unsigned, `charon-dev` keychain namespace,
-#                          isolated from production credentials.
-#   `make nous-install` — Developer ID-signed, `charon` namespace,
-#                          hardened runtime enabled.
+#   `make nous-dev`  — unsigned, `charon-dev` keychain namespace,
+#                       isolated from production credentials.
+#   `make nous-sign` — Developer ID-signed, `charon` namespace,
+#                       hardened runtime enabled. Follow with
+#                       `nous service install` to register launchd.
 # Ad-hoc as a third posture was a transitional artifact (operator
 # had no Developer ID); retired in nous#20.
 #
@@ -75,8 +75,10 @@ NOUS_NOTARYTOOL_PROFILE ?= nous-notary
 # Each phase depends on the previous via PHONY prereqs, so chains run
 # top-to-bottom on every invocation (no stale-build false-cache risk).
 #
-# nous-install         = nous-sign + install to $(NOUS_INSTALL_PREFIX) + launchd
-# nous-install-notarized = nous-notarize + install + launchd (for distribution)
+# Local install: `make nous-sign && nous service install` (two steps,
+#   intentionally — see comment on the install-side block below).
+# nous-install-notarized = nous-notarize + install + launchd (for cross-Mac
+#   distribution; keeps the combined gesture because notarization is slow).
 #
 # The `nous-` prefix on every target is deliberate: brain repos (and
 # other nous consumers) commonly define their own `make build` for
@@ -187,62 +189,49 @@ nous-dev:
 	@echo ""
 	@echo "==> Running ./bin/nous serve in foreground (charon-dev namespace, unsigned)"
 	@echo "    Ctrl-C exits both daemons gracefully."
-	@echo "    Re-install production: make nous-install"
+	@echo "    For signed production install: make nous-sign && nous service install"
 	@echo ""
 	@exec ./bin/nous serve $(NOUS_DEV_ARGS)
 
-# make nous-install — stops dev foreground, builds + signs the unified
-# `nous` binary (so it identifies as the `charon` production keychain
-# namespace + ACL'd-only access), installs to $(NOUS_INSTALL_PREFIX),
-# and registers + starts the com.42shots.nous launchd service.
+# The local-install path is now two steps: `make nous-sign` to
+# produce a Developer-ID-signed binary at nous/bin/nous, then
+# `nous service install` to register + kickstart launchd. These
+# are kept separate so the operator can re-sign (after a code
+# change) without disturbing an already-running service, and
+# re-install the service (e.g., to pick up a plist change) without
+# re-signing. The old combined `make nous-install` target was
+# retired once the install prefix collapsed to nous/bin: the copy
+# step it owned (to $(NOUS_INSTALL_PREFIX)) became redundant, and
+# the only remaining work was running `nous service install`,
+# which is already a public command.
 #
-# Lifecycle invariants this target maintains:
-#   - At most one nous serve process running (kills any dev foreground
-#     before installing; service install bounces the existing plist).
-#   - launchctl load auto-starts the service (plist has RunAtLoad=true).
-#   - Symmetric counterpart: make nous-uninstall stops + removes.
-#   - Signing happens BEFORE install copy so $(NOUS_INSTALL_PREFIX)
-#     always holds the signed binary. The runtime self-check resolves
-#     it into the `charon` keychain namespace.
-# nous-install: signed but unnotarized install. The fast install path
-# for the operator's own Mac — Gatekeeper accepts a Developer-ID-signed
-# binary from the same Apple ID locally. Wife's Mac (and any other
-# distributed-to Mac) needs nous-install-notarized instead, since
-# Gatekeeper there will refuse first-launch without an online notary
-# check (which an unnotarized binary fails).
-nous-install: nous-sign install-nous-and-launchd
-	@echo ""
-	@echo "==> Done (signed, not notarized). Verify with: nous service status"
-	@echo ""
-	@echo "  [note] this install is fine for THIS Mac — Gatekeeper accepts"
-	@echo "         locally-signed binaries from the signing Apple ID."
-	@echo "         For other Macs (wife's machine, etc.), use:"
-	@echo "             make nous-install-notarized"
-	@echo "         which adds the Apple notary roundtrip."
+# nous-install-notarized stays because the notary roundtrip + the
+# distribution-grade install belong together as a single gesture
+# operators only run when actually shipping to another Mac.
 
 # nous-install-notarized: full distribution-grade install. Same flow
-# as nous-install but the binary has been through Apple's notary
-# before it lands at $(NOUS_INSTALL_PREFIX). 30s-to-minutes slower
-# than nous-install due to the notary roundtrip.
+# as the local sign+install path but the binary has been through
+# Apple's notary before it lands at $(NOUS_INSTALL_PREFIX). 30s-to-
+# minutes slower due to the notary roundtrip.
 nous-install-notarized: nous-notarize install-nous-and-launchd
 	@echo ""
 	@echo "==> Done (signed + notarized). Verify with: nous service status"
 
-# install-nous-and-launchd: the install-side common work shared by
-# nous-install and nous-install-notarized. Not a public target —
-# the dependency chain (nous-sign or nous-notarize) guarantees the
-# right binary is in place.
+# install-nous-and-launchd: the install-side common work for
+# nous-install-notarized (which still wants the combined gesture
+# because notarization is slow). Not a public target — the
+# dependency chain (nous-notarize) guarantees the signed-and-
+# notarized binary is at nous/bin/nous.
+#
+# Operates on nous/bin/nous in place — the old separate $(NOUS_
+# INSTALL_PREFIX) copy was retired with `make nous-install`.
 .PHONY: install-nous-and-launchd
 install-nous-and-launchd:
 	@echo "==> Stopping dev foreground process (best-effort)..."
 	@pkill -f '$(NOUS_DIR)bin/nous serve' 2>/dev/null || true
 	@pkill -f 'bin/nous serve' 2>/dev/null || true
-	@echo "==> Installing bin/nous to $(NOUS_INSTALL_PREFIX)/"
-	@mkdir -p $(NOUS_INSTALL_PREFIX)
-	@install -m 0755 bin/nous $(NOUS_INSTALL_PREFIX)/nous
-	@echo "  installed $(NOUS_INSTALL_PREFIX)/nous"
 	@echo "==> Registering + starting com.42shots.nous launchd service..."
-	@$(NOUS_INSTALL_PREFIX)/nous service install
+	@$(NOUS_DIR)bin/nous service install
 	@echo ""
 	@echo "  [note] this is a namespace flip: production credentials"
 	@echo "         live in keychain service=\"charon\" (was charon-dev"
@@ -252,23 +241,20 @@ install-nous-and-launchd:
 	@echo "         For signed .app packaging of nous security menubar,"
 	@echo "         see the rescoped nous#19 (deferred follow-up to nous#22)."
 
-# make nous-uninstall — symmetric counterpart to nous-install. Stops
-# and removes the unified launchd service plus any legacy plists left
-# over from earlier milestones. Idempotent; safe on a machine that
-# never installed.
-#
-# Doesn't remove the binary from $(NOUS_INSTALL_PREFIX) — the
-# operator may still want to invoke nous directly. To fully wipe:
-#   make nous-uninstall && rm $(NOUS_INSTALL_PREFIX)/nous
+# make nous-uninstall — stops and removes the unified launchd
+# service plus any legacy plists left over from earlier milestones.
+# Idempotent; safe on a machine that never installed. Doesn't
+# remove the binary at nous/bin/nous — the operator may still want
+# to invoke nous directly.
 nous-uninstall:
 	@echo "==> Stopping dev foreground process (best-effort)..."
 	@pkill -f '$(NOUS_DIR)bin/nous serve' 2>/dev/null || true
 	@pkill -f 'bin/nous serve' 2>/dev/null || true
 	@echo "==> Removing launchd service(s)..."
-	@if [ -x $(NOUS_INSTALL_PREFIX)/nous ]; then \
-		$(NOUS_INSTALL_PREFIX)/nous service uninstall; \
+	@if [ -x $(NOUS_DIR)bin/nous ]; then \
+		$(NOUS_DIR)bin/nous service uninstall; \
 	else \
-		echo "  no installed nous binary at $(NOUS_INSTALL_PREFIX)/nous; falling back to direct launchctl"; \
+		echo "  no nous binary at $(NOUS_DIR)bin/nous; falling back to direct launchctl"; \
 		launchctl bootout gui/$$(id -u) com.42shots.nous 2>/dev/null || true; \
 		launchctl bootout gui/$$(id -u) com.charon.proxy 2>/dev/null || true; \
 		launchctl bootout gui/$$(id -u) com.xianxu.brain-sync 2>/dev/null || true; \
@@ -279,8 +265,7 @@ nous-uninstall:
 		rm -f ~/Library/LaunchAgents/com.xianxu.nous.plist; \
 	fi
 	@echo ""
-	@echo "==> Done. Installed binaries left at $(NOUS_INSTALL_PREFIX)/."
-	@echo "    To fully wipe: rm $(NOUS_INSTALL_PREFIX)/{nous,charon,brain-sync}"
+	@echo "==> Done."
 
 test:
 	go test ./...

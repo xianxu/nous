@@ -319,11 +319,11 @@ func pickAnchor(keys []identity.Key, anchorArg string) (string, error) {
 //     `make nous-build` dev layout where the binary is at
 //     `nous/bin/nous` (so ../scripts/ is the script dir).
 //  3. <workspace-root>/nous/scripts/new-brain.sh — catches the
-//     install case (`make nous-install` puts the binary at
-//     ~/.local/bin/nous, where workspace.Root falls back to
-//     $HOME/workspace, and the source repo is at <ws>/nous).
-//     This was the previously-broken case when nous brain new
-//     was invoked from outside the nous folder.
+//     case where the binary lives outside the nous source tree
+//     (historically ~/.local/bin/nous from the retired
+//     `make nous-install`; today this branch mostly serves as a
+//     defensive fallback when workspace.Root resolves but the
+//     binary-relative path above misses).
 //  4. ./scripts/new-brain.sh — CWD relative; covers
 //     ad-hoc dev invocations from inside the nous repo.
 func findNewBrainScript() (string, error) {
@@ -348,9 +348,10 @@ func findNewBrainScript() (string, error) {
 			return p, nil
 		}
 	}
-	// Workspace-root fallback: installed binaries (e.g.,
-	// ~/.local/bin/nous via `make nous-install`) don't sit in the
-	// nous source tree, so the binary-relative path above misses.
+	// Workspace-root fallback: a binary that doesn't sit in the
+	// nous source tree (rare today since the install prefix
+	// collapsed to nous/bin; this branch covered the retired
+	// `make nous-install` to ~/.local/bin/nous, kept as defense.)
 	// workspace.Root() resolves to $HOME/workspace as a last resort,
 	// where nous typically lives as a sibling brain dir.
 	if root, err := workspace.Root(); err == nil {
