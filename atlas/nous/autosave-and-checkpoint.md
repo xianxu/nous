@@ -91,10 +91,40 @@ For brains with autosave on:
   to `AutoCommitter.NotifyRefChange()` instead of triggering an
   immediate `PushBrain`. So manual `git commit` from the operator's
   shell flows through the same 60s window as autosave commits.
-- Periodic fetch (5s, see #30 commit `8ddc8dc`) is unchanged.
+- Periodic fetch (5s, see #30 commit `8ddc8dc`) is gated on a cheap
+  ls-remote check — see "Pull-side negative cache" below.
 
 For brains with `autosave: off`: behavior reverts to the pre-#30
 shape — RefWatcher → immediate push.
+
+## Pull-side negative cache
+
+On encrypted (gcrypt) remotes, `git fetch origin` always invokes
+`gpg --status-fd 3 -q -d` to decrypt the manifest, even when nothing
+upstream changed — gcrypt's transport can't ask the server "did
+anything move?" without downloading and decrypting first. At N
+brains × 5s ticks this dominated CPU in the field (gpg-agent at 90%+,
+load avg 16+ on a 12-core machine; see #34).
+
+The cheap "did anything change?" probe sidesteps gcrypt entirely:
+
+- gcrypt stores encrypted content on the **regular `refs/heads/master`**
+  branch of the underlying git server. The commit SHA on that branch
+  *is* the unique fingerprint of the encrypted state.
+- `refs/heads/keys` (nous#23 pubkey distribution) moves independently;
+  the keys-sync path needs to see that motion too.
+- `git ls-remote <gcrypt-stripped-url>` returns both SHAs over the
+  standard smart protocol — no gpg invocation, microseconds of CPU.
+
+`Watch()` keeps a `lastSeenRefs map[brain]snapshot` in process memory.
+Each tick, per brain: take a fresh ls-remote snapshot; if it matches
+last seen, skip the entire per-brain block (no fetch, no keys sync, no
+auto-admit). Cache updates only after a clean `PullBrain`, so a
+transient fetch error doesn't poison subsequent ticks. ls-remote
+errors fall through to the existing fetch path.
+
+Operator-visible at `--verbose`: `brainsync: <repo> no remote changes
+(skip)` per skipped brain per tick.
 
 ## What's deferred (follow-up issues)
 
@@ -116,3 +146,7 @@ shape — RefWatcher → immediate push.
 - `nous/lib/brain/manifest.go` — `AutosaveEnabled()`.
 - `nous/cmd/nous/push.go` — the `nous push` command.
 - `nous/workshop/issues/000030-autosave-and-nous-push.md` — spec.
+- `nous/lib/brainsync/lsremote.go` — `RemoteRawURL` + `LsRemoteRaw`
+  for the pull-side negative cache.
+- `nous/workshop/issues/000034-brain-poll-ls-remote-negative-cache.md`
+  — root cause + fix.
