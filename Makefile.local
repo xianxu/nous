@@ -1,12 +1,18 @@
 # Nous repo-specific targets.
 
-# Self-refresh: when run inside nous, route `make refresh` through
-# nous's own setup script (which re-vendors the ariadne base layer
-# from ../ariadne AND nous's own internal manifests). Lives here
-# rather than the root Makefile so the vendored ariadne Makefile
-# stays uniform across all consumers.
+# Self-refresh: when run inside nous, `make refresh` invokes the
+# canonical setup.sh (now vendored from ariadne at construct/setup.sh).
+# The canonical script auto-discovers ancestors via go.mod (replace
+# directive → ariadne) and walks the dep chain in topological order.
+# UPSTREAM_NAME / UPSTREAM_REFRESH still set here so the existing
+# Makefile.workflow refresh: target keeps working during transition,
+# but the path now points at the unified script.
+#
+# Background: pre-#32, nous had its own bespoke nous/setup.sh that
+# wrapped ariadne's setup with vendored manifest snapshots. That's been
+# replaced by the canonical script + go.mod-based dep resolution.
 UPSTREAM_NAME    := nous
-UPSTREAM_REFRESH := nous/setup.sh
+UPSTREAM_REFRESH := construct/setup.sh
 
 # Include nous layer targets (build, test, clean, trim)
 -include Makefile.nous

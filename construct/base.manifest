@@ -1,0 +1,54 @@
+# Nous base.manifest — nous-specific additions on top of ariadne's base layer.
+#
+# Ancestors are discovered automatically by construct/setup.sh (vendored
+# from ariadne) via `go list -m all` + replace directives in go.mod. This
+# file holds only nous's own contributions; ariadne's base layer is walked
+# first as a transitive upstream.
+#
+# Format: <action> <source-path> [<target-path>]
+#
+# Actions:
+#   symlink   — create symlink (or copy in vendor mode)
+#   copy      — copy once (for files that need local modification)
+#   scaffold  — create empty directory
+#   touch     — create empty file if missing
+#   merge     — JSON merge (settings.<layer>.json layered under settings.local.json)
+
+# ── Nous skills ──────────────────────────────────────────────────────────────
+# nous-tools is the consolidated skill: covers both tool invocation (Audience
+# A — invoke cmd/<name>) and tool authoring (Audience B — write code that
+# uses the proxy via `nous instructions`). The standalone charon skill was
+# retired after charon merged into the nous binary; its protocol-guide
+# content lives inside nous itself, accessed via `nous instructions`.
+symlink   construct/skills/nous-tools    .claude/skills/nous-tools
+symlink   construct/skills/nous-resolve  .claude/skills/nous-resolve
+
+# ── Makefile ─────────────────────────────────────────────────────────────────
+symlink   Makefile.nous
+
+# ── Documentation ────────────────────────────────────────────────────────────
+copy      README.md           README-NOUS.md
+
+# ── Directory conventions ────────────────────────────────────────────────────
+scaffold  life
+scaffold  memory/ideas/pensive
+scaffold  memory/life/travel
+scaffold  memory/life/references
+scaffold  memory/work/meeting-notes
+
+# ── Plugins (merged from the former nous/plugins/*.manifest pattern) ─────────
+# Plugin manifests were a pre-2026-05-19 modular packaging mechanism. With
+# selective-plugin support gone (every plugin always applied), the
+# modularity adds no operator-visible value, so we inline the contents
+# here. Adding new "plugin-shaped" contributions: just append symlink
+# entries.
+
+# Gmail plugin — search and read Gmail threads via the nous proxy.
+# Requires: `nous auth google <email>` (charon merged into nous; auth
+# commands live under the nous binary now).
+symlink   lib/gmail
+symlink   cmd/gmail
+
+# Oneshot plugin — single system+user prompt against a local Ollama model.
+# Requires: ollama serve running locally (or OLLAMA_HOST set).
+symlink   cmd/oneshot

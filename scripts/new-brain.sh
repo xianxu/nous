@@ -16,9 +16,12 @@
 #   4. Select a GPG identity (single → auto; multiple → prompt; zero → bail).
 #   5. mkdir target; git init; set branch main; set git user identity.
 #   6. Pre-create go.mod with right module path (so setup.sh doesn't infer
-#      from the opaque gcrypt remote URL).
-#   7. Run nous/setup.sh --yes from the target directory (default
-#      symlink mode after the 2026-05-19 simplification).
+#      from the opaque gcrypt remote URL). Adds `replace github.com/xianxu/nous
+#      => ../nous` so the canonical setup.sh resolves nous as an ancestor.
+#   7. Run ../nous/construct/setup.sh --yes from the target directory. The
+#      canonical script discovers ancestors (ariadne via nous's go.mod,
+#      transitively) and walks both layers' manifests in one pass. Default
+#      mode is symlink.
 #   8. Author .brain/config.md per ariadne AGENTS.md §1.
 #   9. Set gcrypt remote and gcrypt-participants.
 #  10. git add . && commit && push --force --set-upstream origin main.
@@ -321,13 +324,27 @@ cat > go.mod <<EOF
 module github.com/$GH_FULL
 
 go 1.22
+
+// Substrate ancestor: nous (which transitively provides ariadne).
+// Require + replace together — Go needs the require to consider the
+// module part of the brain's module graph (so cmd/gmail etc. can
+// import github.com/xianxu/nous/lib/gmail), while the replace
+// directs resolution to the sibling source. The pseudo-version
+// 0.0.0-00010101000000-000000000000 is the standard placeholder
+// for "version determined by replace, not by tag."
+require github.com/xianxu/nous v0.0.0-00010101000000-000000000000
+
+replace github.com/xianxu/nous => ../nous
 EOF
 ok "Wrote go.mod (module github.com/$GH_FULL)"
 
-# ── 7. Run nous setup.sh --yes ───────────────────────────────────────────────
-# Default mode is symlink (matches the old --all behavior).
-info "Running nous/setup.sh --yes ..."
-"$NOUS_DIR/nous/setup.sh" --yes
+# ── 7. Run canonical setup.sh --yes ──────────────────────────────────────────
+# Canonical setup.sh lives in ariadne, vendored down to nous/construct/.
+# Walks ariadne + nous manifests in one invocation, ancestors auto-
+# discovered via the new brain's go.mod (which we just wrote with a
+# replace directive for nous).
+info "Running ../nous/construct/setup.sh --yes ..."
+"$NOUS_DIR/construct/setup.sh" --yes
 ok "nous setup complete."
 
 # ── 8. Author .brain/config.md ───────────────────────────────────────────────

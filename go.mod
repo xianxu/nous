@@ -2,6 +2,8 @@ module github.com/xianxu/nous
 
 go 1.25.0
 
+replace github.com/xianxu/ariadne => ../ariadne
+
 require (
 	fyne.io/systray v1.12.1
 	github.com/charmbracelet/bubbles v1.0.0

@@ -16,7 +16,7 @@ How shared-brain conflicts get resolved. Companion to [`brain/atlas/sync-substra
 
 A Claude Code slash command that resolves conflict pairs via AI-prose merge with prototype-aware structural reasoning.
 
-- **Location**: `nous/nous/skills/nous-resolve/` (vendored to `.claude/skills/nous-resolve` via `nous/nous/nous.manifest`)
+- **Location**: `construct/skills/nous-resolve/` (vendored to `.claude/skills/nous-resolve` via `construct/base.manifest`)
 - **Invocation**:
   - `/nous-resolve <brain-root>` — resolve mode (one brain at a time)
   - `/nous-resolve <brain-root> undo` — revert the most recent `/nous-resolve` merge commit
@@ -51,7 +51,7 @@ When a prototype exists at `construct/datatype/<type>.md`, prototype semantics a
 
 ## Pointers
 
-- Skill: `nous/nous/skills/nous-resolve/SKILL.md`
+- Skill: `construct/skills/nous-resolve/SKILL.md`
 - Plan: `workshop/plans/000005-semantic-merge-skill-plan.md`
 - Issue: `workshop/issues/000005-semantic-merge-skill.md`
 - Sync substrate it operates on top of: `brain/atlas/sync-substrate-decision.md`
