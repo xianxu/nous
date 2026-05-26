@@ -58,7 +58,17 @@ That prints the canonical protocol guide embedded in the installed `nous` binary
 - **Build**: `make build` compiles all `cmd/*/main.go` to `cmd/<name>/bin/<name>` (with `bin/<name>` symlinks). The signed nous binary itself is built via `make nous-build`; it has a `.skip-make-build` sentinel so `make build` leaves it alone.
 - **Test**: `make test` runs all Go tests.
 
+## Two different command trees, don't confuse them
+
+There are two distinct surfaces — discover each via its own help command:
+
+1. **The `nous` binary itself** — provider auth, brain management, identity, service control. **Run `nous --help`** for the verb tree. Common subcommand groups: `nous provider …` (AI provider config + account list), `nous brain …` (TUI), `nous identity …`, `nous service …`, `nous instructions`, `nous run`. **Do not guess top-level verbs** (e.g. `nous accounts` is wrong; the right form is `nous provider accounts` or similar inside the `provider` subcommand).
+
+2. **The `cmd/<name>/` tool tree** — operator-built Go binaries (gmail, oneshot, etc.). Each has its own `cmd/<name>/SKILL.md`. Invoked via `nous run -- go run ./cmd/<name>` or `nous run -- ./bin/<name>`.
+
+When you need to do something that nous's binary handles (manage providers, list accounts, configure auth), use tree 1. When you need to do something a `cmd/<name>` tool handles (search Gmail, fetch from Drive), use tree 2.
+
 ## When NOT to invoke this skill
 
-- For tasks that don't involve a `cmd/<name>` tool (general code work, doc edits, etc.) — Claude can just write the code directly.
+- For tasks that don't involve nous's binary or a `cmd/<name>` tool (general code work, doc edits, etc.) — Claude can just write the code directly.
 - For low-level proxy debugging when you can read the source — `lib/charon/` in the nous repo has the proxy implementation.
