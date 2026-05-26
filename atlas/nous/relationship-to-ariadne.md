@@ -139,10 +139,13 @@ working tools, and learns how to build their own by reading
   `nous-test-{bootstrap,roundtrip,snapshot}.sh` — non-Go
   glue, mostly shell scripts orchestrating gpg/git/gh calls
   that would be awkward to write in Go.
-- `nous/setup.sh`, `nous/manifest.md`, `nous/skills/`,
-  `nous/plugins/` — the install scaffolding consumed by
-  *downstream* repos (e.g., a personal repo that does
-  `../nous/nous/setup.sh` to inherit the toolchain).
+- `construct/setup.sh` (canonical, vendored from ariadne via
+  base.manifest), `construct/base.manifest`, `construct/skills/` —
+  the install scaffolding consumed by *downstream* repos (e.g., a
+  personal repo that does `../nous/construct/setup.sh` to inherit
+  ariadne's base layer + nous's additions in one invocation;
+  ancestors auto-discovered from go.mod). See ariadne#32 for the
+  unified replication model that retired the `nous/nous/` namespace.
 
 ## The bootstrap mental model
 

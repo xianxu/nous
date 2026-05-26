@@ -17,11 +17,11 @@ nous/         ← nous layer (Go tools, plugins, setup for downstream repos)
 
 **Nous** provides the tool infrastructure — Go libraries, CLI binaries, Charon integration, and a plugin system.
 
-Downstream repos consume nous via a single command (matches `ariadne/construct/setup.sh`'s shape):
+Downstream repos consume nous via a single command — the canonical setup.sh, vendored from ariadne and walking both ariadne's and nous's manifests in one invocation (see ariadne#32 for the unified replication model):
 ```bash
-../nous/nous/setup.sh            # symlink everything from nous (default)
-../nous/nous/setup.sh --vendor   # copy everything (for repos that can't sibling-link)
-../nous/nous/setup.sh --yes      # skip confirmations (non-interactive)
+../nous/construct/setup.sh            # symlink everything (default)
+../nous/construct/setup.sh --vendor   # copy everything (for repos that can't sibling-link)
+../nous/construct/setup.sh --yes      # skip confirmations (non-interactive)
 ```
 
 ## Repo Structure
@@ -29,14 +29,15 @@ Downstream repos consume nous via a single command (matches `ariadne/construct/s
 ```
 cmd/                  # Go binaries — each is also an agent skill
   gmail/              # Gmail search CLI + SKILL.md
+  nous/.skip-make-build  # opt-out sentinel: signed/notarized binaries don't auto-build
 lib/                  # Reusable Go libraries
   gmail/              # Gmail API client via Charon proxy
-nous/                 # Nous layer construct system
-  setup.sh            # Bootstraps downstream repos
-  nous.manifest       # Core files to install
-  plugins/            # Per-plugin manifests (gmail.manifest, etc.)
-  skills/             # Nous-owned Claude skills (nous-tools meta-skill)
-construct/            # Ariadne layer (vendored)
+construct/            # Substrate management (both ariadne-vendored + nous-own)
+  setup.sh            # Canonical setup script (symlinked from ariadne)
+  base.manifest       # Nous's contributions (skills, Makefile.nous, plugins)
+  skills/             # Nous-owned Claude skills (nous-tools, charon, nous-resolve)
+  scripts/            # Ariadne-vendored helper scripts
+  local/              # Ariadne-vendored skill dir
 atlas/                # This map
 workshop/             # Issues, plans, history, lessons
 life/                 # Personal data (scaffold for downstream repos)
@@ -48,7 +49,7 @@ Each `cmd/<name>/` directory is a Go binary and an agent skill:
 - `main.go` — the binary
 - `SKILL.md` — how agents invoke it
 
-The `nous-tools` meta-skill (in `nous/skills/`) tells Claude to discover tools by reading `cmd/*/SKILL.md`. No per-tool registration needed.
+The `nous-tools` meta-skill (in `construct/skills/`) tells Claude to discover tools by reading `cmd/*/SKILL.md`. No per-tool registration needed.
 
 ## Go Tooling
 
@@ -58,23 +59,15 @@ The `nous-tools` meta-skill (in `nous/skills/`) tells Claude to discover tools b
 - `make clean` — removes build artifacts
 - All tools run through Charon proxy for credential isolation
 
-## Plugin System
+## Plugin System (historical → folded into base.manifest)
 
-Plugins are defined by manifest files in `nous/plugins/` and applied
-in bulk — every plugin manifest is processed on every setup run. Two
-modes (matches `ariadne/construct/setup.sh`):
+The pre-2026-05-19 plugin system used per-plugin manifests in `nous/plugins/`.
+That mechanism was folded into `construct/base.manifest` as part of ariadne#32:
+plugin-shaped contributions (gmail, oneshot) became inline entries in nous's
+single base.manifest. Adding new "plugin-shaped" contributions = appending
+symlink lines.
 
-- **default (symlink)**: symlink everything into the target tree, track nous HEAD
-- **`--vendor`**: copy files into the target so the consumer owns them
-  (for public repos that can't depend on nous as a sibling clone)
-- Re-run with no args: refresh in whatever mode was previously set
-
-Mode recorded in `.nous-mode` (content: `symlink` or `vendor`).
+The setup script's behavior (modes, idempotency, confirmation on mode change)
+is now provided by the canonical `construct/setup.sh` vendored from ariadne.
+Mode recorded in `.ariadne-mode` (unified marker filename across layers).
 Switching modes requires confirmation.
-
-Historical note: pre-2026-05-19 the script had `--all` / `--add <plugin>`
-/ `--rm <plugin>` for selective plugin management. That distinction
-solved a problem operators didn't have (plugin set is small; everyone
-wanted everything); folded into the simpler ariadne-shaped two-mode
-design. Legacy `.nous-mode` values `all` and `selective` auto-migrate
-to `symlink` / `vendor` on first run.

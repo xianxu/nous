@@ -1,0 +1,16 @@
+# Skipped by Makefile.workflow's generic build: scanner.
+#
+# The nous binary is distributed signed + notarized via `make nous-bootstrap`
+# (or `make nous-install-notarized` for the full distribution flow).
+# Overwriting bin/nous with an unsigned local build at the same path
+# invalidates the operator's macOS keychain ACL grants for the signed
+# identity and breaks notification capabilities (UNUserNotificationCenter
+# filters unsigned binaries).
+#
+# Build a local signed copy via `make nous-build` + `make nous-sign` when
+# you need to iterate on the binary's behavior. The generic `make build`
+# scanner intentionally leaves bin/nous alone.
+#
+# This sentinel mechanism replaces the hardcoded `case "$$name" in nous)`
+# skip that used to live in Makefile.workflow's build: target. See
+# workshop/issues/000032 (ariadne) for the layering rationale.

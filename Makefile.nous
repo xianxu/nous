@@ -380,7 +380,7 @@ cloneto:
 # `cloneto` (which mirrors the current repo's full git history), new-brain
 # provisions an empty brain — fresh git init, no source history. Interactive:
 # prompts for path (if not given), GitHub owner+name, GPG identity. Creates
-# the GitHub repo (private), runs nous/setup.sh --all --yes in the new tree,
+# the GitHub repo (private), runs ../nous/construct/setup.sh --yes in the new tree,
 # authors .brain/config.md, commits, pushes.
 #
 # Usage:

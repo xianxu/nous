@@ -90,7 +90,7 @@ CLAUDE.md           # Agent instructions (loaded automatically by Claude Code)
 
 Ariadne right now is private. The way `nous` uses it is through vendoring. Basically `../ariadne/construct/setup.sh --vendor` is ran to set up the base layer in `nous`. 
 
-`nous` provides the same way its derivative and private `brain` repo should do, basically run `../nous/nous/setup.sh` in your `brain` folder. Note in this example, since everyone have access to `nous` and since `brain` is intended to be private, we used symlink version, e.g. without the `--vendor` flag. This requires `nous` and `brain` to be sibling in some folder.
+`nous` provides the same way its derivative and private `brain` repo should do, basically run `../nous/construct/setup.sh` in your `brain` folder. The canonical setup.sh walks ariadne's base layer *and* nous's additions in one invocation; ancestors are discovered transitively via the brain's `go.mod`. Note in this example, since everyone have access to `nous` and since `brain` is intended to be private, we used symlink version, e.g. without the `--vendor` flag. This requires `nous` and `brain` to be sibling in some folder (and ariadne too, for the replace directive to resolve).
 
 ### Go applications
 

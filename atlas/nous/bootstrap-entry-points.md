@@ -59,7 +59,7 @@ Spec: `nous#3` M1 step 0; threat model `brain/atlas/threat-model-shared-brain.md
 
 ### `make new-brain [path]` — provision a fresh brain
 
-Interactive end-to-end. Prompts for GitHub owner+repo (creates the repo via `gh repo create --private`; if the repo already exists with content, prompts to delete + recreate — force-push can't recover from gcrypt state encrypted to a different GPG key), GPG identity, target path. Performs `git init`, runs `nous/setup.sh --all --yes` to symlink `construct/`, authors `.brain/config.md`, configures the `gcrypt::ssh://...` remote, pushes the initial encrypted commit.
+Interactive end-to-end. Prompts for GitHub owner+repo (creates the repo via `gh repo create --private`; if the repo already exists with content, prompts to delete + recreate — force-push can't recover from gcrypt state encrypted to a different GPG key), GPG identity, target path. Performs `git init`, runs `../nous/construct/setup.sh --yes` to symlink ariadne's base layer + nous's additions (the canonical setup.sh walks both via go.mod's transitive resolution), authors `.brain/config.md`, configures the `gcrypt::ssh://...` remote, pushes the initial encrypted commit.
 
 Output: a working private brain at `<path>` with full encryption-at-rest. The first plaintext commit lives only on the local clone; only ciphertext touches GitHub.
 
