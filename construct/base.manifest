@@ -15,8 +15,12 @@
 #   merge     — JSON merge (settings.<layer>.json layered under settings.local.json)
 
 # ── Nous skills ──────────────────────────────────────────────────────────────
+# nous-tools is the consolidated skill: covers both tool invocation (Audience
+# A — invoke cmd/<name>) and tool authoring (Audience B — write code that
+# uses the proxy via `nous instructions`). The standalone charon skill was
+# retired after charon merged into the nous binary; its protocol-guide
+# content lives inside nous itself, accessed via `nous instructions`.
 symlink   construct/skills/nous-tools    .claude/skills/nous-tools
-symlink   construct/skills/charon        .claude/skills/charon
 symlink   construct/skills/nous-resolve  .claude/skills/nous-resolve
 
 # ── Makefile ─────────────────────────────────────────────────────────────────
@@ -39,8 +43,9 @@ scaffold  memory/work/meeting-notes
 # here. Adding new "plugin-shaped" contributions: just append symlink
 # entries.
 
-# Gmail plugin — search and read Gmail threads via Charon proxy.
-# Requires: charon auth google <email>
+# Gmail plugin — search and read Gmail threads via the nous proxy.
+# Requires: `nous auth google <email>` (charon merged into nous; auth
+# commands live under the nous binary now).
 symlink   lib/gmail
 symlink   cmd/gmail
 

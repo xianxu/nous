@@ -326,10 +326,14 @@ module github.com/$GH_FULL
 go 1.22
 
 // Substrate ancestor: nous (which transitively provides ariadne).
-// The canonical construct/setup.sh discovers ancestors by parsing
-// replace directives — the require line gets stripped by go mod tidy
-// without a code import, but the replace declaration of intent
-// survives. See ariadne#32 for the unified replication model.
+// Require + replace together — Go needs the require to consider the
+// module part of the brain's module graph (so cmd/gmail etc. can
+// import github.com/xianxu/nous/lib/gmail), while the replace
+// directs resolution to the sibling source. The pseudo-version
+// 0.0.0-00010101000000-000000000000 is the standard placeholder
+// for "version determined by replace, not by tag."
+require github.com/xianxu/nous v0.0.0-00010101000000-000000000000
+
 replace github.com/xianxu/nous => ../nous
 EOF
 ok "Wrote go.mod (module github.com/$GH_FULL)"
