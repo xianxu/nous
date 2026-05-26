@@ -1,6 +1,6 @@
 ---
 id: 000034
-status: open
+status: working
 deps: []
 target: shared-brain-infrastructure-and-ui
 created: 2026-05-26
@@ -41,25 +41,37 @@ the remote hasn't moved.
 
 ### Cheap check
 
-git-remote-gcrypt stores its state in the **outer** git repo as one or
-more refs under `refs/gcrypt/<remote-name>` (pointing to the commit that
-holds the encrypted pack list). `git ls-remote` against the outer SSH
-remote returns those SHAs over the standard git smart protocol — no gpg
-involved, a few KB of network, microseconds of CPU.
+git-remote-gcrypt stores its encrypted content on the **regular
+`refs/heads/master`** branch of the underlying git server — the
+commit SHA on that branch *is* the unique fingerprint of the
+encrypted state. Same SHA on master = nothing decryptable changed.
+The local `.git/refs/gcrypt/` directory is empty on a steady-state
+clone; it's used only transiently during in-flight gcrypt operations.
 
-The poll loop becomes:
+So the cheap check is: probe the outer remote (the underlying ssh
+url, with the `gcrypt::` prefix stripped) via `git ls-remote` and
+compare the entire ref listing. The poll loop becomes:
 
 ```
 for each shared brain repo:
-  outer_remote = origin's underlying ssh url   # ssh://git@github.com/xianxu/<repo>.git
-  remote_refs  = git ls-remote outer_remote refs/gcrypt/*
-  cached_refs  = lastSeen[repo]
+  outer_url   = strip "gcrypt::" from remote.origin.url
+                # e.g. ssh://git@github.com/xianxu/<repo>.git
+  remote_refs = git ls-remote outer_url   # plain smart protocol, no gpg
+  cached_refs = lastSeen[repo]
   if remote_refs == cached_refs:
-    skip                                       # steady state — no work
+    skip                                  # steady state — no work
   else:
-    git -C repo fetch origin                   # full encrypted fetch (gpg decrypts)
-    lastSeen[repo] = remote_refs
+    PullBrain(repo)                       # full encrypted fetch (gpg decrypts)
+    if PullBrain succeeded:
+      lastSeen[repo] = remote_refs
 ```
+
+We capture the *entire* `ls-remote` output (sorted for stable
+hashing), not just `refs/heads/master`. Reason: the `refs/heads/keys`
+branch (nous#23 pubkey distribution) moves independently when peers
+publish their keys, and `syncBrainPubkeys` needs to see that
+movement. Sorting normalizes server-dependent ordering so the
+serialization is byte-stable across calls.
 
 Steady-state cost drops from "gpg decrypt per tick" to "one ls-remote per
 tick" (a single round-trip, no decryption).
@@ -100,29 +112,55 @@ tick" (a single round-trip, no decryption).
 
 ## Plan
 
-- [ ] **M1 — ls-remote helper**
-  - [ ] Function `lsRemoteGcryptRefs(repoPath string) (string, error)`
-        that resolves origin's outer ssh url and runs
-        `git ls-remote <url> 'refs/gcrypt/*'`, returns a stable
-        serialization of the result.
-  - [ ] Unit test against a fixture repo or mocked git command.
+- [x] **M1 — ls-remote helper**
+  - [x] `RemoteRawURL(repo)` — strips `gcrypt::` prefix from origin url.
+  - [x] `LsRemoteRaw(url)` — runs `git ls-remote <url>`, returns a
+        sorted byte-stable serialization. Bypasses the gcrypt helper,
+        so no gpg invocation.
+  - [x] Unit tests in `lib/brainsync/lsremote_test.go`: gcrypt-prefix
+        stripping, plain-url pass-through, missing-origin error, stable
+        serialization across calls, change detection after push, error
+        on bad url. 6/6 pass.
 
-- [ ] **M2 — Integrate into the poll loop**
-  - [ ] Identify the poll-loop site in `cmd/nous/...` or
-        `lib/brain/sync/...` (brain-sync code, wherever the fetch tick
-        lives post-#16 unification).
-  - [ ] Add in-memory `lastSeen map[string]string` to the poller.
-  - [ ] On each tick: ls-remote first; skip fetch on match.
-  - [ ] Log a debug line when skip fires (so we can verify steady-state
-        cost in `nous serve -v` output).
+- [x] **M2 — Integrate into the poll loop**
+  - [x] Poll-loop site located: `lib/brainsync/watch.go` (`Watch()`
+        ticker case). Per-brain block now calls `refSnapshot(b)` before
+        `PullBrain(b)` and short-circuits the whole block when the
+        snapshot matches `lastSeenRefs[b]`.
+  - [x] In-memory `lastSeenRefs map[string]string` scoped to `Watch()`.
+        Updated only on successful pull (no cache poisoning on fetch
+        errors).
+  - [x] On `refSnapshot` error (ls-remote couldn't run / network
+        glitch): fall through to existing fetch path. Same behavior as
+        today, no regression.
+  - [x] Verbose log line `brainsync: <repo> no remote changes (skip)`
+        when the cache fires.
 
-- [ ] **M3 — Verification**
-  - [ ] Repro the incident shape locally: install nous launchd job,
-        observe baseline CPU + gpg child-process rate.
-  - [ ] Build + reinstall with the fix.
+- [ ] **M3 — Verification** (requires operator: re-arm gpg-agent)
+  - [ ] Reinstall the nous launchd service.
   - [ ] Observe: gpg-agent stays cold, no `gpg --status-fd` children
         in steady state, load average normal.
-  - [ ] Force a remote change on one brain repo, observe one fetch
-        fires for that repo only.
+  - [ ] Force a remote change on one brain repo (push from another
+        peer or shell), observe exactly one fetch fires for that repo
+        on the next tick.
+
+## Revisions
+
+- **2026-05-26 — Spec correction (pre-implementation).** Original spec
+  said gcrypt state lives at `refs/gcrypt/<remote-name>` on the outer
+  remote. Verified against a live brain repo: gcrypt actually stores
+  encrypted content on the regular `refs/heads/master` branch of the
+  underlying git server. Updated the Cheap-check section to use full
+  `ls-remote` against the gcrypt-stripped url (captures both master
+  and the nous#23 keys branch in one shot). No scope change.
 
 ## Log
+
+- **2026-05-26 — M1 + M2 implemented.** New file
+  `lib/brainsync/lsremote.go` (helpers); test file
+  `lib/brainsync/lsremote_test.go` (6/6 pass); ~20 LOC change to
+  `lib/brainsync/watch.go` (cache check before per-brain pull). `go
+  test ./...` green, `go vet ./lib/brainsync/...` clean, `go build
+  ./cmd/nous/` clean. M3 verification staged for operator: requires
+  gpg-agent re-arm + service reinstall.
+

@@ -164,6 +164,13 @@ func Watch(ctx context.Context, brains []string, fetchEvery time.Duration, verbo
 	ticker := time.NewTicker(fetchEvery)
 	defer ticker.Stop()
 
+	// Negative cache for the per-tick pull: a ref snapshot from
+	// `git ls-remote` against the raw (gcrypt-stripped) origin url.
+	// Identical across ticks → remote hasn't moved → skip the full
+	// fetch + keys-sync work, which on gcrypt remotes would invoke gpg
+	// to decrypt the manifest just to find no changes. See nous#34.
+	lastSeenRefs := make(map[string]string, len(brains))
+
 	// Startup catch-up: push anything local-ahead-of-origin that was
 	// committed while the daemon was down. Without this pass, a
 	// pre-existing unpushed commit waits for the *next* ref change to
@@ -197,6 +204,20 @@ func Watch(ctx context.Context, brains []string, fetchEvery time.Duration, verbo
 			}
 		case <-ticker.C:
 			for _, b := range brains {
+				// Negative cache check (nous#34). If ls-remote
+				// against the raw url returns the same SHA list as
+				// last tick, skip the entire per-brain block — no
+				// fetch (so no gpg decrypt), no keys sync, no auto-
+				// admit. If ls-remote itself errors, fall through to
+				// the normal path: PullBrain will hit the same
+				// network and surface a real error message.
+				snap, snapOK := refSnapshot(b)
+				if snapOK && lastSeenRefs[b] == snap {
+					if verbose {
+						log.Printf("brainsync: %s no remote changes (skip)", b)
+					}
+					continue
+				}
 				res, err := PullBrain(b)
 				switch {
 				case err != nil:
@@ -208,6 +229,12 @@ func Watch(ctx context.Context, brains []string, fetchEvery time.Duration, verbo
 					// Skip-with-reason only at verbose; otherwise
 					// every quiet tick spams the log.
 					log.Printf("brainsync: pull %s skipped (%s)", b, res.SkipReason)
+				}
+				// Update the cache only on a clean pull. If pull
+				// errored, leave lastSeenRefs[b] as-is so the next
+				// tick retries the fetch path rather than skipping.
+				if err == nil && snapOK {
+					lastSeenRefs[b] = snap
 				}
 				// Also refresh peer pubkeys from the keys branch
 				// (nous#23). A peer added by anyone on this brain
@@ -226,6 +253,22 @@ func Watch(ctx context.Context, brains []string, fetchEvery time.Duration, verbo
 			return nil
 		}
 	}
+}
+
+// refSnapshot returns a stable serialization of the outer remote's refs
+// for the negative-cache check (nous#34). Returns (snap, true) on
+// success, ("", false) if the snapshot couldn't be obtained — caller
+// falls back to running the normal fetch path on a false.
+func refSnapshot(repo string) (string, bool) {
+	url, err := RemoteRawURL(repo)
+	if err != nil {
+		return "", false
+	}
+	snap, err := LsRemoteRaw(url)
+	if err != nil {
+		return "", false
+	}
+	return snap, true
 }
 
 // autoAdmitBrain runs lib/brain.AutoAdmitFromKeysBranch and pushes
