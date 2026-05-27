@@ -2,8 +2,6 @@ module github.com/xianxu/nous
 
 go 1.26.3
 
-replace github.com/xianxu/ariadne => ../ariadne
-
 require (
 	fyne.io/systray v1.12.1
 	github.com/charmbracelet/bubbles v1.0.0
@@ -48,12 +46,9 @@ require (
 	github.com/muesli/reflow v0.3.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
-	github.com/xianxu/ariadne v0.0.0-00010101000000-000000000000 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yuin/goldmark v1.7.13 // indirect
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
 	golang.org/x/net v0.38.0 // indirect
 	golang.org/x/text v0.30.0 // indirect
 )
-
-tool github.com/xianxu/ariadne/cmd/sdlc
