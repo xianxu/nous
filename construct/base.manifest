@@ -27,7 +27,7 @@ symlink   construct/skills/nous-resolve  .claude/skills/nous-resolve
 symlink   Makefile.nous
 
 # ── Documentation ────────────────────────────────────────────────────────────
-copy      README.md           README-NOUS.md
+symlink   README.md           README-NOUS.md
 
 # ── Directory conventions ────────────────────────────────────────────────────
 scaffold  life
