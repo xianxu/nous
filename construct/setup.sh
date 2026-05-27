@@ -371,7 +371,14 @@ walk_manifest() {
         # .claude/skills/X` exposes a skill via the Claude-Code-expected
         # path) while protecting entries like `symlink Makefile.nous`
         # (declared for downstream consumers; tautological in nous itself).
-        if [[ "$upstream/$source" == "$TARGET_DIR/$target" ]]; then
+        #
+        # Exception: the `merge` action has implicit source-rename semantics
+        # (reads .claude/settings.<layer>.json, writes .claude/settings.json
+        # — different files). On self-walk for ariadne, this regenerates
+        # the layer's own settings.json from its committed settings.X.json
+        # + local overlay. Skipping it would silently break ariadne's
+        # self-refresh.
+        if [[ "$action" != "merge" && "$upstream/$source" == "$TARGET_DIR/$target" ]]; then
             printf "  ${YELLOW}skipped${RESET} %s (self-reference at canonical location)\n" "$target"
             continue
         fi
@@ -525,6 +532,28 @@ fi
 if [[ ! -f "$MODE_MARKER" ]] || [[ "$(tr -d '[:space:]' < "$MODE_MARKER")" != "$MODE" ]]; then
     echo "$MODE" > "$MODE_MARKER"
     printf "  ${GREEN}wrote${RESET}   .ariadne-mode (%s)\n" "$MODE"
+fi
+
+# ── Vendor Go source (vendor mode + go.mod present) ──────────────────────────
+# In vendor mode, the substrate isn't just text — Go binaries that ship
+# from ariadne (like cmd/sdlc) need their source available in the target
+# repo too. `go mod vendor` populates vendor/ with the source for every
+# require / tool declaration in go.mod, so the binary can be built
+# locally without needing the ancestor checked out next door.
+#
+# Symlink mode skips this — sibling-checkout development resolves Go
+# imports via the replace directive's local path, no vendor/ needed.
+if [[ "$MODE" == "vendor" && -f "$TARGET_DIR/go.mod" ]]; then
+    if command -v go >/dev/null 2>&1; then
+        printf "\n  ${CYAN}vendoring Go source (go mod vendor)${RESET}\n"
+        if ( cd "$TARGET_DIR" && go mod tidy && go mod vendor ) 2>&1 | sed 's/^/    /'; then
+            printf "  ${GREEN}vendored${RESET} Go source into vendor/\n"
+        else
+            printf "  ${YELLOW}skipped${RESET} go mod vendor (errors above; non-fatal)\n"
+        fi
+    else
+        printf "  ${YELLOW}skipped${RESET} go mod vendor (go toolchain not on PATH)\n"
+    fi
 fi
 
 # ── Sync skill symlinks ───────────────────────────────────────────────────────

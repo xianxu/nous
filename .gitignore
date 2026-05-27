@@ -5,3 +5,4 @@
 cmd/*/bin/
 bin/
 .DS_Store
+/bin/sdlc
