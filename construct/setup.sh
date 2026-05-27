@@ -363,13 +363,15 @@ walk_manifest() {
         # path) while protecting entries like `symlink Makefile.nous`
         # (declared for downstream consumers; tautological in nous itself).
         #
-        # Exception: the `merge` action has implicit source-rename semantics
-        # (reads .claude/settings.<layer>.json, writes .claude/settings.json
-        # — different files). On self-walk for ariadne, this regenerates
-        # the layer's own settings.json from its committed settings.X.json
-        # + local overlay. Skipping it would silently break ariadne's
-        # self-refresh.
-        if [[ "$action" != "merge" && "$upstream/$source" == "$TARGET_DIR/$target" ]]; then
+        # Exceptions: these actions are not file-shape operations and the
+        # self-reference filter doesn't apply to them.
+        #   merge — implicit source-rename (reads .X.<layer>.json, writes
+        #           .X.json; different files). On self-walk, regenerates
+        #           the layer's own settings.json from committed + local.
+        #   tool  — modifies the target's go.mod via `go mod edit`. On
+        #           self-walk, adds the tool directive to the upstream's
+        #           own go.mod (so `go tool sdlc` works locally there too).
+        if [[ "$action" != "merge" && "$action" != "tool" && "$upstream/$source" == "$TARGET_DIR/$target" ]]; then
             printf "  ${YELLOW}skipped${RESET} %s (self-reference at canonical location)\n" "$target"
             continue
         fi
@@ -415,11 +417,75 @@ walk_manifest() {
                     printf "  ${GREEN}created${RESET} %s\n" "$source"
                 fi
                 ;;
+            tool)
+                # Declare a Go tool dependency from this upstream in the
+                # target's go.mod. Adds (idempotently) the require + replace
+                # + tool directives so `go mod vendor` can populate the
+                # source for `make sdlc-build` etc.
+                #
+                # The single-arg form (`tool cmd/sdlc`) names the path
+                # within the upstream module. Self-walk for the upstream's
+                # own go.mod skips require+replace (would be circular) but
+                # still adds the tool directive (so `go tool sdlc` works
+                # locally in the upstream too).
+                ensure_go_tool_dependency "$upstream" "$source"
+                ;;
             *)
                 printf "  ${YELLOW}unknown action: %s${RESET}\n" "$action"
                 ;;
         esac
     done < "$manifest"
+}
+
+# ── ensure_go_tool_dependency — wire an upstream Go tool into target's go.mod
+ensure_go_tool_dependency() {
+    local upstream="$1"      # absolute upstream path
+    local tool_path="$2"     # relative path within upstream module (e.g. cmd/sdlc)
+
+    if [[ ! -f "$TARGET_DIR/go.mod" ]]; then
+        printf "  ${YELLOW}skipped${RESET} tool %s (no go.mod in target)\n" "$tool_path"
+        return 0
+    fi
+    if ! command -v go >/dev/null 2>&1; then
+        printf "  ${YELLOW}skipped${RESET} tool %s (go toolchain not on PATH)\n" "$tool_path"
+        return 0
+    fi
+    if [[ ! -f "$upstream/go.mod" ]]; then
+        printf "  ${YELLOW}skipped${RESET} tool %s (no go.mod in upstream)\n" "$tool_path"
+        return 0
+    fi
+
+    local upstream_module target_module rel_path
+    upstream_module=$(awk '/^module / {print $2; exit}' "$upstream/go.mod")
+    target_module=$(awk '/^module / {print $2; exit}' "$TARGET_DIR/go.mod")
+    rel_path=$(python3 -c "import os; print(os.path.relpath('$upstream', '$TARGET_DIR'))" 2>/dev/null || echo "$upstream")
+
+    # Ensure go directive >= 1.24 so the tool directive is supported.
+    local go_dir current_go
+    current_go=$(awk '/^go / {print $2; exit}' "$TARGET_DIR/go.mod")
+    if [[ -n "$current_go" ]]; then
+        local cmp_major cmp_minor cur_major cur_minor
+        cmp_major=1; cmp_minor=24
+        cur_major="${current_go%%.*}"
+        cur_minor="${current_go#*.}"; cur_minor="${cur_minor%%.*}"
+        if (( cur_major < cmp_major )) || { (( cur_major == cmp_major )) && (( cur_minor < cmp_minor )); }; then
+            ( cd "$TARGET_DIR" && go mod edit -go=1.24 ) || true
+            printf "  ${YELLOW}bumped${RESET}  go directive in go.mod to 1.24 (required for tool directive)\n"
+        fi
+    fi
+
+    if [[ "$upstream_module" != "$target_module" ]]; then
+        # Cross-module: add require + replace + tool.
+        ( cd "$TARGET_DIR" && {
+            go mod edit -require "${upstream_module}@v0.0.0-00010101000000-000000000000"
+            go mod edit -replace "${upstream_module}=${rel_path}"
+            go mod edit -tool "${upstream_module}/${tool_path}"
+        } ) && printf "  ${GREEN}declared${RESET} tool %s/%s in go.mod (require + replace + tool)\n" "$upstream_module" "$tool_path"
+    else
+        # Self-walk: tool directive only (require + replace would be circular).
+        ( cd "$TARGET_DIR" && go mod edit -tool "${upstream_module}/${tool_path}" ) \
+            && printf "  ${GREEN}declared${RESET} tool %s/%s in go.mod (self; tool only)\n" "$upstream_module" "$tool_path"
+    fi
 }
 
 # ── Process manifest(s) ───────────────────────────────────────────────────────
