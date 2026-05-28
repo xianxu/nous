@@ -380,17 +380,10 @@ fi
 # cmd/nous/bin/nous (the real binary), which is what gets written
 # into the launchd plist. Stable across rebuilds.
 if [ -f "$NOUS_DIR/bin/nous" ] && [ "${NOUS_BOOTSTRAP_SKIP_SERVICE:-}" != "1" ]; then
-    # PATH wiring — find the right shell rc and append if needed.
-    SHELL_RC=""
-    case "${SHELL:-}" in
-        */zsh)  SHELL_RC="$HOME/.zshrc" ;;
-        */bash) [ -f "$HOME/.bash_profile" ] && SHELL_RC="$HOME/.bash_profile" || SHELL_RC="$HOME/.bashrc" ;;
-    esac
-    if [ -n "$SHELL_RC" ] && ! grep -q "nous/bin" "$SHELL_RC" 2>/dev/null; then
-        info "Adding $NOUS_DIR/bin to PATH in $SHELL_RC..."
-        printf '\n# Added by nous-bootstrap: nous binary location\nexport PATH="%s/bin:$PATH"\n' "$NOUS_DIR" >> "$SHELL_RC"
-        ok "PATH updated. Open a new shell (or run: source $SHELL_RC) to pick it up."
-    fi
+    # Put nous on PATH via the same gesture as standalone `make
+    # nous-install`. Single source of truth for the rc-append logic
+    # so re-runs and bootstrap behave identically.
+    "$NOUS_DIR/scripts/nous-install.sh"
 
     info "Starting nous service (uninstall first for hygiene)..."
     "$NOUS_DIR/bin/nous" service uninstall >/dev/null 2>&1 || true

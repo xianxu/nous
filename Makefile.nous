@@ -19,7 +19,7 @@
 # the host (no symlinks involved) it's identical to the previous result.
 NOUS_DIR := $(shell cd '$(dir $(lastword $(MAKEFILE_LIST)))' && pwd -L)/
 
-.PHONY: nous-build nous-sign nous-notarize nous-dev nous-install-notarized nous-uninstall test clean trim identity moveto cloneto new-brain nous-bootstrap nous-test-bootstrap nous-test-snapshot nous-test-roundtrip nous-test-brain-sync
+.PHONY: nous-build nous-sign nous-notarize nous-dev nous-install nous-install-notarized nous-uninstall test clean trim identity moveto cloneto new-brain nous-bootstrap nous-test-bootstrap nous-test-snapshot nous-test-roundtrip nous-test-brain-sync
 
 # Where installed binaries land. PATH-stable on most operator
 # machines; no sudo; survives Homebrew rebuilds.
@@ -199,15 +199,29 @@ nous-dev:
 # are kept separate so the operator can re-sign (after a code
 # change) without disturbing an already-running service, and
 # re-install the service (e.g., to pick up a plist change) without
-# re-signing. The old combined `make nous-install` target was
-# retired once the install prefix collapsed to nous/bin: the copy
-# step it owned (to $(NOUS_INSTALL_PREFIX)) became redundant, and
-# the only remaining work was running `nous service install`,
-# which is already a public command.
+# re-signing. The old "copy to install prefix + register launchd"
+# gesture (formerly bundled under `nous-install`) was unbundled
+# once the install prefix collapsed to nous/bin: the copy step
+# became redundant, and the only remaining work was `nous service
+# install`, which is already a public command.
+#
+# The name `nous-install` was reclaimed for a different gesture
+# below: put nous on the operator's PATH (rc-append to $NOUS_DIR/bin).
+# Mirrors ariadne's sdlc-install. Distinct from install-nous-and-
+# launchd (the service-side install, still a private helper used by
+# nous-install-notarized).
 #
 # nous-install-notarized stays because the notary roundtrip + the
 # distribution-grade install belong together as a single gesture
 # operators only run when actually shipping to another Mac.
+
+# nous-install: put $(NOUS_DIR)bin on the operator's PATH (zsh/bash
+# rc-append, idempotent). Standalone re-entry point for the rc-append
+# logic that scripts/nous-bootstrap.sh also invokes on fresh-Mac
+# bootstrap. Requires bin/nous to already exist — runs `make nous-
+# build` first if you need a fresh build.
+nous-install:
+	@"$(NOUS_DIR)scripts/nous-install.sh"
 
 # nous-install-notarized: full distribution-grade install. Same flow
 # as the local sign+install path but the binary has been through
