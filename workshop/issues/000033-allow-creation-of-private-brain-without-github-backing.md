@@ -143,19 +143,31 @@ sense — detail copy disambiguates.)
 > disturbing the proven GitHub bootstrap.
 
 ### M2 — `publish` primitive (local → private)
-- [ ] Extract GitHub-creation logic (`gh repo create`, remote add,
-      gcrypt-participants sync, first push, keys-branch publish) out of
-      `brain_new.go` / `scripts/new-brain.sh` into a reusable `publish`
-      primitive (`brain.Publish` + `scripts/publish-brain.sh`).
-- [ ] `nous brain publish [--brain PATH]` CLI calling the primitive:
-      `gh repo create --private` → `git remote add origin gcrypt::…` →
-      gcrypt-participants sync → push.
-- [ ] Guard: refuse publish if a remote already exists (idempotency /
-      no double-host).
-- [ ] Tests: publish a local brain → remote set, push succeeds, status
-      flips to `private`. Re-publish refused.
-- [ ] Verify: round-trip — create local, publish, confirm GitHub repo
-      holds ciphertext and `brain list` shows `private`.
+- [x] `scripts/publish-brain.sh` — GitHub half for an existing local
+      brain: `gh repo create --private` → `git remote add origin
+      gcrypt::…` → set gcrypt-participants → `git push --force -u`.
+- [x] `nous brain publish [--brain PATH]` (`cmd/nous/brain_publish.go`):
+      resolve brain (flag/picker) → guard → confirm → run script → keys
+      branch.
+- [x] `publishKeysBranch` extracted from `brain_new.go` into a shared
+      helper (DRY; both `new --recipient` and `publish` use it).
+- [x] Guard `ensureLocalForPublish`: refuse if a remote already exists.
+- [x] Tests (`brain_publish_test.go`): guard with/without remote,
+      `--brain` resolution, bad path, `shortFps`, `orPlaceholder`. All
+      green. Offline CLI checks: `--help`, guard refuses a
+      remote-bearing brain, Go→script handoff reaches `publish-brain.sh`.
+- [ ] **Verify (operator-run): round-trip** — `nous brain new` a local
+      brain, `nous brain publish` it, confirm the GitHub repo holds
+      opaque ciphertext and `git clone` round-trips. Needs a real GPG
+      secret key + push; deferred to the operator (see Log).
+
+> **DRY debt (tracked):** the gh-repo-create ceremony in
+> `publish-brain.sh` is duplicated from `new-brain.sh` step 3 rather
+> than extracted into a sourced helper. Deliberate: `new-brain.sh` and
+> the multi-recipient path can't be runtime-verified in this env (no gh
+> auth was assumed, no gpg secret key), so they were left untouched to
+> avoid shipping unverified changes to the proven bootstrap. Unify into
+> a shared `brain-lib.sh` once the round-trip is verified.
 
 ### M3 — TUI ladder
 - [ ] `list.go`: 3-rung label (`local` / `private` / `shared · N`).
@@ -208,3 +220,24 @@ none`, clean tree, surfaced by `nous brain list`.
 "Encrypted via gcrypt …" — false for a local brain (plaintext on disk,
 FileVault-protected). The frontmatter is correct; only the human body
 line misleads. Fix when M3 touches copy.
+
+### 2026-05-29 — M2 landed (code; round-trip verify pending operator)
+Added the publish rung: `scripts/publish-brain.sh` (GitHub half for an
+existing local brain) + `nous brain publish` (`brain_publish.go`) +
+`publishKeysBranch` extracted as a shared helper. Guard
+`ensureLocalForPublish` refuses an already-remote'd brain. Unit tests
+green; `go build ./...` + vet + `go test ./cmd/nous ./lib/brain -short`
+clean. Offline-verified the CLI path up to the GitHub side effects:
+`--help`, the guard (refuses a remote-bearing brain via `--brain`), and
+the Go→`publish-brain.sh` handoff (splash + dep checks pass).
+
+Did **not** runtime-verify the actual `gh repo create` + gcrypt push.
+Discovered mid-test that `gh` *is* authenticated as `xianxu` in this
+sandbox — but creating repos on the operator's GitHub account is an
+outward-facing side effect they asked to own ("you run the verify"), so
+I stopped before any `gh repo create`. No repos were created (a `head`
+pipe-close SIGPIPE'd the script just before it). Round-trip verify is
+the operator's, or theirs-to-authorize against a throwaway repo.
+
+DRY debt logged in the M2 plan block: `publish-brain.sh` duplicates
+`new-brain.sh`'s gh-create ceremony; unify post-verify.

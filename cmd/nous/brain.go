@@ -35,7 +35,8 @@ list of brains → drill-in (recipients, sync state, conflicts) →
 actions. Use the subcommands below for scriptable / agent-driven use.
 
 Subcommands:
-  new                      provision a brain (single or multi-recipient)
+  new                      provision a brain (local by default)
+  publish                  publish a local brain to GitHub (local → private)
   clone                    clone a shared brain (auto-imports peer pubkeys)
   list                     show brains under the workspace root
   recipient list           list recipients on a brain
@@ -67,6 +68,7 @@ Subcommands:
 	}
 	cmd.AddCommand(
 		newBrainNewCmd(),
+		newBrainPublishCmd(),
 		newBrainCloneCmd(),
 		newBrainInviteCmd(),
 		newBrainJoinCmd(),

@@ -12,7 +12,6 @@ import (
 	"golang.org/x/term"
 
 	"github.com/xianxu/nous/lib/brain"
-	"github.com/xianxu/nous/lib/gh"
 	"github.com/xianxu/nous/lib/identity"
 	"github.com/xianxu/nous/lib/workspace"
 )
@@ -229,51 +228,11 @@ a second commit + push (gcrypt re-encrypts to all recipients).`,
 			}
 
 			// Publish every recipient's pubkey to the brain's `keys`
-			// filestore branch (nous#23). Peers cloning the brain
-			// later can auto-import all pubkeys before gcrypt's
-			// signature verification needs them — eliminates the
-			// manual sneakernet step.
-			//
-			// Best-effort: a keys-branch publish failure doesn't
-			// undo the gcrypt provisioning above. The brain works
-			// without it; peers would need the legacy sneakernet
-			// flow until publish succeeds. Surface failures loudly
-			// so operator knows to remediate (re-run nous brain new,
-			// or a future `nous brain publish-keys` verb).
-			fmt.Fprintln(out)
-			fmt.Fprintln(out, "Publishing recipient pubkeys to the keys branch …")
-			ctx := cmd.Context()
-			anyFailed := false
-			for _, fp := range recipients {
-				if err := brain.PublishPubkey(ctx, abs, fp); err != nil {
-					fmt.Fprintf(out, "  warning: publish %s: %v\n", shortFp(fp), err)
-					anyFailed = true
-					continue
-				}
-				fmt.Fprintf(out, "  published %s\n", shortFp(fp))
-			}
-			// Also publish operator's own pubkey under the new
-			// nous#26 `<login>.asc` convention. Joiners running
-			// `nous brain join` orphan-create the keys branch if it's
-			// empty; without this publish, a joiner's first push
-			// would replace the keys branch with just their own key,
-			// leaving the operator's pubkey missing for subsequent
-			// signature verification. (Yesterday's brain-family bug,
-			// nous#26 M7 regression test.)
-			if myLogin, err := gh.AuthLogin(); err == nil && myLogin != "" {
-				if err := brain.PublishOwnPubkey(ctx, abs, myLogin, ownFp); err != nil {
-					fmt.Fprintf(out, "  warning: publish %s.asc: %v\n", myLogin, err)
-					anyFailed = true
-				} else {
-					fmt.Fprintf(out, "  published %s.asc (operator)\n", myLogin)
-				}
-			} else {
-				fmt.Fprintln(out, "  note: couldn't resolve github login (gh auth?); skipping <login>.asc publish.")
-				fmt.Fprintln(out, "        Run `nous brain join <owner>/<repo>` from this host later to publish.")
-			}
-			if anyFailed {
-				fmt.Fprintln(out, "  (some publishes failed; peers may need sneakernet pubkey exchange)")
-			}
+			// filestore branch (nous#23) so peers cloning later can
+			// auto-import before gcrypt signature verification needs
+			// them. Shared with `nous brain publish` — see
+			// publishKeysBranch (brain_publish.go) for the why.
+			publishKeysBranch(out, cmd.Context(), abs, recipients, ownFp)
 
 			fmt.Fprintln(out)
 			fmt.Fprintln(out, "Brain provisioned.")
