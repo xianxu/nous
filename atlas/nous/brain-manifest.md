@@ -30,6 +30,10 @@ Encoding the convention in each tool independently would be parallel-mechanism f
 
 Real repo names will vary: `brain`, `family-brain`, `brain-private`, `xianxu-brain`, etc. Naming is a UX hint, not a security primitive. Conflating them is brittle — a renamed checkout would silently lose its brain-ness, or a non-brain repo named `brain` would accidentally get brain-aware behavior. The manifest is explicit, auditable, and decoupled from on-disk path.
 
+## Privacy vs. topology (two axes)
+
+`recipients:` is the **privacy** axis — who can decrypt (one = private, 2+ = shared). Orthogonal to it is **topology** — where the ciphertext lives and whether there's an upstream at all: a brain can be *local* (no remote, plaintext working tree, FileVault-protected), *private* (hosted, solo), or *shared* (hosted, multiple). A local brain and a hosted-solo brain are both single-recipient yet a rung apart. `nous#33` made topology first-class; the ladder (local → publish → private → invite → shared) and the `nous brain new`/`publish`/`invite` verbs live in `brain-topology-ladder.md`.
+
 ## Where the depth lives
 
 Full schema rationale, security posture, threat boundaries, and per-mode implications live in `brain/atlas/threat-model-shared-brain.md`. This atlas entry is the constitutional pointer; the threat model carries the load-bearing analysis.

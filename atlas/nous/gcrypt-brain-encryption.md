@@ -18,6 +18,8 @@ Per the shared-brain threat model: every brain — private and shared — is enc
 
 This means a "private" brain is operationally identical to a single-recipient shared brain. Setup procedure, push/pull, recovery — all the same.
 
+**A *local* brain has no gcrypt at all.** gcrypt only engages on push to a `gcrypt::` remote; a local-only brain (no remote — the bottom rung of the topology ladder, `nous#33`) has a plaintext working tree and plaintext git objects, protected at rest by FileVault, not gcrypt. `nous brain publish` is the moment gcrypt is wired in and the brain's history is first encrypted to the remote. The manual procedure below is what `publish` automates; `nous brain new` + `nous brain publish` is the supported path. See `brain-topology-ladder.md`.
+
 ## Provisioning a new gcrypt'd brain
 
 Prerequisite: GPG identity configured per `make identity` (in `nous/`). Confirm with `gpg --list-secret-keys --keyid-format LONG`; you should see your `[SC]` primary plus `ssb` `[E]` encrypt subkey.

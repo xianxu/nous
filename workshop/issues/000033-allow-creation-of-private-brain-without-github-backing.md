@@ -195,10 +195,18 @@ sense — detail copy disambiguates.)
       interactive `p`-publish round-trip shares M2's GitHub verify.
 
 ### M4 — Docs / atlas / threat model
-- [ ] Atlas: document the topology ladder + the privacy-vs-topology axis
-      distinction. Update `atlas/index.md`.
-- [ ] Threat model (`brain/atlas/threat-model-shared-brain.md`): add the
-      local-only posture + the iCloud-plaintext boundary caveat.
+- [x] Atlas: new `atlas/nous/brain-topology-ladder.md` (canonical ladder
+      doc — two axes, the three rungs, the verbs, TUI surfacing, the
+      external-sync boundary). Privacy-vs-topology pointer added to
+      `brain-manifest.md`; local-has-no-gcrypt note added to
+      `gcrypt-brain-encryption.md`. (No `atlas/index.md` exists in nous —
+      docs are per-subdir; nothing to update there.)
+- [x] Threat model (`brain/atlas/threat-model-shared-brain.md`, **peer
+      repo**): local-only posture + iCloud-plaintext caveat + a `nous#33`
+      Revisions entry, added as inline `🤖{}` proposal markers per
+      AGENTS.md §1 (human-centric security doc → operator reviews/accepts,
+      not a direct overwrite). **Left uncommitted in the brain repo** for
+      operator review.
 
 ## Log
 
