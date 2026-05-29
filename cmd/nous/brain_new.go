@@ -43,12 +43,19 @@ func newBrainNewCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "new BRAIN-PATH",
-		Short: "Provision a new brain (single or multi-recipient)",
-		Long: `Provision a fresh gcrypt-encrypted brain at the given path. With no
-recipient flags, the brain is private (single recipient = the operator).
-With --recipient or --fingerprint, additional GPG keys are admitted —
-each goes through the verify-fingerprint ceremony if it's not already
-in the local keyring.
+		Short: "Provision a new brain (local by default)",
+		Long: `Provision a fresh brain at the given path.
+
+With no recipient flags, the brain is LOCAL-ONLY: a git repo on this
+machine with no remote, no GitHub, no network. Encrypted at rest by
+FileVault; gcrypt only engages once it's published. This is the bottom
+rung of the topology ladder — promote it with ` + "`nous brain publish`" + `
+(→ private GitHub) and then ` + "`nous brain invite`" + ` (→ shared).
+
+With --recipient or --fingerprint, the brain is provisioned directly as
+a GitHub-backed shared brain (the multi-recipient path): additional GPG
+keys are admitted, each through the verify-fingerprint ceremony if it's
+not already in the local keyring.
 
 Flags:
   --as FP                   (when keyring has multiple secret keys)
@@ -90,6 +97,16 @@ a second commit + push (gcrypt re-encrypts to all recipients).`,
 			ownFp, err := pickAnchor(ownKeys, anchorFp)
 			if err != nil {
 				return err
+			}
+
+			// No recipient flags → bottom rung of the topology ladder: a
+			// local-only brain (git repo, no remote, no GitHub, no
+			// network). `nous brain publish` promotes it to a
+			// GitHub-backed encrypted brain later. The multi-recipient
+			// GitHub path below stays available for provisioning a shared
+			// brain directly during the transition.
+			if !multiRecipient {
+				return provisionLocal(cmd, brainPath, ownFp)
 			}
 
 			// Collect peers.
@@ -309,65 +326,105 @@ func pickAnchor(keys []identity.Key, anchorArg string) (string, error) {
 	return "", fmt.Errorf("--as %q matches no secret key in your keyring", anchorArg)
 }
 
-// findNewBrainScript locates scripts/new-brain.sh from several common
-// install layouts. The function is order-sensitive: more specific +
-// operator-controlled paths come first.
+// findNousFile locates a file relative to the nous repo root (e.g.
+// "scripts/new-brain.sh", "construct/setup.sh") across the common
+// install layouts. Order-sensitive: more specific + operator-controlled
+// paths come first.
 //
 // Resolution order:
-//  1. $NOUS_DIR/scripts/new-brain.sh — explicit override.
-//  2. <dir-of-binary>/../scripts/new-brain.sh — works for the
-//     `make nous-build` dev layout where the binary is at
-//     `nous/bin/nous` (so ../scripts/ is the script dir).
-//  3. <workspace-root>/nous/scripts/new-brain.sh — catches the
-//     case where the binary lives outside the nous source tree
+//  1. $NOUS_DIR/<rel> — explicit override.
+//  2. <dir-of-binary>/../<rel> — the `make nous-build` dev layout where
+//     the binary is at `nous/bin/nous` (so ../ is the repo root).
+//     EvalSymlinks first so bin/nous → cmd/nous/bin/nous resolves.
+//  3. <workspace-root>/nous/<rel> — binary outside the nous source tree
 //     (historically ~/.local/bin/nous from the retired
-//     `make nous-install`; today this branch mostly serves as a
-//     defensive fallback when workspace.Root resolves but the
-//     binary-relative path above misses).
-//  4. ./scripts/new-brain.sh — CWD relative; covers
-//     ad-hoc dev invocations from inside the nous repo.
-func findNewBrainScript() (string, error) {
+//     `make nous-install`); defensive fallback.
+//  4. ./<rel> — CWD relative; ad-hoc dev invocations from inside nous.
+func findNousFile(rel string) (string, error) {
+	var candidates []string
 	if dir := os.Getenv("NOUS_DIR"); dir != "" {
-		p := filepath.Join(dir, "scripts", "new-brain.sh")
-		if _, err := os.Stat(p); err == nil {
-			return p, nil
-		}
+		candidates = append(candidates, filepath.Join(dir, rel))
 	}
 	if exe, err := os.Executable(); err == nil {
-		// <root>/<repo>/bin/<exe> → <root>/<repo>/scripts/new-brain.sh
-		// EvalSymlinks so bin/nous → cmd/nous/bin/nous resolves to
-		// the real path, then walk up to scripts/.
 		real := exe
 		if r, err := filepath.EvalSymlinks(exe); err == nil {
 			real = r
 		}
-		bin := filepath.Dir(real)
-		repo := filepath.Dir(bin)
-		p := filepath.Join(repo, "scripts", "new-brain.sh")
-		if _, err := os.Stat(p); err == nil {
-			return p, nil
-		}
+		repo := filepath.Dir(filepath.Dir(real)) // <repo>/bin/<exe> → <repo>
+		candidates = append(candidates, filepath.Join(repo, rel))
 	}
-	// Workspace-root fallback: a binary that doesn't sit in the
-	// nous source tree (rare today since the install prefix
-	// collapsed to nous/bin; this branch covered the retired
-	// `make nous-install` to ~/.local/bin/nous, kept as defense.)
-	// workspace.Root() resolves to $HOME/workspace as a last resort,
-	// where nous typically lives as a sibling brain dir.
 	if root, err := workspace.Root(); err == nil {
-		p := filepath.Join(root, "nous", "scripts", "new-brain.sh")
+		candidates = append(candidates, filepath.Join(root, "nous", rel))
+	}
+	if p, err := filepath.Abs(rel); err == nil {
+		candidates = append(candidates, p)
+	}
+	for _, p := range candidates {
 		if _, err := os.Stat(p); err == nil {
 			return p, nil
 		}
 	}
-	if p, err := filepath.Abs("scripts/new-brain.sh"); err == nil {
-		if _, err := os.Stat(p); err == nil {
-			return p, nil
-		}
+	return "", fmt.Errorf("%s not found in $NOUS_DIR, binary-relative path, "+
+		"workspace-root (`<workspace>/nous/%s`), or CWD-relative. "+
+		"Set $NOUS_DIR to the nous repo root, or run from inside it.", rel, rel)
+}
+
+// findNewBrainScript locates scripts/new-brain.sh (multi-recipient
+// GitHub provisioning path). See findNousFile for resolution order.
+func findNewBrainScript() (string, error) {
+	return findNousFile(filepath.Join("scripts", "new-brain.sh"))
+}
+
+// findSetupScript locates construct/setup.sh (the substrate installer
+// that wires nous/ariadne symlinks + go.mod tooling into a brain).
+func findSetupScript() (string, error) {
+	return findNousFile(filepath.Join("construct", "setup.sh"))
+}
+
+// provisionLocal creates a local-only private brain: git init + go.mod +
+// manifest (single recipient, sync_substrate none, no remote) + initial
+// commit, with construct/setup.sh wiring the substrate in between. No
+// GitHub, no gcrypt, no network — the bottom rung of the topology
+// ladder. Delegates the scaffold to brain.InitLocal and passes a
+// closure that runs setup.sh from inside the new brain.
+func provisionLocal(cmd *cobra.Command, brainPath, ownFp string) error {
+	out := cmd.OutOrStdout()
+	abs, err := filepath.Abs(brainPath)
+	if err != nil {
+		return err
 	}
-	return "", fmt.Errorf("scripts/new-brain.sh not found in $NOUS_DIR, " +
-		"binary-relative path, workspace-root (`<workspace>/nous/scripts/`), or CWD-relative. " +
-		"Set $NOUS_DIR to the nous repo root, or run `nous brain new` from inside it.")
+	name := filepath.Base(abs)
+
+	fmt.Fprintf(out, "Provisioning local brain %q (on this device only — no remote) …\n", name)
+
+	setup := func() error {
+		script, err := findSetupScript()
+		if err != nil {
+			// Substrate wiring is best-effort: the brain is a valid git
+			// repo + manifest without it, just missing the nous/ariadne
+			// symlinks. Surface the miss so the operator can re-run
+			// setup.sh manually, but don't fail provisioning.
+			fmt.Fprintf(out, "  note: construct/setup.sh not found (%v); skipping substrate wiring.\n", err)
+			fmt.Fprintln(out, "        Run `make refresh` (or construct/setup.sh --yes) inside the brain later.")
+			return nil
+		}
+		c := exec.Command("bash", script, "--yes")
+		c.Dir = abs
+		c.Stdin = os.Stdin
+		c.Stdout = os.Stdout
+		c.Stderr = os.Stderr
+		return c.Run()
+	}
+
+	if err := brain.InitLocal(abs, name, ownFp, setup); err != nil {
+		return err
+	}
+
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "Local brain provisioned at %s\n", abs)
+	fmt.Fprintln(out, "  • on this device only — no remote; encrypted at rest by FileVault")
+	fmt.Fprintln(out, "  • `nous brain publish` backs it up to GitHub (gcrypt-encrypted) when you're ready")
+	return nil
 }
 
 // pickSubstrate returns "none" for single-recipient (private) brains

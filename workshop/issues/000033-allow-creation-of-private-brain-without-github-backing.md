@@ -118,22 +118,38 @@ sense — detail copy disambiguates.)
 ## Plan
 
 ### M1 — `nous brain new` becomes local-first
-- [ ] Extract GitHub-creation logic (`gh repo create`, remote add,
-      gcrypt-participants sync, first push) out of `brain_new.go` /
-      `scripts/new-brain.sh` into a reusable `publish` function in
-      `lib/brain/`.
-- [ ] `nous brain new` does git init + manifest (single recipient,
-      `sync_substrate: none`, no remote) + first commit only. No network.
-- [ ] Tests: offline creation produces a valid local brain; manifest has
-      no remote; `LoadStatus` reports `OriginURL == ""`, `HasUpstream ==
-      false`.
-- [ ] Verify: `nous brain new <path>` with network/GitHub auth absent
-      succeeds; `nous brain list` shows it.
+- [x] `lib/brain.InitLocal` — Go-native local scaffold: git init, go.mod
+      (substrate wiring), manifest (single recipient, `sync_substrate:
+      none`, **no remote**), initial commit. Reuses `WriteManifest`;
+      substrate step injected as a callback (testable with nil).
+- [x] `nous brain new` (no flags) routes to `provisionLocal` →
+      `InitLocal` + `construct/setup.sh`. Multi-recipient GitHub path
+      left **untouched** (gated behind `--recipient`/`--fingerprint`) so
+      shared-brain creation doesn't regress mid-ladder.
+- [x] `findNousFile` helper (DRY'd from `findNewBrainScript`) + new
+      `findSetupScript`.
+- [x] Tests: `provision_test.go` — offline creation, no-remote manifest,
+      `LoadStatus` reports `OriginURL == ""` / `HasUpstream == false`,
+      substrate-callback committed, refuses existing path / empty
+      recipient, `moduleSafe`.
+- [x] Verify: ran the built binary offline with an ephemeral GPG key —
+      brain created with no remote, clean tree, `brain list` shows it.
+
+> **Revision (2026-05-29):** the GitHub-logic *extraction* originally
+> listed here moved to M2. M1 went Go-native for the local scaffold and
+> deliberately did **not** touch `scripts/new-brain.sh` or the
+> multi-recipient path — lower risk, and the extraction is exactly what
+> M2 (publish) needs anyway. Net: M1 adds the local rung without
+> disturbing the proven GitHub bootstrap.
 
 ### M2 — `publish` primitive (local → private)
-- [ ] `nous brain publish [--brain PATH]` CLI calling the extracted
-      primitive: `gh repo create --private` → `git remote add origin
-      gcrypt::…` → gcrypt-participants sync → push.
+- [ ] Extract GitHub-creation logic (`gh repo create`, remote add,
+      gcrypt-participants sync, first push, keys-branch publish) out of
+      `brain_new.go` / `scripts/new-brain.sh` into a reusable `publish`
+      primitive (`brain.Publish` + `scripts/publish-brain.sh`).
+- [ ] `nous brain publish [--brain PATH]` CLI calling the primitive:
+      `gh repo create --private` → `git remote add origin gcrypt::…` →
+      gcrypt-participants sync → push.
 - [ ] Guard: refuse publish if a remote already exists (idempotency /
       no double-host).
 - [ ] Tests: publish a local brain → remote set, push succeeds, status
@@ -176,3 +192,19 @@ the single extracted GitHub primitive and a state-gated detail footer.
 New-brain flow decided: **always local first** (publish is always an
 explicit later gesture; new-brain has zero GitHub logic). Spec + 4-milestone
 plan written. Awaiting plan approval before implementation.
+
+### 2026-05-29 — M1 landed
+Approved (no estimate — small-issue track). Implemented the local rung:
+`brain.InitLocal` (Go-native scaffold, `lib/brain/provision.go`) +
+`provisionLocal` routing in `cmd/nous/brain_new.go`, with `findNousFile`
+DRY'd from `findNewBrainScript`. Multi-recipient GitHub path untouched.
+Tests in `provision_test.go` (all pass); `go build ./...` + `go vet` +
+`go test ./lib/brain -short` + `./cmd/nous` green. Verified the built
+binary offline with an ephemeral GPG keyring (sandbox has no secret
+keys): brain created with no remote, single recipient, `sync_substrate:
+none`, clean tree, surfaced by `nous brain list`.
+
+**Carried to M3 (copy):** `WriteManifest`'s boilerplate body still reads
+"Encrypted via gcrypt …" — false for a local brain (plaintext on disk,
+FileVault-protected). The frontmatter is correct; only the human body
+line misleads. Fix when M3 touches copy.
