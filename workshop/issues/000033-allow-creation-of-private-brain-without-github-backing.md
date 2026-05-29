@@ -277,3 +277,25 @@ M1-carried nit). Operator `*` now shows for local brains (call-site
 logic; `IsOperator`'s GitHub contract untouched). All unit tests green
 (`lib/tui/brain`, `lib/brain -short`, `cmd/nous`); visually rendered all
 three rungs to confirm. Interactive publish round-trip shares M2's verify.
+
+### 2026-05-29 — M4 (atlas) + code review (M1–M4) + fixes
+M4: new `atlas/nous/brain-topology-ladder.md`; pointers in
+`brain-manifest.md` + `gcrypt-brain-encryption.md`; threat-model
+additions (peer brain repo) as inline `🤖{}` markers (autosave-committed
+locally, not pushed; pending operator accept).
+
+Fresh-eyes code review over `8b7aa55..b799476` (per AGENTS.md §3). **No
+Critical findings**; multi-recipient path confirmed behaviorally
+unchanged; guard / gcrypt-participants / TUI rung-gating / publish
+subprocess wiring verified clean. Addressed both Important findings:
+(1) single-recipient manifest body had re-introduced a rung-specific
+clause that goes stale post-publish → reworded topology-neutral;
+(2) documented the `replace … => ../nous` sibling-of-nous invariant in
+`provision.go` (matches new-brain.sh; not derived, by design). Minor:
+tempfile `trap` in publish-brain.sh. Pre-existing `readOriginURL`
+triplication left as-is (out of scope). Lessons captured in
+`workshop/lessons.md`. Build + vet + `go test ./lib/brain -short
+./cmd/nous ./lib/tui/brain` green.
+
+**Status: M1, M3, M4 complete + verified offline. M2 code complete +
+reviewed; only the GitHub round-trip verify remains (operator-run).**

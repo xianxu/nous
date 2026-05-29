@@ -16,6 +16,14 @@ import (
 // scripts/new-brain.sh step 6, minus the GitHub-derived module path
 // (we have no remote, and resolving an owner would need `gh` auth —
 // exactly the network dependency a local brain avoids).
+//
+// The `replace … => ../nous` target is NOT cosmetic — it's the
+// substrate-ancestor wiring construct/setup.sh's go.mod-based discovery
+// walks. It hardcodes the workspace invariant that brains live as direct
+// peers of the `nous` repo (`~/workspace/{nous,brain,...}`), matching
+// scripts/new-brain.sh, which emits the same `../nous`. A brain created
+// outside that layout won't resolve the substrate until the path is
+// fixed up.
 const localGoModTmpl = `module local/%s
 
 go 1.22

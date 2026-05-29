@@ -121,6 +121,7 @@ elif gh api "repos/$GH_FULL" --silent >/dev/null 2>&1; then
 else
     info "Creating GitHub repo $GH_FULL (private, no issues, no wiki)..."
     create_err=$(mktemp -t publish-brain-create.XXXXXX)
+    trap 'rm -f "$create_err"' EXIT
     if ! create_repo 2>"$create_err"; then
         if grep -q "users/$GH_OWNER" "$create_err" 2>/dev/null \
            && [ "$(gh api user --jq .login 2>/dev/null)" = "$GH_OWNER" ]; then

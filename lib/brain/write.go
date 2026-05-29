@@ -146,7 +146,7 @@ func renderManifest(m Manifest) string {
 	if m.Shared() {
 		fmt.Fprintf(&b, "# %s brain manifest\n\nMulti-recipient GPG list (%d recipients); encrypted via gcrypt when pushed to a remote. Bootstrapped by `nous brain new`.\n\nSchema reference: ariadne `AGENTS.md` §1 (Peer Repo). Security posture: `atlas/threat-model-shared-brain.md`.\n", name, len(recipients))
 	} else {
-		fmt.Fprintf(&b, "# %s brain manifest\n\nSingle-recipient GPG list (the operator); encrypted via gcrypt when pushed to a remote. A local-only brain stays plaintext on disk (FileVault is the at-rest protection) until `nous brain publish`. Bootstrapped by `nous brain new`.\n\nSchema reference: ariadne `AGENTS.md` §1 (Peer Repo). Security posture: `atlas/threat-model-shared-brain.md`.\n", name)
+		fmt.Fprintf(&b, "# %s brain manifest\n\nSingle-recipient GPG list (the operator); encrypted via gcrypt when pushed to a remote. Bootstrapped by `nous brain new`.\n\nSchema reference: ariadne `AGENTS.md` §1 (Peer Repo). Security posture: `atlas/threat-model-shared-brain.md`.\n", name)
 	}
 	return b.String()
 }

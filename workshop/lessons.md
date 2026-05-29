@@ -139,3 +139,44 @@ Process notes for M5:
   commit; I missed the pause. **Rule:** when implementing the
   second copy of a small algorithm, the pause is mandatory, not
   optional.
+
+## nous#33 — local-only brains + topology ladder (2026-05-29)
+
+- **Editing any file inside a brain triggers autosave (auto-commit).**
+  Adding inline `🤖{}` proposal markers to `brain/atlas/threat-model-
+  shared-brain.md` (intending to leave them as uncommitted working-tree
+  proposals per AGENTS.md §1) got auto-committed by the brain's autosave
+  daemon as three local commits. Harmless here (committed locally, not
+  pushed; the operator still reviews/accepts the markers in-editor), but
+  **the "leave it uncommitted for review" mental model doesn't hold
+  inside a brain.** **Rule:** before editing a file in a brain repo,
+  expect autosave to commit it; if you need a true uncommitted proposal,
+  say so to the operator rather than assuming the working tree stays
+  dirty.
+- **"Offline" was a false assumption — `gh` was authenticated in the
+  sandbox.** A TUI/CLI verify ran `nous brain publish --brain X --yes`
+  expecting it to fail fast at "no gh auth"; instead `gh` was live as
+  the real user, and only a `| head` SIGPIPE killed the script before
+  `gh repo create` ran against the operator's account. **Rule:** never
+  run a command with outward-facing side effects (repo create, push)
+  on the assumption that auth is absent — check `gh auth status` first,
+  or run against a hand-made fixture that can't reach the network, and
+  never pass `--yes` to a creating command during a "safe" probe.
+- **Rewording a doc to be "topology-neutral" — don't leave a stale
+  rung-specific sibling.** M3 reworded the shared-recipient manifest
+  body to drop the false "Encrypted via gcrypt" claim, but the
+  single-recipient body gained a NEW rung-specific clause ("stays
+  plaintext until `nous brain publish`") that goes stale the moment the
+  brain is published (publish doesn't rewrite the body). Reviewer caught
+  it. **Rule:** when you neutralize state-specific wording in one branch
+  of a conditional, audit the sibling branches for the same class of
+  claim — a half-applied reword is worse than none (it reads as
+  authoritative-but-wrong).
+- **Milestone scoping under "can't verify here" constraints.** M2's
+  GitHub round-trip wasn't runnable in-env, so the GitHub-create
+  ceremony was duplicated into `publish-brain.sh` rather than extracted
+  from the proven `new-brain.sh` (which couldn't be re-verified). Logged
+  as tracked DRY debt, not silently shipped. **Rule:** when you can't
+  runtime-verify a refactor of proven code, prefer additive duplication
+  with a tracked-debt note over an unverifiable in-place rewrite — and
+  make the deferral explicit in the issue, not just the commit.
