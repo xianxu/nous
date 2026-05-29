@@ -33,6 +33,7 @@ type listItem struct {
 	isPending  bool
 	isUncloned bool
 	isOperator bool // local-brain-only; false for invitations / uncloned
+	hasRemote  bool // local-brain-only; true once published (origin set)
 }
 
 // labelInner is the post-marker text — basename + kind/count for
@@ -61,10 +62,8 @@ func (it listItem) labelInner() string {
 	// basename is the unambiguous answer.
 	name := filepath.Base(it.manifest.Path)
 	n := len(it.manifest.Recipients)
-	if n <= 1 {
-		return fmt.Sprintf("%-22s  (private)", name)
-	}
-	return fmt.Sprintf("%-22s  (shared, %d collaborators)", name, n)
+	r := classifyRung(it.hasRemote, n)
+	return fmt.Sprintf("%-22s  %s", name, rungLabel(r, n))
 }
 
 type listModel struct {
@@ -169,11 +168,15 @@ func mergeUserReposDedup(a, b []gh.UserRepo) []gh.UserRepo {
 func buildLocalItems(manifests []libbrain.Manifest, myLogin string) []listItem {
 	items := make([]listItem, 0, len(manifests))
 	for _, m := range manifests {
-		isOp := false
-		if myLogin != "" {
+		hasRemote := libbrain.ReadOriginURL(m.Path) != ""
+		// A local brain (no remote) is trivially yours — show the
+		// owner marker even with no gh auth. A published brain defers
+		// to GitHub ownership/permission via IsOperator.
+		isOp := !hasRemote
+		if hasRemote && myLogin != "" {
 			isOp = libbrain.IsOperator(m.Path, myLogin)
 		}
-		items = append(items, listItem{manifest: m, isOperator: isOp})
+		items = append(items, listItem{manifest: m, isOperator: isOp, hasRemote: hasRemote})
 	}
 	sort.Slice(items, func(i, j int) bool {
 		return filepath.Base(items[i].manifest.Path) < filepath.Base(items[j].manifest.Path)
@@ -474,10 +477,8 @@ func (m listModel) View() string {
 		b.WriteString(mutedStyle.Render("  loading collaborators..."))
 		b.WriteString("\n")
 	}
-	if m.myLogin != "" {
-		b.WriteString(mutedStyle.Render("  (* = owner)"))
-		b.WriteString("\n")
-	}
+	b.WriteString(mutedStyle.Render("  (* = owner · local = this device only)"))
+	b.WriteString("\n")
 	b.WriteString(helpStyle.Render("↑↓/jk  navigate    enter  drill in    n  new brain    r  refresh    q/esc  quit"))
 	return b.String()
 }

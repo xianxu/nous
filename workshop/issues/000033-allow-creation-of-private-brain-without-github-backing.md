@@ -170,16 +170,29 @@ sense — detail copy disambiguates.)
 > a shared `brain-lib.sh` once the round-trip is verified.
 
 ### M3 — TUI ladder
-- [ ] `list.go`: 3-rung label (`local` / `private` / `shared · N`).
-- [ ] `detail.go`: state-gated action footer per rung; remove
-      silently-blocked actions.
-- [ ] `root.go`: `screenPublish` + `p` keybinding wired from `local`
-      detail view; on success re-render as `private`.
-- [ ] Copy fix: `no upstream configured` → `local only — lives on this
-      device, no remote`.
-- [ ] `IsOperator`: local-only brain → operator (`*`).
-- [ ] Verify: drive the TUI through local → publish → private → invite →
-      shared; each rung shows exactly its next gesture.
+- [x] `rung.go`: shared `classifyRung` + `rungLabel` (DRY between list
+      and detail; the privacy-vs-topology distinction lives here once).
+- [x] `list.go`: 3-rung label (`local` / `private` / `shared · N`),
+      derived from a per-item `hasRemote` computed once at build time.
+- [x] `detail.go`: rung-based header + **state-gated action footer**
+      (local→`p`, private→`a`, shared→`a`/`r`/`l`); handlers gated to
+      match (no silently-failing actions; `a` on local nudges to publish).
+- [x] `root.go`: `p` → `launchPublishMsg` → runs `nous brain publish` as
+      a foreground subprocess (pinentry-safe, like clone) →
+      `publishSubprocessDoneMsg` re-enters detail showing the new rung.
+      (Used the subprocess pattern rather than a `screenPublish` model —
+      reuses the M2 CLI, no duplicate flow.)
+- [x] Copy fix: empty `OriginURL` → `local only — lives on this device,
+      no remote` (detail); `WriteManifest` body reworded
+      topology-neutral ("encrypted via gcrypt when pushed to a remote"),
+      closing the M1-carried "Encrypted via gcrypt" nit at its source.
+- [x] Operator marker: local-only brain → owner (`*`), handled at the
+      list call site (no change to `IsOperator`'s GitHub contract);
+      legend always rendered so the marker isn't orphaned without gh auth.
+- [x] Verify (offline): unit tests (rung classify/label, list label,
+      detail render + action-gating per rung, publish message flow, root
+      publish-done handling) + a visual render of all three rungs. The
+      interactive `p`-publish round-trip shares M2's GitHub verify.
 
 ### M4 — Docs / atlas / threat model
 - [ ] Atlas: document the topology ladder + the privacy-vs-topology axis
@@ -241,3 +254,18 @@ the operator's, or theirs-to-authorize against a throwaway repo.
 
 DRY debt logged in the M2 plan block: `publish-brain.sh` duplicates
 `new-brain.sh`'s gh-create ceremony; unify post-verify.
+
+### 2026-05-29 — M3 landed (TUI ladder)
+Surfaced the topology ladder in `nous brain`. New `rung.go` holds the
+shared `classifyRung`/`rungLabel` (used by both list and detail). List
+shows the 3-rung label; detail shows a rung-based header + a state-gated
+footer that offers only the next-rung gesture (local→`p` publish,
+private→`a` invite, shared→`a`/`r`/`l`), with handlers gated to match.
+`p` runs `nous brain publish` as a foreground subprocess (reuses the M2
+CLI; pinentry-safe) and re-enters detail on return. Copy fixed in two
+places: detail's "no upstream" → "local only — lives on this device",
+and `WriteManifest`'s body reworded topology-neutral (closes the
+M1-carried nit). Operator `*` now shows for local brains (call-site
+logic; `IsOperator`'s GitHub contract untouched). All unit tests green
+(`lib/tui/brain`, `lib/brain -short`, `cmd/nous`); visually rendered all
+three rungs to confirm. Interactive publish round-trip shares M2's verify.

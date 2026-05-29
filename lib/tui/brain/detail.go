@@ -29,6 +29,13 @@ type openConflictPreviewMsg struct {
 
 type popToListMsg struct{}
 
+// launchPublishMsg asks the root model to publish a local brain to
+// GitHub (the local → private rung). The root runs `nous brain publish`
+// as a foreground subprocess so gpg/ssh pinentry prompts work.
+type launchPublishMsg struct {
+	brainPath string
+}
+
 type launchRecipientAddMsg struct {
 	brainPath string
 }
@@ -71,28 +78,55 @@ func (m detailModel) Update(msg tea.Msg) (detailModel, tea.Cmd) {
 		m.err = msg.err
 		return m, nil
 	case tea.KeyMsg:
+		// Actions are gated by the brain's rung (nous#33): a local brain
+		// can only `p` publish; a published brain can `a`/`r`/`l`. We
+		// don't list — or accept — actions that the current rung can't
+		// perform, rather than letting them fail downstream.
+		if m.loading || m.err != nil {
+			// Only nav keys work while loading / on error.
+			switch msg.String() {
+			case "esc":
+				return m, func() tea.Msg { return popToListMsg{} }
+			case "q", "ctrl+c":
+				return m, tea.Quit
+			}
+			return m, nil
+		}
+		r := classifyRung(m.status.OriginURL != "", len(m.status.Manifest.Recipients))
 		switch msg.String() {
 		case "esc":
 			return m, func() tea.Msg { return popToListMsg{} }
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "c":
-			if m.loading || m.err != nil || len(m.status.ConflictFiles) == 0 {
+			if len(m.status.ConflictFiles) == 0 {
 				m.banner = "no conflicts to preview"
 				return m, nil
 			}
 			return m, func() tea.Msg {
 				return openConflictPreviewMsg{root: m.path, rels: m.status.ConflictFiles}
 			}
+		case "p":
+			// Publish: local → private. Only meaningful on a local brain.
+			if r != rungLocal {
+				return m, nil
+			}
+			return m, func() tea.Msg {
+				return launchPublishMsg{brainPath: m.path}
+			}
 		case "a":
-			if m.loading || m.err != nil {
+			// Invite a collaborator: needs a hosted repo. Local brains
+			// must publish first.
+			if r == rungLocal {
+				m.banner = "publish first (press p) — can't invite to a local-only brain"
 				return m, nil
 			}
 			return m, func() tea.Msg {
 				return launchInviteCollabMsg{brainPath: m.path}
 			}
 		case "r":
-			if m.loading || m.err != nil {
+			// Remove a collaborator: only meaningful on a shared brain.
+			if r != rungShared {
 				return m, nil
 			}
 			if len(m.status.Recipients) == 0 {
@@ -103,10 +137,11 @@ func (m detailModel) Update(msg tea.Msg) (detailModel, tea.Cmd) {
 				return launchRecipientRemoveMsg{brainPath: m.path, recipients: m.status.Recipients}
 			}
 		case "l":
-			// Leave this brain. Refuses are inside LeaveBrain itself
-			// (owner-check, not-a-collaborator, last-collaborator); the
-			// TUI's job is just routing to the confirm screen.
-			if m.loading || m.err != nil {
+			// Leave this brain — only meaningful when it's shared (a
+			// private/local brain is solely yours; there's nothing to
+			// leave). Refuses inside LeaveBrain itself; the TUI just
+			// routes to the confirm screen.
+			if r != rungShared {
 				return m, nil
 			}
 			return m, func() tea.Msg {
@@ -136,16 +171,25 @@ func (m detailModel) View() string {
 	}
 
 	s := m.status
-	kind := "private"
-	if s.Manifest.Shared() {
-		kind = "shared"
+	// Header reflects the topology rung (nous#33), not just recipient
+	// count: a local brain and a hosted-solo brain are both "private" by
+	// recipients but a rung apart. The label tells the operator where
+	// the brain lives.
+	rg := classifyRung(s.OriginURL != "", len(s.Manifest.Recipients))
+	var headerLine string
+	switch rg {
+	case rungLocal:
+		headerLine = "local — on this device only, no remote"
+	case rungShared:
+		headerLine = fmt.Sprintf("shared · %d collaborators · github", len(s.Manifest.Recipients))
+	default:
+		headerLine = "private · github"
 	}
 	// sync_substrate names any *additional* file-sync layer beyond
 	// git+gcrypt (syncthing, git-daemon). The default "" / "none" means
 	// "git+gcrypt only" — which IS the sync mechanism — so showing it
 	// in the header was misleading ("am I not syncing?"). Surface only
 	// when a substrate is actually configured.
-	headerLine := fmt.Sprintf("%s · %d collaborator(s)", kind, len(s.Manifest.Recipients))
 	if sub := s.Manifest.SyncSubstrate; sub != "" && sub != "none" {
 		headerLine += fmt.Sprintf(" · sync_substrate: %s", sub)
 	}
@@ -208,7 +252,12 @@ func (m detailModel) View() string {
 	}
 	if !s.HasUpstream {
 		b.WriteString("  ")
-		b.WriteString(mutedStyle.Render("no upstream configured"))
+		if s.OriginURL == "" {
+			// Intentional state for a local brain, not a misconfiguration.
+			b.WriteString(mutedStyle.Render("local only — lives on this device, no remote"))
+		} else {
+			b.WriteString(mutedStyle.Render("no upstream configured"))
+		}
 		b.WriteString("\n")
 	} else {
 		ahead := fmt.Sprintf("ahead %d", s.Ahead)
@@ -276,7 +325,22 @@ func (m detailModel) View() string {
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("a  add collaborator    r  remove collaborator    l  leave brain    c  preview conflicts    esc  back    q  quit"))
+	// State-gated footer: show only the actions valid at this rung —
+	// the "next gesture up the ladder" plus management for shared brains.
+	var actions []string
+	switch rg {
+	case rungLocal:
+		actions = []string{"p  publish to GitHub"}
+	case rungShared:
+		actions = []string{"a  invite", "r  remove collaborator", "l  leave brain"}
+	default: // rungPrivate
+		actions = []string{"a  invite a collaborator"}
+	}
+	if len(s.ConflictFiles) > 0 {
+		actions = append(actions, "c  preview conflicts")
+	}
+	actions = append(actions, "esc  back", "q  quit")
+	b.WriteString(helpStyle.Render(strings.Join(actions, "    ")))
 	return b.String()
 }
 

@@ -137,10 +137,16 @@ func renderManifest(m Manifest) string {
 	if name == "" {
 		name = "brain"
 	}
+	// Body wording is topology-neutral: the manifest can't tell whether
+	// this brain has a remote yet (a local brain and a hosted-private
+	// brain both have one recipient + sync_substrate none), so it must
+	// not assert "encrypted" — a local brain's working tree is plaintext
+	// until it's published. "Encrypted via gcrypt when published" is true
+	// at every rung of the topology ladder (nous#33).
 	if m.Shared() {
-		fmt.Fprintf(&b, "# %s brain manifest\n\nEncrypted via gcrypt with a multi-recipient GPG list (%d recipients). Bootstrapped by `nous brain new`.\n\nSchema reference: ariadne `AGENTS.md` §1 (Peer Repo). Security posture: `atlas/threat-model-shared-brain.md`.\n", name, len(recipients))
+		fmt.Fprintf(&b, "# %s brain manifest\n\nMulti-recipient GPG list (%d recipients); encrypted via gcrypt when pushed to a remote. Bootstrapped by `nous brain new`.\n\nSchema reference: ariadne `AGENTS.md` §1 (Peer Repo). Security posture: `atlas/threat-model-shared-brain.md`.\n", name, len(recipients))
 	} else {
-		fmt.Fprintf(&b, "# %s brain manifest\n\nEncrypted via gcrypt with a single-recipient GPG list (the operator). Bootstrapped by `nous brain new`.\n\nSchema reference: ariadne `AGENTS.md` §1 (Peer Repo). Security posture: `atlas/threat-model-shared-brain.md`.\n", name)
+		fmt.Fprintf(&b, "# %s brain manifest\n\nSingle-recipient GPG list (the operator); encrypted via gcrypt when pushed to a remote. A local-only brain stays plaintext on disk (FileVault is the at-rest protection) until `nous brain publish`. Bootstrapped by `nous brain new`.\n\nSchema reference: ariadne `AGENTS.md` §1 (Peer Repo). Security posture: `atlas/threat-model-shared-brain.md`.\n", name)
 	}
 	return b.String()
 }

@@ -1,10 +1,22 @@
 package brain
 
 import (
+	"os"
+	"os/exec"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/xianxu/nous/lib/gh"
 )
+
+// publishSubprocessDoneMsg signals "the `nous brain publish` subprocess
+// returned." On success the brain is now private (origin set); we
+// re-enter the detail view so its refreshed status shows the new rung
+// and the `a invite` gesture.
+type publishSubprocessDoneMsg struct {
+	path string
+	err  error
+}
 
 // rootModel owns the screen stack for the brain TUI: list ⇄ detail ⇄
 // conflict preview, plus the recipient add/remove flows launched from
@@ -125,6 +137,35 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.current = screenAcceptInvite
 		m.acceptInvite = newAcceptInviteModel(msg.invitation)
 		return m, m.acceptInvite.Init()
+	case launchPublishMsg:
+		// Publish runs as a foreground subprocess (suspends the TUI):
+		// gh repo create + gcrypt push need a real terminal for gpg/ssh
+		// pinentry. Same posture as the clone subprocess. Reuses the
+		// `nous brain publish` CLI rather than re-implementing the flow.
+		bin, err := os.Executable()
+		if err != nil {
+			bin = "nous"
+		}
+		path := msg.brainPath
+		cmd := exec.Command(bin, "brain", "publish", "--brain", path)
+		cmd.Env = os.Environ()
+		return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+			return publishSubprocessDoneMsg{path: path, err: err}
+		})
+	case publishSubprocessDoneMsg:
+		// Origin may now be set; the list's per-brain rung is recomputed
+		// on next render, so drop the cache. Return to the detail view
+		// for the same brain — its Init re-loads Status, surfacing the
+		// new rung (private) and the `a invite` action.
+		m.listCache = nil
+		m.current = screenDetail
+		m.detail = newDetailModel(msg.path)
+		if msg.err == nil {
+			m.detail.banner = "✓ published — now private (GitHub-backed)"
+		} else {
+			m.detail.banner = "✗ publish: " + msg.err.Error()
+		}
+		return m, m.detail.Init()
 	case launchLeaveMsg:
 		m.current = screenLeave
 		m.leave = newLeaveModel(msg.brainPath)
