@@ -1,10 +1,10 @@
 ---
 id: 000033
-status: working
+status: done
 deps: []
 github_issue:
 created: 2026-05-26
-updated: 2026-05-30
+updated: 2026-05-31
 estimate_hours:
 actual_hours:
 ---
@@ -161,10 +161,10 @@ sense — detail copy disambiguates.)
       `--brain` resolution, bad path, `shortFps`, `orPlaceholder`. All
       green. Offline CLI checks: `--help`, guard refuses a
       remote-bearing brain, Go→script handoff reaches `publish-brain.sh`.
-- [ ] **Verify (operator-run): round-trip** — `nous brain new` a local
-      brain, `nous brain publish` it, confirm the GitHub repo holds
-      opaque ciphertext and `git clone` round-trips. Needs a real GPG
-      secret key + push; deferred to the operator (see Log).
+- [x] **Verify (operator-run): round-trip** — operator ran it manually
+      (2026-05-31): `nous brain new` (local, no identity) → `nous brain
+      publish --as` → GitHub holds opaque ciphertext, `git clone`
+      round-trips. All good. ✓
 
 > **DRY debt (tracked):** the gh-repo-create ceremony in
 > `publish-brain.sh` is duplicated from `new-brain.sh` step 3 rather
@@ -215,6 +215,8 @@ sense — detail copy disambiguates.)
 
 ## Log
 
+
+- 2026-05-31: closed — operator ran local→publish→clone round-trip manually (2026-05-31): GitHub holds opaque gcrypt ciphertext, clone round-trips; nous brain new verified creating a brain with zero GPG keys; build+vet+go test green; M1-M4 code-reviewed. FORCE: small-issue track, operator opted out of velocity/actual-hours tracking.
 ### 2026-05-29 — session summary
 Design session (no code). Brainstormed the privacy-vs-topology split:
 the requested "local-only private brain" is not a new privacy mode but a
@@ -335,3 +337,9 @@ verified working with no GPG key.
 the lightweight upstream step (local create) to save ceremony later is a
 false economy — it taxes the common case and couples a dependency where
 none belongs. Put the ceremony where the need actually arises.
+
+### 2026-05-31 — round-trip verified; closing
+Operator ran the full local → publish → confirm-ciphertext → clone
+round-trip by hand; all good. M2's last open box ticked. All four
+milestones + the deferred-identity revision complete and verified.
+Closing the issue and pushing the branch.
