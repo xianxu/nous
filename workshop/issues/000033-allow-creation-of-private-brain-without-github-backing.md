@@ -1,6 +1,6 @@
 ---
 id: 000033
-status: working
+status: done
 deps: []
 github_issue:
 created: 2026-05-26
@@ -216,6 +216,8 @@ sense — detail copy disambiguates.)
 ## Log
 
 
+
+- 2026-05-31: closed — operator round-trip verified (local→publish→clone); TUI new-brain flow now local-only (no identity picker), CLI new needs no GPG key, detail `p` publishes; build+vet+go test (lib/brain,cmd/nous,lib/tui/brain) green. FORCE: small-issue track, no velocity actuals per session directive.
 - 2026-05-31: closed — operator ran local→publish→clone round-trip manually (2026-05-31): GitHub holds opaque gcrypt ciphertext, clone round-trips; nous brain new verified creating a brain with zero GPG keys; build+vet+go test green; M1-M4 code-reviewed. FORCE: small-issue track, operator opted out of velocity/actual-hours tracking.
 ### 2026-05-29 — session summary
 Design session (no code). Brainstormed the privacy-vs-topology split:
