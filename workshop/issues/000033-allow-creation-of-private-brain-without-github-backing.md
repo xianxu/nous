@@ -1,6 +1,6 @@
 ---
 id: 000033
-status: done
+status: working
 deps: []
 github_issue:
 created: 2026-05-26
@@ -343,3 +343,25 @@ Operator ran the full local → publish → confirm-ciphertext → clone
 round-trip by hand; all good. M2's last open box ticked. All four
 milestones + the deferred-identity revision complete and verified.
 Closing the issue and pushing the branch.
+
+### 2026-05-31 — follow-up: TUI new-brain flow was still doing identity ceremony
+Operator caught it post-close: M3 wired the detail-view `p` publish
+action and the rung labels, but I never updated the TUI's **new-brain
+flow** (`lib/tui/brain/new.go`, the list's `n` key). It delegated to
+`nous brain new` (so it *did* create a local brain functionally), but
+still ran the old identity-picker stage for multi-key operators and a
+confirm screen warning about "GPG passphrase and gh confirmations" —
+the exact ceremony the deferred-identity fix removed.
+
+Fixed: dropped `newStageIdentity` entirely (a local brain needs no key);
+path → confirm directly; removed the `--as` passthrough; reworded the
+confirm + done copy to describe local creation ("no remote, no network,
+no GPG key needed; publish later with `p`"). Tests `new_test.go` pin the
+path→confirm transition and the local copy. Build + TUI + cmd suites
+green; rendered the flow to confirm. Reopened → fixed → re-closing.
+
+Lesson reinforced: when a behavior change lands (identity deferral),
+sweep *every* surface that performs it — I updated the CLI and the
+detail view but missed the sibling new-brain TUI flow. "Surface the
+ladder in the TUI" (M3) should have included the creation entry point,
+not just the labels + detail actions.

@@ -9,36 +9,32 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-
-	"github.com/xianxu/nous/lib/identity"
 )
 
 // new.go owns the "create a new brain" flow launched from the list
-// screen (key: `n`). The flow is intentionally thin — the TUI is the
-// launchpad, not a re-implementation of nous brain new's logic:
+// screen (key: `n`). It creates a LOCAL brain (nous#33): no remote, no
+// GitHub, no network, and — crucially — no GPG identity. The flow is
+// intentionally thin:
 //
 //  1. Prompt for target directory path.
 //  2. Confirm.
-//  3. tea.ExecProcess delegates to `nous brain new <path>`,
-//     temporarily releasing the terminal so the script can do its
-//     GPG-passphrase + gh-prompt + confirmation ceremony in the
-//     normal terminal mode.
+//  3. tea.ExecProcess delegates to `nous brain new <path>` (which
+//     defaults to local creation), briefly releasing the terminal.
 //  4. On subprocess completion, return to the list (refreshed).
 //
-// Why not re-implement the ceremony in tea? Because nous brain new
-// already handles the multi-step prompts, gpg-agent invocations,
-// and gh API calls correctly. Reimplementing inside bubbletea would
-// require duplicating that logic AND fighting bubbletea's alternate-
-// screen rendering against gpg-agent's pinentry. Delegation via
-// ExecProcess is the right boundary.
+// No identity picker, no passphrase prompt: a local brain has nothing
+// to encrypt, so there's no key to choose. The recipient (and any GPG
+// ceremony) is established later, by `nous brain publish` — which the
+// operator reaches via the detail view's `p` action once the brain
+// exists. Delegating to the CLI via ExecProcess keeps a single source
+// of truth for what "create a brain" means.
 
 type newBrainStage int
 
 const (
-	newStagePath     newBrainStage = iota // textinput for path
-	newStageIdentity                      // arrow-key picker for anchor key (only when >1 secret key)
-	newStageConfirm                       // "Run nous brain new <path>? [Y/n]"
-	newStageDone                          // result rendered; any key returns
+	newStagePath    newBrainStage = iota // textinput for path
+	newStageConfirm                      // "Run nous brain new <path>? [Y/n]"
+	newStageDone                         // result rendered; any key returns
 )
 
 // launchNewBrainMsg signals "open the new-brain flow." Emitted by
@@ -60,32 +56,18 @@ type newBrainModel struct {
 	stage newBrainStage
 	path  textinput.Model
 
-	picked   string         // resolved path; passed to ExecProcess
-	idKeys   []identity.Key // secret keys for the picker (newStageIdentity)
-	idCursor int            // cursor in idKeys
-	idFp     string         // picked anchor fingerprint; "" when single-key
-	err      error
-
-	idErr error // populated when identity.List itself failed
+	picked string // resolved path; passed to ExecProcess
+	err    error
 }
 
 func newNewBrainModel() newBrainModel {
 	p := textinput.New()
-	p.Placeholder = "../brain-family"
+	p.Placeholder = "../my-notes"
 	p.Prompt = "  target path> "
 	p.CharLimit = 1024
 	p.Width = 64
 	p.Focus()
-	m := newBrainModel{stage: newStagePath, path: p}
-	// Eager-load identity list so the path-stage's `next` decision
-	// (skip-identity vs show-picker) doesn't lag the keystroke.
-	keys, err := identity.List()
-	if err != nil {
-		m.idErr = err
-	} else {
-		m.idKeys = keys
-	}
-	return m
+	return newBrainModel{stage: newStagePath, path: p}
 }
 
 func (m newBrainModel) Init() tea.Cmd { return textinput.Blink }
@@ -117,8 +99,6 @@ func (m newBrainModel) Update(msg tea.Msg) (newBrainModel, tea.Cmd) {
 	switch m.stage {
 	case newStagePath:
 		return m.updatePath(msg)
-	case newStageIdentity:
-		return m.updateIdentity(msg)
 	case newStageConfirm:
 		return m.updateConfirm(msg)
 	case newStageDone:
@@ -150,14 +130,9 @@ func (m newBrainModel) updatePath(msg tea.Msg) (newBrainModel, tea.Cmd) {
 				return m, nil
 			}
 			m.picked = abs
-			// Next stage depends on identity count: skip the picker
-			// when there's a single secret key (or the list failed —
-			// let the subprocess surface that error).
-			if len(m.idKeys) > 1 {
-				m.stage = newStageIdentity
-			} else {
-				m.stage = newStageConfirm
-			}
+			// No identity stage — a local brain needs no key. Straight
+			// to confirm.
+			m.stage = newStageConfirm
 			return m, nil
 		}
 	}
@@ -214,29 +189,6 @@ func resolvePath(input string) string {
 	return abs
 }
 
-func (m newBrainModel) updateIdentity(msg tea.Msg) (newBrainModel, tea.Cmd) {
-	km, ok := msg.(tea.KeyMsg)
-	if !ok {
-		return m, nil
-	}
-	switch km.String() {
-	case "esc", "ctrl+c":
-		return m, func() tea.Msg { return cancelNewBrainMsg{} }
-	case "up", "k":
-		if m.idCursor > 0 {
-			m.idCursor--
-		}
-	case "down", "j":
-		if m.idCursor < len(m.idKeys)-1 {
-			m.idCursor++
-		}
-	case "enter":
-		m.idFp = m.idKeys[m.idCursor].Fingerprint
-		m.stage = newStageConfirm
-	}
-	return m, nil
-}
-
 func (m newBrainModel) updateConfirm(msg tea.Msg) (newBrainModel, tea.Cmd) {
 	km, ok := msg.(tea.KeyMsg)
 	if !ok {
@@ -253,16 +205,9 @@ func (m newBrainModel) updateConfirm(msg tea.Msg) (newBrainModel, tea.Cmd) {
 		if err != nil {
 			bin = "nous" // fall back to PATH lookup
 		}
-		args := []string{"brain", "new", m.picked}
-		if m.idFp != "" {
-			// Disambiguate the operator's anchor key (--as flag, added
-			// alongside this TUI stage so the subprocess doesn't bail
-			// with "multiple secret keys" when keyring has >1).
-			args = append(args, "--as", m.idFp)
-		}
-		cmd := exec.Command(bin, args...)
-		// Pass through current env; nous brain new reads gh auth,
-		// GNUPGHOME, etc.
+		// `nous brain new <path>` with no flags → a local brain. No
+		// --as: local creation ignores the identity entirely.
+		cmd := exec.Command(bin, "brain", "new", m.picked)
 		cmd.Env = os.Environ()
 		return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
 			return subprocessCompletedMsg{err: err}
@@ -300,34 +245,16 @@ func (m newBrainModel) View() string {
 		b.WriteString("\n")
 		b.WriteString(helpStyle.Render("enter  continue    esc  cancel"))
 
-	case newStageIdentity:
-		b.WriteString("Multiple secret keys in your keyring. Which key should anchor\n")
-		b.WriteString("this brain? (You'll be the only collaborator at first; admit\n")
-		b.WriteString("others later with `nous brain invite`.)\n\n")
-		for i, k := range m.idKeys {
-			row := fmt.Sprintf("  %s  %s", shortFingerprint(k.Fingerprint), k.UID)
-			if i == m.idCursor {
-				row = cursorRowStyle.Render("▸ " + fmt.Sprintf("%s  %s", shortFingerprint(k.Fingerprint), k.UID))
-			}
-			b.WriteString(row)
-			b.WriteString("\n")
-		}
-		b.WriteString("\n")
-		b.WriteString(helpStyle.Render("↑↓/jk  navigate    enter  pick    esc  cancel"))
-
 	case newStageConfirm:
 		b.WriteString("About to launch:\n\n")
-		invoc := fmt.Sprintf("nous brain new %s", m.picked)
-		if m.idFp != "" {
-			invoc += " --as " + shortFingerprint(m.idFp)
-		}
 		b.WriteString("  ")
-		b.WriteString(cursorRowStyle.Render(invoc))
+		b.WriteString(cursorRowStyle.Render(fmt.Sprintf("nous brain new %s", m.picked)))
 		b.WriteString("\n\n")
 		b.WriteString(mutedStyle.Render(
-			"That command will prompt for your GPG passphrase and gh\n" +
-				"confirmations in your normal terminal — the TUI yields\n" +
-				"control until it completes, then resumes."))
+			"Creates a local brain on this device — no remote, no network,\n" +
+				"no GPG key needed. Encrypted at rest by FileVault. Back it up\n" +
+				"to GitHub later with `nous brain publish` (the detail view's\n" +
+				"`p` action)."))
 		b.WriteString("\n\n")
 		b.WriteString(helpStyle.Render("y/enter  run    n/esc  cancel"))
 
@@ -335,8 +262,10 @@ func (m newBrainModel) View() string {
 		if m.err != nil {
 			b.WriteString(warnStyle.Render("✗ nous brain new failed: " + m.err.Error()))
 		} else {
-			b.WriteString("✓ Brain created at ")
+			b.WriteString("✓ Local brain created at ")
 			b.WriteString(cursorRowStyle.Render(m.picked))
+			b.WriteString("\n")
+			b.WriteString(mutedStyle.Render("  `p` from its detail view publishes it to GitHub when you're ready."))
 		}
 		b.WriteString("\n\n")
 		b.WriteString(helpStyle.Render("any key  return to list"))
