@@ -180,3 +180,15 @@ Process notes for M5:
   runtime-verify a refactor of proven code, prefer additive duplication
   with a tracked-debt note over an unverifiable in-place rewrite — and
   make the deferral explicit in the issue, not just the commit.
+
+- **Don't front-load a downstream requirement onto a lightweight upstream
+  step.** M1 made `nous brain new` resolve+record a GPG recipient so that
+  `publish` would be ceremony-free — but that forced `--as` on ambiguous
+  keyrings and required a GPG key to *exist* just to create a local brain
+  that encrypts nothing. The operator caught it: "why pick an identity for
+  a local-only brain?" **Rule:** put the ceremony where the need actually
+  arises (the recipient belongs at `publish`, where encryption starts),
+  not where it's cheap to bolt on. A "save a step later" optimization that
+  taxes the common case and couples an unnecessary dependency is a false
+  economy. Corollary: when the operator asks "why do we need X here?",
+  treat it as a design smell, not a request for justification.
