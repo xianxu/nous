@@ -4,7 +4,7 @@ status: working
 deps: []
 github_issue:
 created: 2026-05-26
-updated: 2026-05-29
+updated: 2026-05-30
 estimate_hours:
 actual_hours:
 ---
@@ -38,7 +38,11 @@ The existing model has one privacy knob — the **recipient list**
 (`len(recipients) == 1` → private, `>= 2` → shared). That is unchanged.
 What this issue adds is a second, orthogonal axis — **topology**: where
 ciphertext lives and whether there's an upstream at all. A local-only
-brain is still *private* (single recipient); it just has no remote.
+brain has **no recipients at all** (nothing is encrypted, so there's no
+one to encrypt to) and no remote; the privacy axis is populated at
+`publish`. *(Revised 2026-05-30 — see Log; the original spec recorded a
+local brain as "single recipient," which front-loaded an identity
+ceremony onto local create. Dropped.)*
 
 ### The upgrade ladder
 
@@ -119,9 +123,10 @@ sense — detail copy disambiguates.)
 
 ### M1 — `nous brain new` becomes local-first
 - [x] `lib/brain.InitLocal` — Go-native local scaffold: git init, go.mod
-      (substrate wiring), manifest (single recipient, `sync_substrate:
-      none`, **no remote**), initial commit. Reuses `WriteManifest`;
-      substrate step injected as a callback (testable with nil).
+      (substrate wiring), manifest (**empty recipients**, `sync_substrate:
+      none`, **no remote**), initial commit. No GPG identity required.
+      Reuses `WriteManifest`; substrate step injected as a callback
+      (testable with nil). *(recipient handling revised 2026-05-30 — see Log)*
 - [x] `nous brain new` (no flags) routes to `provisionLocal` →
       `InitLocal` + `construct/setup.sh`. Multi-recipient GitHub path
       left **untouched** (gated behind `--recipient`/`--fingerprint`) so
@@ -299,3 +304,34 @@ triplication left as-is (out of scope). Lessons captured in
 
 **Status: M1, M3, M4 complete + verified offline. M2 code complete +
 reviewed; only the GitHub round-trip verify remains (operator-run).**
+
+### 2026-05-30 — design fix: local brains need NO identity (operator catch)
+Operator, mid-verify: "if we're making a local-only brain, why pick an
+identity at all?" Correct — it was a wart. M1 had `nous brain new`
+resolve a GPG identity and record it as the sole recipient (front-loaded
+so publish would be ceremony-free), which forced `--as` on ambiguous
+keyrings and *required a GPG key to exist at all* — directly against the
+"lightweight, offline, zero-ceremony" point of the local rung.
+
+Fix (revises M1 + M2): a local brain has **empty recipients** and needs
+no identity. `nous brain new` no longer touches the keyring (verified:
+creates a brain with `recipients: []` on a machine with zero secret
+keys). The identity is resolved at **`nous brain publish`** — the moment
+encryption first matters: publish picks the key (`--as` if ambiguous),
+records it in the manifest (RewriteFrontmatter + commit, only after the
+confirm so an abort doesn't mutate), then encrypts. This also makes the
+privacy axis honest: it's unpopulated until publish.
+
+Touched: `InitLocal` (drop recipient param, write empty); `brain_new.go`
+(local branch skips identity entirely; multi-recipient path unchanged);
+`brain_publish.go` (resolve + record recipient, `--as` flag);
+`write.go` (one neutral manifest body — no count/rung claim, since the
+body must survive the local→published transition that only rewrites
+frontmatter); CLI `brain list` + atlas docs + threat-model marker
+updated to "local = no recipients". All tests green; `nous brain new`
+verified working with no GPG key.
+
+**Lesson:** front-loading a downstream requirement (the recipient) onto
+the lightweight upstream step (local create) to save ceremony later is a
+false economy — it taxes the common case and couples a dependency where
+none belongs. Put the ceremony where the need actually arises.

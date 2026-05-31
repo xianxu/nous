@@ -32,7 +32,7 @@ Real repo names will vary: `brain`, `family-brain`, `brain-private`, `xianxu-bra
 
 ## Privacy vs. topology (two axes)
 
-`recipients:` is the **privacy** axis — who can decrypt (one = private, 2+ = shared). Orthogonal to it is **topology** — where the ciphertext lives and whether there's an upstream at all: a brain can be *local* (no remote, plaintext working tree, FileVault-protected), *private* (hosted, solo), or *shared* (hosted, multiple). A local brain and a hosted-solo brain are both single-recipient yet a rung apart. `nous#33` made topology first-class; the ladder (local → publish → private → invite → shared) and the `nous brain new`/`publish`/`invite` verbs live in `brain-topology-ladder.md`.
+`recipients:` is the **privacy** axis — who can decrypt (one = private, 2+ = shared). Orthogonal to it is **topology** — where the ciphertext lives and whether there's an upstream at all: a brain can be *local* (no remote, **empty recipients**, plaintext working tree, FileVault-protected), *private* (hosted, one recipient), or *shared* (hosted, multiple). A local brain has no recipients at all — the privacy axis isn't populated until `nous brain publish` resolves the operator's identity and records it. `nous#33` made topology first-class; the ladder (local → publish → private → invite → shared) and the `nous brain new`/`publish`/`invite` verbs live in `brain-topology-ladder.md`.
 
 ## Where the depth lives
 

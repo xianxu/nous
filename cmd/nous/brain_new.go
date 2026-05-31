@@ -80,7 +80,19 @@ a second commit + push (gcrypt re-encrypts to all recipients).`,
 			out := cmd.OutOrStdout()
 
 			multiRecipient := len(recipientFiles) > 0 || len(fingerprints) > 0
-			if multiRecipient && !term.IsTerminal(int(os.Stdin.Fd())) {
+
+			// No recipient flags → bottom rung of the topology ladder: a
+			// local-only brain (git repo, no remote, no GitHub, no
+			// network, no GPG identity). A local brain has nothing to
+			// encrypt, so it has no recipients and needs no key ceremony —
+			// the identity is resolved later, by `nous brain publish`. The
+			// multi-recipient GitHub path below stays available for
+			// provisioning a shared brain directly.
+			if !multiRecipient {
+				return provisionLocal(cmd, brainPath)
+			}
+
+			if !term.IsTerminal(int(os.Stdin.Fd())) {
 				return fmt.Errorf("multi-recipient provisioning requires an interactive terminal (TTY-only safeguard)")
 			}
 
@@ -96,16 +108,6 @@ a second commit + push (gcrypt re-encrypts to all recipients).`,
 			ownFp, err := pickAnchor(ownKeys, anchorFp)
 			if err != nil {
 				return err
-			}
-
-			// No recipient flags → bottom rung of the topology ladder: a
-			// local-only brain (git repo, no remote, no GitHub, no
-			// network). `nous brain publish` promotes it to a
-			// GitHub-backed encrypted brain later. The multi-recipient
-			// GitHub path below stays available for provisioning a shared
-			// brain directly during the transition.
-			if !multiRecipient {
-				return provisionLocal(cmd, brainPath, ownFp)
 			}
 
 			// Collect peers.
@@ -346,7 +348,7 @@ func findSetupScript() (string, error) {
 // GitHub, no gcrypt, no network — the bottom rung of the topology
 // ladder. Delegates the scaffold to brain.InitLocal and passes a
 // closure that runs setup.sh from inside the new brain.
-func provisionLocal(cmd *cobra.Command, brainPath, ownFp string) error {
+func provisionLocal(cmd *cobra.Command, brainPath string) error {
 	out := cmd.OutOrStdout()
 	abs, err := filepath.Abs(brainPath)
 	if err != nil {
@@ -375,14 +377,14 @@ func provisionLocal(cmd *cobra.Command, brainPath, ownFp string) error {
 		return c.Run()
 	}
 
-	if err := brain.InitLocal(abs, name, ownFp, setup); err != nil {
+	if err := brain.InitLocal(abs, name, setup); err != nil {
 		return err
 	}
 
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "Local brain provisioned at %s\n", abs)
-	fmt.Fprintln(out, "  • on this device only — no remote; encrypted at rest by FileVault")
-	fmt.Fprintln(out, "  • `nous brain publish` backs it up to GitHub (gcrypt-encrypted) when you're ready")
+	fmt.Fprintln(out, "  • on this device only — no remote, no recipients; encrypted at rest by FileVault")
+	fmt.Fprintln(out, "  • `nous brain publish` assigns a recipient and backs it up to GitHub (gcrypt-encrypted)")
 	return nil
 }
 

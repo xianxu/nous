@@ -8,16 +8,15 @@ import (
 	"testing"
 )
 
-const testFP = "0ECF6AC06E9BB6C5B928F10B5D6885D83872C2F0"
-
 func TestInitLocal_CreatesLocalBrain(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "scratch")
 
-	if err := InitLocal(root, "scratch", testFP, nil); err != nil {
+	if err := InitLocal(root, "scratch", nil); err != nil {
 		t.Fatalf("InitLocal: %v", err)
 	}
 
-	// Manifest: single recipient, sync_substrate none, name set.
+	// Manifest: NO recipients (local brain has nothing to encrypt to),
+	// sync_substrate none, name set.
 	m, err := Read(root)
 	if err != nil {
 		t.Fatalf("Read manifest: %v", err)
@@ -25,14 +24,14 @@ func TestInitLocal_CreatesLocalBrain(t *testing.T) {
 	if m.Name != "scratch" {
 		t.Errorf("Name = %q, want scratch", m.Name)
 	}
-	if len(m.Recipients) != 1 || m.Recipients[0] != testFP {
-		t.Errorf("Recipients = %v, want [%s]", m.Recipients, testFP)
+	if len(m.Recipients) != 0 {
+		t.Errorf("Recipients = %v, want empty (a local brain has no recipients)", m.Recipients)
 	}
 	if m.SyncSubstrate != "none" {
 		t.Errorf("SyncSubstrate = %q, want none", m.SyncSubstrate)
 	}
 	if m.Shared() {
-		t.Errorf("Shared() = true; single-recipient brain must be private")
+		t.Errorf("Shared() = true; a recipient-less local brain must not be shared")
 	}
 
 	// go.mod wires nous as the substrate ancestor.
@@ -71,15 +70,8 @@ func TestInitLocal_CreatesLocalBrain(t *testing.T) {
 
 func TestInitLocal_RefusesExistingPath(t *testing.T) {
 	root := t.TempDir() // already exists
-	if err := InitLocal(root, "x", testFP, nil); err == nil {
+	if err := InitLocal(root, "x", nil); err == nil {
 		t.Fatalf("InitLocal on existing path: want error, got nil")
-	}
-}
-
-func TestInitLocal_RequiresRecipient(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "x")
-	if err := InitLocal(root, "x", "", nil); err == nil {
-		t.Fatalf("InitLocal with empty recipientFP: want error, got nil")
 	}
 }
 
@@ -88,7 +80,7 @@ func TestInitLocal_SubstrateCallbackOutputIsCommitted(t *testing.T) {
 	setup := func() error {
 		return os.WriteFile(filepath.Join(root, "SUBSTRATE.txt"), []byte("wired"), 0o644)
 	}
-	if err := InitLocal(root, "scratch", testFP, setup); err != nil {
+	if err := InitLocal(root, "scratch", setup); err != nil {
 		t.Fatalf("InitLocal: %v", err)
 	}
 	// The substrate file must be in the initial commit, not left dirty.
@@ -108,7 +100,7 @@ func TestInitLocal_SubstrateCallbackOutputIsCommitted(t *testing.T) {
 func TestInitLocal_SubstrateFailureAborts(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "scratch")
 	boom := func() error { return os.ErrPermission }
-	if err := InitLocal(root, "scratch", testFP, boom); err == nil {
+	if err := InitLocal(root, "scratch", boom); err == nil {
 		t.Fatalf("InitLocal: want error when substrate setup fails, got nil")
 	}
 }

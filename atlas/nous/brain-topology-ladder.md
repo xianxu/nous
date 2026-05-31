@@ -12,9 +12,12 @@ A brain has two independent properties that are easy to conflate:
 - **Topology** — *where the ciphertext lives, and whether there's an
   upstream at all.* This is the new axis `nous#33` made first-class.
 
-A local-only brain and a GitHub-backed solo brain are **both private**
-(one recipient) but a full rung apart on topology. Before `nous#33` the
-TUI labelled both `private` — indistinguishable. Now the label reflects
+A local-only brain has **no recipients at all** (nothing is encrypted,
+so there's no one to encrypt to); a GitHub-backed solo brain has exactly
+one. They're a full rung apart on topology, and the privacy axis isn't
+even populated until a brain is published. Before `nous#33` the TUI
+labelled the hosted-solo case `private` with no distinct local state.
+Now the label reflects
 topology.
 
 ## The ladder
@@ -26,7 +29,7 @@ nous brain new ──▶ local ──[publish]──▶ private ──[invite]�
 
 | Rung | Condition | What it means |
 |------|-----------|---------------|
-| **local** | no `remote.origin.url` | a git repo on this device only. gcrypt never engages (it only encrypts on push to a gcrypt remote), so the working tree + objects are **plaintext** — FileVault is the at-rest protection. No daemon watches it (`brainsync` `isWatchable` excludes single-recipient + no-remote). |
+| **local** | no `remote.origin.url`; **empty recipients** | a git repo on this device only. No GPG identity needed to create one. gcrypt never engages (it only encrypts on push to a gcrypt remote), so the working tree + objects are **plaintext** — FileVault is the at-rest protection. No daemon watches it (no remote = nothing to sync). |
 | **private** | remote + 1 recipient | gcrypt-encrypted backup on GitHub, solo. |
 | **shared** | remote + 2+ recipients | gcrypt-encrypted on GitHub, multiple recipients. |
 
@@ -36,13 +39,16 @@ ciphertext is on GitHub, "going back to local" doesn't un-leak it.
 ## The verbs
 
 - **`nous brain new <path>`** (no flags) → makes a **local** brain:
-  `git init`, go.mod (substrate wiring), manifest (single recipient,
+  `git init`, go.mod (substrate wiring), manifest (empty recipients,
   `sync_substrate: none`, no remote), first commit. No GitHub, no
-  network, no GPG passphrase. This is the lightweight default.
+  network, **no GPG identity at all** — you can make one on a machine
+  with no key set up. This is the lightweight default.
   (`lib/brain.InitLocal` + `cmd/nous/brain_new.go` `provisionLocal`.)
-- **`nous brain publish [--brain PATH]`** → **local → private**: create a
-  private GitHub repo, wire the gcrypt remote (encrypted to the
-  operator's key), push. Refuses if a remote already exists.
+- **`nous brain publish [--brain PATH]`** → **local → private**: this is
+  where the recipient is established — publish resolves your GPG identity
+  (`--as` if the keyring is ambiguous), records it as the sole recipient
+  in the manifest, creates a private GitHub repo, wires the gcrypt remote
+  (encrypted to that key), and pushes. Refuses if a remote already exists.
   (`cmd/nous/brain_publish.go` + `scripts/publish-brain.sh`.)
 - **`nous brain invite <login>`** → **private → shared**: GitHub
   collaborator invite + auto-admit on their join. Unchanged by `nous#33`

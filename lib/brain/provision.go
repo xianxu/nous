@@ -37,29 +37,28 @@ require github.com/xianxu/nous v0.0.0-00010101000000-000000000000
 replace github.com/xianxu/nous => ../nous
 `
 
-// InitLocal scaffolds a local-only private brain at brainRoot: a git
-// repo with NO remote, a go.mod wiring the nous substrate, a manifest
-// (single recipient = recipientFP, sync_substrate: none), and one
-// initial commit.
+// InitLocal scaffolds a local-only brain at brainRoot: a git repo with
+// NO remote, a go.mod wiring the nous substrate, a manifest with an
+// EMPTY recipient list (sync_substrate: none), and one initial commit.
 //
-// No GitHub, no gcrypt, no network. gcrypt only engages on push to a
-// gcrypt remote, and a local brain has none, so its working tree and
-// git objects are plaintext — FileVault (device FDE) is the at-rest
-// protection. This is the bottom rung of the topology ladder
-// (local → private → shared); `nous brain publish` promotes it to a
-// GitHub-backed encrypted brain.
+// No GitHub, no gcrypt, no network — and crucially, no GPG identity. A
+// local brain has nothing to encrypt (gcrypt only engages on push to a
+// gcrypt remote, and there is none), so it has no recipients: its
+// working tree and git objects are plaintext, with FileVault (device
+// FDE) as the at-rest protection. Requiring an identity here would tax
+// the lightweight case for no benefit — you can make a local brain on a
+// machine with no GPG set up at all.
 //
-// recipientFP is recorded as the sole recipient even though nothing is
-// encrypted yet: it's the identity the brain re-keys to the moment it's
-// published, so publish needs no further key ceremony.
+// The recipient (the privacy axis — who can decrypt) is established at
+// `nous brain publish`, the moment encryption first matters: publish
+// resolves the operator's GPG identity, writes it into the manifest, and
+// gcrypt-encrypts to it. This is the bottom rung of the topology ladder
+// (local → private → shared).
 //
 // setupSubstrate, when non-nil, runs after go.mod is written and before
 // the commit, so substrate symlinks (construct/setup.sh's output) land
 // in the initial commit. Tests pass nil to skip the substrate step.
-func InitLocal(brainRoot, name, recipientFP string, setupSubstrate func() error) error {
-	if recipientFP == "" {
-		return fmt.Errorf("InitLocal: recipientFP required (the manifest records the operator as sole recipient)")
-	}
+func InitLocal(brainRoot, name string, setupSubstrate func() error) error {
 	if _, err := os.Stat(brainRoot); err == nil {
 		return fmt.Errorf("InitLocal: %s already exists — move it aside or pick a fresh path", brainRoot)
 	}
@@ -86,7 +85,7 @@ func InitLocal(brainRoot, name, recipientFP string, setupSubstrate func() error)
 
 	if err := WriteManifest(brainRoot, Manifest{
 		Name:          name,
-		Recipients:    []string{recipientFP},
+		Recipients:    nil, // empty: a local brain has no one to encrypt to yet
 		SyncSubstrate: "none",
 	}); err != nil {
 		return fmt.Errorf("write manifest: %w", err)

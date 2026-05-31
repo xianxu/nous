@@ -124,30 +124,21 @@ func atomicWrite(path, content string) error {
 // body. Used by WriteManifest at provisioning time;
 // RewriteFrontmatter (recipient-change path) skips the body entirely.
 func renderManifest(m Manifest) string {
-	recipients := append([]string(nil), m.Recipients...)
-	sort.Strings(recipients)
-
 	var b strings.Builder
 	b.WriteString(renderFrontmatter(m))
 
-	// Body. Plural ("recipients") for shared brains; singular for
-	// private brains. Cheap human-readable nuance; the schema is the
-	// source of truth either way.
 	name := m.Name
 	if name == "" {
 		name = "brain"
 	}
-	// Body wording is topology-neutral: the manifest can't tell whether
-	// this brain has a remote yet (a local brain and a hosted-private
-	// brain both have one recipient + sync_substrate none), so it must
-	// not assert "encrypted" — a local brain's working tree is plaintext
-	// until it's published. "Encrypted via gcrypt when published" is true
-	// at every rung of the topology ladder (nous#33).
-	if m.Shared() {
-		fmt.Fprintf(&b, "# %s brain manifest\n\nMulti-recipient GPG list (%d recipients); encrypted via gcrypt when pushed to a remote. Bootstrapped by `nous brain new`.\n\nSchema reference: ariadne `AGENTS.md` §1 (Peer Repo). Security posture: `atlas/threat-model-shared-brain.md`.\n", name, len(recipients))
-	} else {
-		fmt.Fprintf(&b, "# %s brain manifest\n\nSingle-recipient GPG list (the operator); encrypted via gcrypt when pushed to a remote. Bootstrapped by `nous brain new`.\n\nSchema reference: ariadne `AGENTS.md` §1 (Peer Repo). Security posture: `atlas/threat-model-shared-brain.md`.\n", name)
-	}
+	// One body for every recipient count and topology rung. A local brain
+	// has an empty recipient list and no remote; a published brain has 1+
+	// recipients; and `nous brain publish` only rewrites the frontmatter
+	// (preserving this body), so the body must not assert a count, a
+	// "single/multi-recipient" framing, or a current encryption state —
+	// any of those goes stale across the local → published transition
+	// (nous#33). It describes the *fields*, not this brain's rung.
+	fmt.Fprintf(&b, "# %s brain manifest\n\nRecipients (the GPG keys that can decrypt this brain) are listed in the frontmatter above; content is encrypted via gcrypt on push to a remote. A local-only brain has no recipients and no remote until `nous brain publish`. Bootstrapped by `nous brain new`.\n\nSchema reference: ariadne `AGENTS.md` §1 (Peer Repo). Security posture: `atlas/threat-model-shared-brain.md`.\n", name)
 	return b.String()
 }
 

@@ -16,6 +16,7 @@ import (
 
 	"github.com/xianxu/nous/lib/brain"
 	"github.com/xianxu/nous/lib/gh"
+	"github.com/xianxu/nous/lib/identity"
 )
 
 // newBrainPublishCmd builds `nous brain publish [--brain PATH]`: the
@@ -32,6 +33,7 @@ import (
 func newBrainPublishCmd() *cobra.Command {
 	var brainPath string
 	var yes bool
+	var anchorFp string
 
 	cmd := &cobra.Command{
 		Use:   "publish",
@@ -46,8 +48,16 @@ a local brain, ` + "`nous brain publish`" + ` backs it up to GitHub, and
 
 Refuses if the brain already has a remote (it's already published).
 
+Publishing is where the brain's recipient is established: a local brain
+has none, so publish resolves your GPG identity and records it as the
+sole recipient before encrypting. (A local brain itself needs no GPG
+identity — only publish does.)
+
 Flags:
   --brain PATH   Skip the brain picker and target this brain directly.
+  --as FP        Which of your GPG secret keys to encrypt to (full FP or
+                 last-8). Required only when your keyring has more than
+                 one secret key and the brain has no recipient yet.
   --yes          Skip the confirmation prompt.
 
 Env overrides (advanced): NOUS_GH_OWNER, NOUS_GH_NAME pick the GitHub
@@ -55,15 +65,16 @@ owner/repo name (defaults: your gh login / the brain dir's basename);
 SKIP_REPO_CREATE=1 skips repo creation when you've made it manually.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runBrainPublish(cmd, brainPath, yes)
+			return runBrainPublish(cmd, brainPath, anchorFp, yes)
 		},
 	}
 	cmd.Flags().StringVar(&brainPath, "brain", "", "target brain path (skips picker)")
+	cmd.Flags().StringVar(&anchorFp, "as", "", "which of your GPG secret keys to encrypt to (full FP or last-8); needed only when the keyring is ambiguous")
 	cmd.Flags().BoolVar(&yes, "yes", false, "skip the confirmation prompt")
 	return cmd
 }
 
-func runBrainPublish(cmd *cobra.Command, brainPathFlag string, yes bool) error {
+func runBrainPublish(cmd *cobra.Command, brainPathFlag, anchorFp string, yes bool) error {
 	out := cmd.OutOrStdout()
 	in := cmd.InOrStdin()
 
@@ -82,13 +93,29 @@ func runBrainPublish(cmd *cobra.Command, brainPathFlag string, yes bool) error {
 		return err
 	}
 
+	// Resolve the recipient set. A local brain (the common case) has an
+	// empty manifest recipient list — this is the moment the privacy axis
+	// is established: resolve the operator's GPG identity now. A brain
+	// that somehow already carries recipients keeps them. `recordRecipient`
+	// is false until we've confirmed, so an aborted publish never mutates
+	// the manifest.
 	recipients := m.Recipients
+	recordRecipient := false
 	if len(recipients) == 0 {
-		return fmt.Errorf("brain %q manifest has no recipients — refusing to publish a brain with no one to encrypt to", abs)
+		ownKeys, err := identity.List()
+		if err != nil {
+			return fmt.Errorf("list own keys: %w", err)
+		}
+		if len(ownKeys) == 0 {
+			return fmt.Errorf("no GPG secret key in keyring — publish needs one to encrypt to; run `nous identity init` first")
+		}
+		fp, err := pickAnchor(ownKeys, anchorFp)
+		if err != nil {
+			return err
+		}
+		recipients = []string{fp}
+		recordRecipient = true
 	}
-	// A local brain is single-recipient by construction (InitLocal seeds
-	// exactly the operator); recipients[0] is the operator's key, used
-	// for the keys-branch <login>.asc publish below.
 	ownFp := recipients[0]
 
 	name := filepath.Base(abs)
@@ -96,7 +123,7 @@ func runBrainPublish(cmd *cobra.Command, brainPathFlag string, yes bool) error {
 	fmt.Fprintf(out, "About to publish local brain to GitHub:\n")
 	fmt.Fprintf(out, "  brain:      %s\n", name)
 	fmt.Fprintf(out, "  repo:       %s/%s (private)\n", orPlaceholder(owner, "<your-login>"), name)
-	fmt.Fprintf(out, "  recipients: %s\n", strings.Join(shortFps(recipients), ", "))
+	fmt.Fprintf(out, "  recipient:  %s\n", strings.Join(shortFps(recipients), ", "))
 	fmt.Fprintln(out, "  Only gcrypt ciphertext touches GitHub.")
 	fmt.Fprintln(out)
 	if !yes {
@@ -105,6 +132,22 @@ func runBrainPublish(cmd *cobra.Command, brainPathFlag string, yes bool) error {
 		}
 		if !confirmYN(out, in, "Publish?") {
 			return errors.New("aborted by operator")
+		}
+	}
+
+	// Confirmed: record the resolved recipient in the manifest (frontmatter
+	// only — preserve the body) and commit, so the push carries it and
+	// gcrypt-participants matches the manifest (the source-of-truth
+	// invariant). Done only when we resolved it just now; a brain that
+	// already had recipients is left as-is.
+	if recordRecipient {
+		nm := m
+		nm.Recipients = recipients
+		if err := brain.RewriteFrontmatter(abs, nm); err != nil {
+			return fmt.Errorf("record recipient in manifest: %w", err)
+		}
+		if err := commitManifestRecipient(abs, ownFp); err != nil {
+			return err
 		}
 	}
 
@@ -132,6 +175,22 @@ func runBrainPublish(cmd *cobra.Command, brainPathFlag string, yes bool) error {
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "Published. %q is now private (GitHub-backed, gcrypt-encrypted).\n", name)
 	fmt.Fprintln(out, "  • `nous brain invite <github-login>` to share it (→ shared)")
+	return nil
+}
+
+// commitManifestRecipient stages + commits the manifest after publish
+// has written the resolved recipient into it, so the gcrypt push carries
+// the recipient (matching gcrypt-participants). Mirrors the plain commit
+// the multi-recipient `new` path uses — relies on the operator's git
+// identity, no -c overrides.
+func commitManifestRecipient(brainRoot, fp string) error {
+	if err := exec.Command("git", "-C", brainRoot, "add", ".brain/config.md").Run(); err != nil {
+		return fmt.Errorf("git add manifest: %w", err)
+	}
+	msg := fmt.Sprintf("publish: record recipient %s", shortFp(fp))
+	if out, err := exec.Command("git", "-C", brainRoot, "commit", "-q", "-m", msg).CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit manifest: %w\n%s", err, out)
+	}
 	return nil
 }
 
