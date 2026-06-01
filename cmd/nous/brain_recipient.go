@@ -125,6 +125,7 @@ func buildKeyAnnotator() (func(string) string, error) {
 
 func newBrainRecipientAddCmd() *cobra.Command {
 	var fingerprint string
+	var verifiedLast8 string
 
 	cmd := &cobra.Command{
 		Use:   "add BRAIN [PUBKEY-FILE]",
@@ -149,8 +150,8 @@ TTY-only: identity admission is a delegation boundary. See
 brain/atlas/threat-model-shared-brain.md.`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !term.IsTerminal(int(os.Stdin.Fd())) {
-				return fmt.Errorf("nous brain recipient add requires an interactive terminal (TTY-only safeguard)")
+			if verifiedLast8 == "" && !term.IsTerminal(int(os.Stdin.Fd())) {
+				return fmt.Errorf("nous brain recipient add requires an interactive terminal, or pass --verified-last8 <8hex> for scripted use (TTY-only safeguard)")
 			}
 			brainPath := args[0]
 			out := cmd.OutOrStdout()
@@ -161,7 +162,7 @@ brain/atlas/threat-model-shared-brain.md.`,
 				return fmt.Errorf("pass either PUBKEY-FILE or --fingerprint, not both")
 			case len(args) == 2:
 				// Import path. Reuse the identity-import ceremony.
-				k, err := importPubkeyFromFile(out, args[1])
+				k, err := importPubkeyFromFile(out, args[1], verifiedLast8)
 				if err != nil {
 					return err
 				}
@@ -175,7 +176,7 @@ brain/atlas/threat-model-shared-brain.md.`,
 					return err
 				}
 				key = k
-				if err := confirmKey(out, key); err != nil {
+				if err := confirmKey(out, key, verifiedLast8); err != nil {
 					return err
 				}
 			default:
@@ -230,6 +231,7 @@ brain/atlas/threat-model-shared-brain.md.`,
 		},
 	}
 	cmd.Flags().StringVar(&fingerprint, "fingerprint", "", "use an already-imported pubkey by fingerprint")
+	cmd.Flags().StringVar(&verifiedLast8, "verified-last8", "", "last-8 hex of the recipient's fingerprint, verified out-of-band — satisfies the ceremony non-interactively (scripted/test use; lifts the TTY gate)")
 	return cmd
 }
 
@@ -237,7 +239,7 @@ brain/atlas/threat-model-shared-brain.md.`,
 // import RunE — read the file, Inspect, prompt for last-8 confirmation,
 // commit. Lifted into a helper so brain recipient add can reuse it
 // without re-prompting twice.
-func importPubkeyFromFile(out io.Writer, path string) (identity.Key, error) {
+func importPubkeyFromFile(out io.Writer, path, verifiedLast8 string) (identity.Key, error) {
 	var data []byte
 	var err error
 	if path == "-" {
@@ -263,7 +265,7 @@ func importPubkeyFromFile(out io.Writer, path string) (identity.Key, error) {
 	fmt.Fprintln(out, "(phone, in-person, signed message — NOT the same channel as the pubkey).")
 	fmt.Fprintln(out)
 
-	if err := promptVerify(os.Stdin, out, peer.Last8()); err != nil {
+	if err := verifyLast8(os.Stdin, out, peer.Last8(), verifiedLast8); err != nil {
 		return identity.Key{}, err
 	}
 	if _, err := identity.Import(armor); err != nil {
@@ -315,13 +317,13 @@ func lookupKey(fingerprint string) (identity.Key, error) {
 
 // confirmKey runs a one-shot verify-fingerprint prompt against an
 // already-imported key. Same form as the import-time ceremony.
-func confirmKey(out io.Writer, k identity.Key) error {
+func confirmKey(out io.Writer, k identity.Key, verifiedLast8 string) error {
 	fmt.Fprintf(out, "About to admit:\n")
 	fmt.Fprintf(out, "  fingerprint: %s\n", k.Fingerprint)
 	fmt.Fprintf(out, "  last-8:      %s\n", k.Last8())
 	fmt.Fprintf(out, "  uid:         %s\n", displayUID(k))
 	fmt.Fprintln(out)
-	return promptVerify(os.Stdin, out, k.Last8())
+	return verifyLast8(os.Stdin, out, k.Last8(), verifiedLast8)
 }
 
 // ─── remove ───────────────────────────────────────────────────────────
