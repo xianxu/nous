@@ -43,12 +43,12 @@ scaffold  memory/work/meeting-notes
 # here. Adding new "plugin-shaped" contributions: just append symlink
 # entries.
 
-# Gmail plugin — search and read Gmail threads via the nous proxy.
-# Requires: `nous auth google <email>` (charon merged into nous; auth
-# commands live under the nous binary now).
-symlink   lib/gmail
-symlink   cmd/gmail
-
-# Oneshot plugin — single system+user prompt against a local Ollama model.
-# Requires: ollama serve running locally (or OLLAMA_HOST set).
-symlink   cmd/oneshot
+# gmail / oneshot (and lib/gmail) are nous-owned Go binaries. Per the
+# ownership = location convention (ariadne#57) they are NOT source-distributed
+# to derivatives — derivatives obtain them as built binaries (the dev-alias
+# build-in-owner mechanism, or a built bin/), never symlinked source. The
+# former `symlink lib/gmail` / `symlink cmd/gmail` / `symlink cmd/oneshot`
+# directives are retired (code flows through Go modules, not the file-symlink
+# substrate channel, which stays for docs/config only).
+#   gmail:   search/read Gmail threads via the nous proxy (`nous auth google <email>`).
+#   oneshot: single system+user prompt against a local Ollama model (ollama serve).
