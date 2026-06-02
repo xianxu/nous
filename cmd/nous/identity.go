@@ -482,35 +482,82 @@ func verifyLast8(in io.Reader, out io.Writer, expected, assumed string) error {
 
 // ─── init ─────────────────────────────────────────────────────────────
 
+// initInputsComplete reports whether enough identity inputs are supplied
+// to run keygen without prompting (name + email). When true, `identity
+// init` may run non-interactively; when false it needs a TTY.
+func initInputsComplete(name, email string) bool {
+	return name != "" && email != ""
+}
+
 func newIdentityInitCmd() *cobra.Command {
-	return &cobra.Command{
+	var name, email, expiry string
+	cmd := &cobra.Command{
 		Use:   "init",
-		Short: "Generate a new GPG keypair (TTY-only)",
+		Short: "Generate a new GPG keypair (TTY-only unless --name/--email given)",
 		Long: `Generate a new GPG keypair for brain encryption. Idempotent: if a
 key already exists in the keyring, prints the existing fingerprint and
 exits without re-generating.
 
-Currently delegates to scripts/identity.sh under the hood — that script
-encodes 200 lines of macOS gpg-agent + pinentry-mac configuration that
-isn't worth re-porting until the surface stabilizes. The script itself
-is TTY-aware; this command adds the explicit TTY check and bails early
-with a clear error.`,
+Delegates to scripts/identity.sh under the hood — that script encodes
+200 lines of macOS gpg-agent + pinentry configuration. The script reads
+IDENTITY_NAME / IDENTITY_EMAIL / IDENTITY_EXPIRY from the environment; in
+an interactive shell it prompts (suggesting git config) when they're
+unset.
+
+Non-interactive (scripted/test) use: pass --name and --email (and
+optionally --expiry, default 5y) — or set the IDENTITY_* env vars — and
+the TTY requirement is lifted. The passphrase still comes from gpg-agent
+(in a headless test VM, scripts/brain-vm-setup.sh wires a fake pinentry
+so keygen runs unattended).`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !term.IsTerminal(int(os.Stdin.Fd())) {
-				return fmt.Errorf("nous identity init requires an interactive terminal (TTY-only safeguard)")
+			// Flags override; fall back to the IDENTITY_* env that
+			// identity.sh already understands.
+			if name == "" {
+				name = os.Getenv("IDENTITY_NAME")
 			}
+			if email == "" {
+				email = os.Getenv("IDENTITY_EMAIL")
+			}
+			if expiry == "" {
+				expiry = os.Getenv("IDENTITY_EXPIRY")
+			}
+
+			nonInteractive := initInputsComplete(name, email)
+			if !nonInteractive && !term.IsTerminal(int(os.Stdin.Fd())) {
+				return fmt.Errorf("nous identity init requires an interactive terminal, or pass --name and --email (and optionally --expiry) for scripted use (TTY-only safeguard)")
+			}
+			// identity.sh dies on a missing IDENTITY_EXPIRY in a non-TTY
+			// run (its prompt can't fire), so supply the documented default.
+			if nonInteractive && expiry == "" {
+				expiry = "5y"
+			}
+
 			scriptPath, err := findIdentityScript()
 			if err != nil {
 				return err
 			}
 			c := exec.Command("bash", scriptPath)
+			c.Env = os.Environ()
+			if name != "" {
+				c.Env = append(c.Env, "IDENTITY_NAME="+name)
+			}
+			if email != "" {
+				c.Env = append(c.Env, "IDENTITY_EMAIL="+email)
+			}
+			if expiry != "" {
+				c.Env = append(c.Env, "IDENTITY_EXPIRY="+expiry)
+			}
 			c.Stdin = os.Stdin
 			c.Stdout = os.Stdout
 			c.Stderr = os.Stderr
 			return c.Run()
 		},
 	}
+	cmd.Flags().StringVar(&name, "name", "", "real name for the key (non-interactive; or IDENTITY_NAME)")
+	cmd.Flags().StringVar(&email, "email", "", "email for the key (non-interactive; or IDENTITY_EMAIL)")
+	cmd.Flags().StringVar(&expiry, "expiry", "", "key expiry e.g. 5y (non-interactive; or IDENTITY_EXPIRY; default 5y)")
+	return cmd
 }
 
 // findIdentityScript locates scripts/identity.sh relative to the nous

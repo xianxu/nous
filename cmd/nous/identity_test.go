@@ -53,6 +53,25 @@ func TestPromptVerify_AcceptsOnSecondAttempt(t *testing.T) {
 	}
 }
 
+// initInputsComplete gates whether `identity init` may skip the TTY: both
+// name and email must be present (nous#36 M3).
+func TestInitInputsComplete(t *testing.T) {
+	cases := []struct {
+		name, email string
+		want        bool
+	}{
+		{"Ying Test", "ying@example.com", true},
+		{"Ying Test", "", false},
+		{"", "ying@example.com", false},
+		{"", "", false},
+	}
+	for _, c := range cases {
+		if got := initInputsComplete(c.name, c.email); got != c.want {
+			t.Errorf("initInputsComplete(%q,%q) = %v, want %v", c.name, c.email, got, c.want)
+		}
+	}
+}
+
 // ── verifyLast8 (--verified-last8 non-interactive ceremony, nous#36) ──
 
 // Assumed value matching the expected last-8 returns nil WITHOUT touching
