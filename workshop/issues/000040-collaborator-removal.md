@@ -94,8 +94,15 @@ stay nous#37.
   `RemoveRecipient` + peer-sidecar source + `LoginUnresolved` loud surface.
   Build/vet + e2e green (no regression). The GitHub-revoke effect needs a real
   remote → confirmed in the durable dogfood retest.
-- [ ] M2 (Bug B): login-keyed removal core spanning pending/collaborator/
-  recipient; CLI + TUI surface. *(surface fork above — confirm before building.)*
+- [x] M2 lib+CLI (Bug B): `brain.FingerprintForLogin` + `brainsync.RemovePerson`
+  (recipient / pending / collaborator-only) + `cancelPendingInvitation`;
+  `nous brain recipient remove` accepts a login and acts at any stage. Surface =
+  "unified recipient remove" (operator-chosen 2026-06-02). Build/vet + tests +
+  e2e green.
+- [ ] M2c (Bug B, TUI): remove/cancel action on pending-invitation rows in
+  `nous brain` detail view — a small pick→confirm→apply sub-model calling
+  `brainsync.RemovePerson(login)`. Deferred from the M2 session (fiddly
+  bubbletea; capability already reachable via the CLI).
 
 ## Log
 
