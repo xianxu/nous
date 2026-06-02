@@ -129,12 +129,19 @@ func runBrainInvite(w io.Writer, in io.Reader, ghLogin, brainPathFlag string, fo
 		}
 	}
 
-	// 5. Send.
-	if err := gh.AddCollaborator(owner, repo, ghLogin, "push"); err != nil {
-		return fmt.Errorf("add collaborator: %w", err)
+	// 5. Send. InviteCollaborator clears any stale/expired invitation
+	// first so a re-invite actually re-sends (a bare PUT is a no-op when
+	// an invitation — even expired — already exists; nous#39).
+	res, err := gh.InviteCollaborator(owner, repo, ghLogin, "push")
+	if err != nil {
+		return fmt.Errorf("invite collaborator: %w", err)
 	}
 
-	fmt.Fprintf(w, "✓ Invitation sent.\n")
+	if res.ReplacedStale {
+		fmt.Fprintf(w, "✓ Replaced a stale/expired invitation and sent a fresh one.\n")
+	} else {
+		fmt.Fprintf(w, "✓ Invitation sent.\n")
+	}
 	fmt.Fprintf(w, "  Tell %s to run `nous brain` on their machine — the\n", ghLogin)
 	fmt.Fprintf(w, "  invitation appears in the list with `enter` to accept,\n")
 	fmt.Fprintf(w, "  then `enter` again on the accessible-but-not-cloned row\n")
