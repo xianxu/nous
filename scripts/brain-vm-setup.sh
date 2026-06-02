@@ -36,6 +36,12 @@ PASS_FILE="$here/../testdata/test-bootstrap/test-key.passphrase"
 [ -f "$PASS_FILE" ] || die "test passphrase fixture not found: $PASS_FILE"
 PASS="$(cat "$PASS_FILE")"
 
+# The vm-hook runs from tart-vm-setup.sh's non-login ssh context, whose PATH is
+# bare (/usr/bin:/bin:…) and excludes /opt/homebrew/bin — so brew-installed gpg
+# + gpgconf wouldn't be found and this script would bail before installing the
+# shim. Load Homebrew's env first (mirrors nous-test-bootstrap.sh).
+[ -x /opt/homebrew/bin/brew ] && eval "$(/opt/homebrew/bin/brew shellenv)"
+
 command -v gpg >/dev/null || die "gpg not installed in VM (run 'make nous-bootstrap' first)"
 
 # ── Persistent fake pinentry ─────────────────────────────────────────
