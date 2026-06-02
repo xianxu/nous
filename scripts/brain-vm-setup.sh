@@ -42,7 +42,14 @@ PASS="$(cat "$PASS_FILE")"
 # shim. Load Homebrew's env first (mirrors nous-test-bootstrap.sh).
 [ -x /opt/homebrew/bin/brew ] && eval "$(/opt/homebrew/bin/brew shellenv)"
 
-command -v gpg >/dev/null || die "gpg not installed in VM (run 'make nous-bootstrap' first)"
+# On a fresh VM the vm-hook fires at boot BEFORE `make nous-bootstrap` installs
+# gpg. There's nothing to configure yet — skip cleanly (exit 0, not a failure)
+# so the boot transcript doesn't show a scary [warn]. The hook runs every boot,
+# so it self-heals: the first boot after gpg is installed wires the shim.
+if ! command -v gpg >/dev/null; then
+    info "gpg not installed yet — deferring shim setup until after 'make nous-bootstrap' (re-runs automatically on next boot)."
+    exit 0
+fi
 
 # ── Persistent fake pinentry ─────────────────────────────────────────
 # Lives under ~/.local/bin so it survives the cold-reboot that `make tart`
