@@ -47,7 +47,10 @@ guarantees:
    brain is automatic.
 3. Resolves `remote.origin.url` → `owner/repo` via
    `brain.GitHubOwnerRepo`.
-4. Calls `gh.AddCollaborator(owner, repo, login, "push")`.
+4. Calls `gh.InviteCollaborator(owner, repo, login, "push")` —
+   deletes any stale/expired invitation first, then PUTs, so a
+   re-invite actually re-sends (a bare PUT is a no-op when an
+   invitation already exists; nous#39).
 
 Done. Operator's role ends here. The invitee will be auto-admitted
 once they accept and publish their pubkey.
