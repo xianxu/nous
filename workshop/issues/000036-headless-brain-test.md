@@ -103,19 +103,39 @@ still required.
 - [ ] `--name/--email/--expiry` (or `IDENTITY_*` env) path; lift TTY gate when
   inputs present; passphrase via shim. Verify keygen unattended in the VM.
 
-### M4 — host-driven e2e + docs
-- [ ] e2e script (host-driven, plain `ssh` — flags lift the gates): VM
-  `identity init` → `identity export` → host `identity import --verified-last8`
-  → host `brain recipient add <brain> --verified-last8` → VM clone/edit/push,
-  asserting recipient set + decrypt round-trip.
-- [ ] Threat-model `## Revisions` note; `atlas/` update.
+### M4 — e2e + docs
+- [x] Threat-model `## Revisions` note (brain `2a3d82b`); `atlas/` update
+  (nous `e3ade8b` — e2e-integration-testing.md).
+- [ ] `scripts/brain-vm-e2e.sh` — self-contained, GitHub-free CLI-level e2e
+  against a `file://` bare gcrypt remote with two throwaway per-`GNUPGHOME`
+  identities: `identity init` (non-interactive) → `export` → `import
+  --verified-last8` → `brain recipient add --verified-last8` → gcrypt clone
+  (unattended via shim) → edit → push → pull → assert the peer's edit
+  decrypts. Durable regression net; runs in CI/VM without GitHub.
+- [ ] Live VM smoke (the runbook below) — boot from nous, confirm the
+  `00-gpg-setup.sh` hook fires + `identity init` runs unattended. The deeper
+  VM clone→push round-trip (needs the VM identity's GitHub access) is
+  **nous#12**'s onboarding scope, not this issue.
 - [ ] Log to brain `data/project/shared-brain.md` (nous#12) as the dry-run.
 
 ## Test plan
 
-M2/M3 carry colocated unit tests (PURE comparison + flag plumbing). M1 + M4 are
-INTEGRATION — verified by the e2e walkthrough against a real tart VM + a
-throwaway brain, since the surface is process-level (gpg-agent, gcrypt, ssh).
+M2/M3 carry colocated unit tests (PURE comparison + flag plumbing). M1 is
+verified by `scripts/brain-vm-e2e.sh` (the shim drives gpg/gcrypt unattended)
++ the live VM smoke. M4's e2e is the CLI-level integration net — process-level
+(gpg-agent, gcrypt) so it lives in a script, not a `go test`.
+
+**Live VM runbook** (boot from nous on this branch):
+- VM shell (after `make tart`): `nous identity init --name "Ying Test" --email
+  "xianxu+yingtest@gmail.com"` → no prompt, no TTY error (the dev-aliases
+  `nous` function builds-on-demand; no manual build needed) → `nous identity
+  export > ~/ying.pub`.
+- Host: `scp admin@$(tart ip nous-test):ying.pub /tmp/ying.pub`, then
+  `nous brain recipient add ~/workspace/brain-shared-test /tmp/ying.pub
+  --verified-last8 <last8> </dev/null`.
+- If building a binary explicitly, use `~/repo/bin` (the dev slot, first on
+  PATH) — NOT `~/.local/bin` (reserved for `make nous-install`'s signed prod
+  binary).
 
 ## Log
 
