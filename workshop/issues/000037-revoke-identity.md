@@ -120,6 +120,29 @@ if multi-operator admin lands.
 - Sizeable (cross-brain fan-out + two-layer revoke + ban-list enforcement +
   honest crypto caveats). Not a quick add — a proper milestone-structured issue.
 
+## Existing `recipient remove` is partial (concrete bugs, 2026-06-01)
+
+Traced what `nous brain recipient remove` (and the TUI "remove collaborator"
+action, `lib/tui/brain/detail.go:128` → same lib path) actually clears:
+manifest (`WithoutRecipient`+`RewriteFrontmatter`) → re-key push → `RevokePubkey`.
+What it **leaves**, causing silent resurrection on the next invite/sync:
+
+1. **`RevokePubkey` deletes only `<FP>.asc`** (`lib/brain/peerkeys.go:81`), but the
+   nous#26 path publishes `<login>.asc`, and `AutoAdmitFromKeysBranch` lists every
+   `.asc` and derives the fp from contents — so the login-keyed file survives and
+   auto-admit re-admits. **Fix:** RevokePubkey must delete the `<login>.asc` too
+   (resolve login via verified.yaml / the file's content).
+2. **`verified.yaml` is never cleared on remove** — the `login→fp` stays
+   "verified," so a later re-publish is auto-admitted with no fresh ceremony.
+   **Fix:** remove must delete the verified.yaml entry (or invalidate it).
+3. **GitHub collaborator is not removed** — `recipient remove`/TUI don't touch
+   repo access (only `nous brain leave` does, self-only). The TUI's "remove
+   collaborator" label is misleading; it's "remove recipient + re-key."
+
+Leaks #1/#2 are bugs in the *existing per-brain* remove and could be fixed
+standalone (M2 below) ahead of the cross-brain fan-out. #3 is the collaborator
+layer (M3).
+
 ## Log
 
 ### 2026-06-01
