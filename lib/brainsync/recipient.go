@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/xianxu/nous/lib/brain"
 	"github.com/xianxu/nous/lib/gh"
@@ -36,6 +37,125 @@ type RemoveRecipientResult struct {
 	// collaborator could NOT be revoked and the caller must surface a
 	// manual-removal hint (never a silent skip).
 	LoginUnresolved bool
+}
+
+// RemovePersonResult reports what RemovePerson did across the membership
+// layers. WasRecipient + Recipient are set when the person was a manifest
+// recipient (the heavy path ran); the GitHub-layer fields are set for the
+// invitation/collaborator cleanup in every case.
+type RemovePersonResult struct {
+	Selector            string
+	Login               string
+	Fingerprint         string
+	Owner, Repo         string
+	WasRecipient        bool
+	Recipient           *RemoveRecipientResult
+	InvitationCancelled bool
+	CollaboratorRevoked bool
+	CollaboratorErr     error
+	LoginUnresolved     bool
+	NothingToDo         bool // selector matched no layer (no recipient, invite, or collaborator)
+}
+
+// RemovePerson removes a person from a SINGLE brain at whatever lifecycle
+// stage they're in — manifest recipient, accepted collaborator, or merely a
+// pending invitation. The selector is a GitHub login OR a fingerprint/last-8.
+// This is the unified "remove this person" entry the CLI + TUI call (the
+// cross-brain fan-out + ban list stay nous#37):
+//
+//   - recipient (selector is an fp/last-8, or a login that resolves to a
+//     manifest recipient) → full RemoveRecipient (manifest + verified + keys
+//     branch + collaborator), then cancel any lingering pending invitation.
+//   - non-recipient login (pending invitee, or accepted-but-not-admitted) →
+//     cancel the pending invitation + revoke the collaborator. No manifest
+//     touch (they were never a recipient).
+func RemovePerson(ctx context.Context, brainPath, selector string, force bool) (*RemovePersonResult, error) {
+	res := &RemovePersonResult{Selector: selector}
+	m, err := brain.Read(brainPath)
+	if err != nil {
+		return res, fmt.Errorf("read manifest: %w", err)
+	}
+
+	// Resolve to a recipient fingerprint — directly (fp/last-8) or via login.
+	fp, _ := brain.MatchRecipient(m.Recipients, selector)
+	if fp == "" {
+		if cand, _ := brain.FingerprintForLogin(ctx, brainPath, selector); cand != "" {
+			if mm, _ := brain.MatchRecipient(m.Recipients, cand); mm != "" {
+				fp = mm
+			}
+		}
+	}
+
+	if fp != "" {
+		// Recipient path — RemoveRecipient owns manifest + verified + keys +
+		// collaborator (with the nous#40 early login resolution).
+		rr, rerr := RemoveRecipient(ctx, brainPath, fp, force)
+		res.Recipient, res.WasRecipient = rr, true
+		if rr != nil {
+			res.Fingerprint, res.Login = rr.Match, rr.Login
+			res.Owner, res.Repo = rr.Owner, rr.Repo
+			res.CollaboratorRevoked, res.CollaboratorErr = rr.CollaboratorRevoked, rr.CollaboratorErr
+			res.LoginUnresolved = rr.LoginUnresolved
+		}
+		if rerr != nil {
+			return res, rerr
+		}
+		// Clear any lingering pending invitation for the login too.
+		if rr != nil && rr.HadRemote && res.Login != "" {
+			if cancelled, _ := cancelPendingInvitation(rr.Owner, rr.Repo, res.Login); cancelled {
+				res.InvitationCancelled = true
+			}
+		}
+		return res, nil
+	}
+
+	// Non-recipient path: selector is a GitHub login in the pending /
+	// collaborator-only state. Needs a remote.
+	originURL := brain.ReadOriginURL(brainPath)
+	if originURL == "" {
+		return res, fmt.Errorf("%q is not a recipient of %s and the brain has no GitHub remote — nothing to remove", selector, filepath.Base(brainPath))
+	}
+	owner, repo, oerr := brain.GitHubOwnerRepo(originURL)
+	if oerr != nil {
+		return res, fmt.Errorf("parse origin URL: %w", oerr)
+	}
+	res.Owner, res.Repo, res.Login = owner, repo, selector
+
+	cancelled, _ := cancelPendingInvitation(owner, repo, selector)
+	res.InvitationCancelled = cancelled
+
+	// Revoke the collaborator only if they actually are one (keeps NothingToDo
+	// accurate — gh's DELETE is a silent no-op for non-collaborators).
+	if perm, perr := gh.CollaboratorPermission(owner, repo, selector); perr == nil && perm != "" && perm != "none" {
+		if cerr := gh.RemoveCollaborator(owner, repo, selector); cerr != nil {
+			res.CollaboratorErr = cerr
+		} else {
+			res.CollaboratorRevoked = true
+		}
+	}
+
+	if !res.InvitationCancelled && !res.CollaboratorRevoked && res.CollaboratorErr == nil {
+		res.NothingToDo = true
+	}
+	return res, nil
+}
+
+// cancelPendingInvitation deletes a pending repo invitation for login if one
+// exists. Returns whether it deleted one.
+func cancelPendingInvitation(owner, repo, login string) (bool, error) {
+	invs, err := gh.RepoPendingInvitations(owner, repo)
+	if err != nil {
+		return false, err
+	}
+	for _, inv := range invs {
+		if strings.EqualFold(inv.Invitee.Login, login) {
+			if derr := gh.DeleteRepoInvitation(owner, repo, inv.ID); derr != nil {
+				return false, derr
+			}
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // RemoveRecipient fully revokes fpArg from a SINGLE brain — the one

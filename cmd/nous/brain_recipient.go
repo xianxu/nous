@@ -332,13 +332,22 @@ func newBrainRecipientRemoveCmd() *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:   "remove BRAIN FINGERPRINT",
-		Short: "Revoke a recipient from a brain (TTY-only; safeguards)",
-		Long: `Remove a recipient from a brain. Updates the manifest +
-gcrypt-participants and pushes so future encryptions exclude the
-removed recipient.
+		Use:   "remove BRAIN FINGERPRINT-OR-LOGIN",
+		Short: "Remove a person from a brain at any stage (TTY-only; safeguards)",
+		Long: `Remove a person from a brain — by fingerprint/last-8 OR by GitHub
+login. Acts at whatever lifecycle stage they're in:
 
-Three safeguards:
+  - manifest recipient → drop from manifest + gcrypt re-key on push,
+    clear verified.yaml, strip their keys-branch pubkey(s), and revoke
+    their GitHub collaborator status;
+  - accepted collaborator not yet admitted, or a still-pending
+    invitation → cancel the invitation + revoke collaborator.
+
+A login is resolved to a recipient when possible (verified.yaml → keys
+branch → peer sidecar); if it isn't a recipient, the GitHub-layer removal
+runs so you can retract someone who never finished joining.
+
+Three safeguards (recipient removals):
 
   1. Last-recipient guard: refuse to remove the only recipient
      (would orphan the brain — nobody could decrypt future pushes).
@@ -349,38 +358,73 @@ Three safeguards:
      removed recipient if they retained their refs. True revocation
      requires re-keying (out of scope here; document for the operator).
 
-TTY-only.`,
+TTY-only (or --force for scripted use).`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !force && !term.IsTerminal(int(os.Stdin.Fd())) {
 				return fmt.Errorf("nous brain recipient remove requires an interactive terminal, or pass --force for scripted use (TTY-only safeguard)")
 			}
 			brainPath := args[0]
-			fpArg := args[1]
+			selector := args[1]
 			out := cmd.OutOrStdout()
 
-			// Pre-flight for the confirm UX. The shared helper re-checks
-			// authoritatively before it mutates anything.
+			// Resolve the selector to a manifest recipient — directly (fp /
+			// last-8) or via a GitHub login (nous#40). If it doesn't resolve to
+			// a recipient, treat it as a login to remove at the GitHub layer
+			// (pending invitation / collaborator) — the "remove someone who
+			// never finished joining" path.
 			m, err := brain.Read(brainPath)
 			if err != nil {
 				return err
 			}
-			match, err := brain.MatchRecipient(m.Recipients, fpArg)
-			if err != nil {
-				return err
-			}
+			match, _ := brain.MatchRecipient(m.Recipients, selector)
 			if match == "" {
-				// Not a recipient. Delegate to the helper, which handles
-				// the unpushed-prior-removal retry vs. real not-found.
-				res, err := brainsync.RemoveRecipient(cmd.Context(), brainPath, fpArg, force)
+				if cand, _ := brain.FingerprintForLogin(cmd.Context(), brainPath, selector); cand != "" {
+					if mm, _ := brain.MatchRecipient(m.Recipients, cand); mm != "" {
+						match = mm
+					}
+				}
+			}
+
+			if match == "" {
+				// fp-shaped selector with an unpushed prior removal → retry.
+				if looksHexFingerprint(selector) {
+					if rr, _ := brainsync.RemoveRecipient(cmd.Context(), brainPath, selector, force); rr != nil && rr.RetriedPush {
+						fmt.Fprintln(out, "Not a recipient locally (already removed?). Retried the pending push.")
+						return nil
+					}
+				}
+				// Otherwise: remove at the GitHub layer (pending invite +
+				// collaborator) for a login that never became a recipient.
+				fmt.Fprintf(out, "%q is not a recipient of %s.\n", selector, filepath.Base(brainPath))
+				fmt.Fprintln(out, "Removing at the GitHub layer: cancel any pending invitation + revoke collaborator.")
+				if !force {
+					if err := promptYes(os.Stdin, out, "Proceed? [y/N] "); err != nil {
+						return err
+					}
+				}
+				pr, err := brainsync.RemovePerson(cmd.Context(), brainPath, selector, force)
 				if err != nil {
 					return err
 				}
-				if res.RetriedPush {
-					fmt.Fprintln(out, "Not a recipient locally (already removed?). Retried the pending push.")
+				if pr.NothingToDo {
+					fmt.Fprintf(out, "Nothing to remove: %q has no pending invitation and is not a collaborator on %s/%s.\n", selector, pr.Owner, pr.Repo)
+					return nil
+				}
+				if pr.InvitationCancelled {
+					fmt.Fprintf(out, "Cancelled pending invitation for %s.\n", selector)
+				}
+				if pr.CollaboratorRevoked {
+					fmt.Fprintf(out, "Revoked GitHub collaborator %s on %s/%s.\n", selector, pr.Owner, pr.Repo)
+				}
+				if pr.CollaboratorErr != nil {
+					fmt.Fprintf(out, "  warning: collaborator removal failed: %v\n", pr.CollaboratorErr)
+					fmt.Fprintf(out, "    retry: gh api -X DELETE repos/%s/%s/collaborators/%s\n", pr.Owner, pr.Repo, selector)
 				}
 				return nil
 			}
+
+			// Recipient path. Safeguards.
 			if err := brain.CanRemoveRecipient(m); err != nil {
 				return fmt.Errorf("%w (removing %s from %s)", err, match, filepath.Base(brainPath))
 			}
@@ -407,42 +451,65 @@ TTY-only.`,
 				}
 			}
 
-			// Apply via the shared complete-remove path: manifest + verified.yaml
-			// + keys branch + GitHub collaborator. CLI and TUI both call this so
-			// they can't drift (nous#38).
-			res, err := brainsync.RemoveRecipient(cmd.Context(), brainPath, fpArg, force)
+			// Apply via the unified per-brain removal (manifest + verified.yaml
+			// + keys branch + collaborator + any pending invitation). CLI + TUI
+			// share this (nous#38/#40).
+			pr, err := brainsync.RemovePerson(cmd.Context(), brainPath, match, force)
 			if err != nil {
 				return err
 			}
+			res := pr.Recipient
 			fmt.Fprintln(out, "Removed + pushed (gcrypt re-encrypted to the remaining recipients).")
-			if len(res.RemovedLogins) > 0 {
-				fmt.Fprintf(out, "Cleared verified.yaml for: %s\n", strings.Join(res.RemovedLogins, ", "))
-			}
-			if res.VerifiedErr != nil {
-				fmt.Fprintf(out, "  warning: clear verified.yaml: %v\n", res.VerifiedErr)
-			}
-			if res.KeysBranchErr != nil {
-				fmt.Fprintf(out, "  warning: revoke %s from keys branch: %v\n", res.ShortFp, res.KeysBranchErr)
-				fmt.Fprintln(out, "  (manifest update succeeded; re-run remove to retry the keys-branch revoke)")
-			}
-			if res.HadRemote {
-				switch {
-				case res.CollaboratorRevoked:
-					fmt.Fprintf(out, "Revoked GitHub collaborator %s on %s/%s.\n", res.Login, res.Owner, res.Repo)
-				case res.LoginUnresolved:
-					fmt.Fprintf(out, "  ⚠ could NOT resolve a GitHub login for %s — collaborator NOT revoked.\n", res.ShortFp)
-					fmt.Fprintln(out, "    They may still have repo access. Remove manually once you know their login:")
-					fmt.Fprintf(out, "    gh api -X DELETE repos/%s/%s/collaborators/<login>\n", res.Owner, res.Repo)
-				case res.CollaboratorErr != nil:
-					fmt.Fprintf(out, "  warning: GitHub collaborator removal failed: %v\n", res.CollaboratorErr)
-					fmt.Fprintf(out, "    retry: gh api -X DELETE repos/%s/%s/collaborators/%s\n", res.Owner, res.Repo, res.Login)
+			if res != nil {
+				if len(res.RemovedLogins) > 0 {
+					fmt.Fprintf(out, "Cleared verified.yaml for: %s\n", strings.Join(res.RemovedLogins, ", "))
 				}
+				if res.VerifiedErr != nil {
+					fmt.Fprintf(out, "  warning: clear verified.yaml: %v\n", res.VerifiedErr)
+				}
+				if res.KeysBranchErr != nil {
+					fmt.Fprintf(out, "  warning: revoke %s from keys branch: %v\n", res.ShortFp, res.KeysBranchErr)
+					fmt.Fprintln(out, "  (manifest update succeeded; re-run remove to retry the keys-branch revoke)")
+				}
+				if res.HadRemote {
+					switch {
+					case res.CollaboratorRevoked:
+						fmt.Fprintf(out, "Revoked GitHub collaborator %s on %s/%s.\n", res.Login, res.Owner, res.Repo)
+					case res.LoginUnresolved:
+						fmt.Fprintf(out, "  ⚠ could NOT resolve a GitHub login for %s — collaborator NOT revoked.\n", res.ShortFp)
+						fmt.Fprintln(out, "    They may still have repo access. Remove manually once you know their login:")
+						fmt.Fprintf(out, "    gh api -X DELETE repos/%s/%s/collaborators/<login>\n", res.Owner, res.Repo)
+					case res.CollaboratorErr != nil:
+						fmt.Fprintf(out, "  warning: GitHub collaborator removal failed: %v\n", res.CollaboratorErr)
+						fmt.Fprintf(out, "    retry: gh api -X DELETE repos/%s/%s/collaborators/%s\n", res.Owner, res.Repo, res.Login)
+					}
+				}
+			}
+			if pr.InvitationCancelled {
+				fmt.Fprintln(out, "Also cancelled a lingering pending invitation.")
 			}
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "skip self-removal warning + interactive confirmation")
 	return cmd
+}
+
+// looksHexFingerprint reports whether s is plausibly a fingerprint or
+// last-8 (8–40 hex chars) rather than a GitHub login — used to decide
+// whether an unmatched selector should hit the recipient retry path or
+// be treated as a login.
+func looksHexFingerprint(s string) bool {
+	s = strings.TrimSpace(s)
+	if len(s) < 8 || len(s) > 40 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 // promptYes reads a y/n confirmation. Empty / "n" / "no" / "esc" are
