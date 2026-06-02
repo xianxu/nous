@@ -1,11 +1,12 @@
 ---
 id: 000036
-status: working
+status: done
 deps: [ariadne#59]
 github_issue:
 created: 2026-06-01
-updated: 2026-06-01
+updated: 2026-06-02
 estimate_hours: 4
+actual_hours: 5
 ---
 
 # scriptable headless brain testing in tart VM
@@ -139,6 +140,8 @@ verified by `scripts/brain-vm-e2e.sh` (the shim drives gpg/gcrypt unattended)
 
 ## Log
 
+
+- 2026-06-02: closed — headless tart VM does brain ops over SSH unattended (fake-pinentry shim) + scriptable ceremony; brain-vm-e2e.sh green end-to-end; live VM smoke confirmed init unattended. --force: codex read-only review served as the milestone review; Review-Verdict trailers not used this session
 ### 2026-06-01
 
 Created. Carved from the shared-brain dogfood (nous#12) — this is the

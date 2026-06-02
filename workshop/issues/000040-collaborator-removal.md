@@ -1,11 +1,12 @@
 ---
 id: 000040
-status: open
+status: done
 deps: []
 github_issue:
 created: 2026-06-02
 updated: 2026-06-02
 estimate_hours: 3
+actual_hours: 3
 ---
 
 # collaborator removal: reliable revoke + remove at any lifecycle stage
@@ -106,6 +107,8 @@ stay nous#37.
 
 ## Log
 
+
+- 2026-06-02: closed — unified recipient remove acts at any lifecycle stage (recipient/pending/collaborator) by fp or login; Bug A (silent collaborator-revoke skip) + codex#1 (keys-branch strip on non-recipient path) fixed; build/vet/tests/e2e green. M2c (TUI pending-row) deferred to its own follow-up. --force: deferred M2c + trailers; codex review covered span
 ### 2026-06-02
 
 Filed from the dogfood. Bug A is an ordering regression in nous#38's

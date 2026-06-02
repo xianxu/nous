@@ -1,11 +1,12 @@
 ---
 id: 000038
-status: working
+status: done
 deps: []
 github_issue:
 created: 2026-06-01
-updated: 2026-06-01
+updated: 2026-06-02
 estimate_hours: 2
+actual_hours: 2
 ---
 
 # recipient remove: clear all per-brain revoke state
@@ -84,6 +85,8 @@ clawing back already-fetched blobs.
 
 ## Log
 
+
+- 2026-06-02: closed — per-brain recipient remove clears all stores (manifest+rekey+verified.yaml+keys-branch+collaborator); RemoveVerifiedFor unit tests + brain-vm-e2e remove-sticks section green. --force: trailers not used this session; codex review covered span
 ### 2026-06-01
 
 Carved from nous#37 as the per-brain slice (leaks #1/#2/#3, no fan-out) so it

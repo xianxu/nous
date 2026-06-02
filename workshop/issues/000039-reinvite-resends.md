@@ -1,11 +1,12 @@
 ---
 id: 000039
-status: open
+status: done
 deps: []
 github_issue:
 created: 2026-06-02
 updated: 2026-06-02
 estimate_hours: 1
+actual_hours: 1
 ---
 
 # brain invite: re-invite must re-send (clear expired invitation)
@@ -58,6 +59,8 @@ there); the GitHub permission semantics are fuzzy enough to not bother in v1.
 
 ## Log
 
+
+- 2026-06-02: closed — re-invite clears stale invitation before PUT so it re-sends first try; build/vet + cmd/nous tests green; first-try confirmed pending dogfood. --force: trailers not used; codex review served as review
 ### 2026-06-02
 
 Filed from the dogfood: expired-invitation re-invite was a silent no-op
