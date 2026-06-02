@@ -164,4 +164,44 @@ grep -q "$MARK" "$BRAIN_OP/notes.md" 2>/dev/null \
     || die "operator did not receive the peer's edit (round-trip failed)"
 ok "operator received the peer's edit"
 
-printf '\n%s✅ brain e2e PASSED%s — scripted ceremony + gcrypt round-trip verified end-to-end.\n' "$GREEN" "$RESET"
+# ── remove sticks: no resurrection vectors left (nous#38) ────────────
+# Seed the two vectors a GitHub-mediated peer would have — a verified.yaml
+# entry and a <login>.asc on the keys branch (alongside the <FP>.asc that
+# `recipient add` published) — then prove `recipient remove` clears ALL of
+# them (manifest + verified.yaml + every keys-branch entry for the fp).
+step "remove sticks — recipient remove clears manifest + verified.yaml + keys branch"
+PEER_LOGIN="e2epeer"
+cat > "$BRAIN_OP/.brain/verified.yaml" <<EOF
+$PEER_LOGIN:
+  fingerprint: $PEER_FP
+  verified_by: e2eop
+  verified_at: 2026-06-01T00:00:00Z
+EOF
+git -C "$BRAIN_OP" add -A
+git -C "$BRAIN_OP" commit -q -m "seed verified.yaml"
+( cd "$BRAIN_OP" && GNUPGHOME="$OP_H" "$NOUS" push >/dev/null )
+
+# Add <login>.asc next to <FP>.asc on the (plaintext) keys branch.
+git clone -q --branch keys --single-branch "file://$WORK/remote.git" "$WORK/keysco" \
+    || die "setup: keys branch not plain-cloneable"
+cp "$WORK/keysco/${PEER_FP}.asc" "$WORK/keysco/${PEER_LOGIN}.asc"
+git -C "$WORK/keysco" -c user.email=o@e2e -c user.name=o add -A
+git -C "$WORK/keysco" -c user.email=o@e2e -c user.name=o commit -q -m "add ${PEER_LOGIN}.asc"
+git -C "$WORK/keysco" push -q origin keys
+ok "seeded verified.yaml + <login>.asc (resurrection vectors present)"
+
+# --force lifts the TTY gate for scripted use.
+GNUPGHOME="$OP_H" "$NOUS" brain recipient remove "$BRAIN_OP" "$PEER_FP" --force </dev/null >/dev/null
+
+grep -q "$PEER_FP" "$BRAIN_OP/.brain/config.md" && die "peer still in manifest after remove" || true
+grep -qi "$PEER_LOGIN" "$BRAIN_OP/.brain/verified.yaml" 2>/dev/null && die "verified.yaml entry survived remove (leak #2)" || true
+rm -rf "$WORK/keysco2"
+git clone -q --branch keys --single-branch "file://$WORK/remote.git" "$WORK/keysco2" || die "re-clone keys branch"
+for f in "$WORK/keysco2"/*.asc; do
+    [ -e "$f" ] || continue
+    fp=$(gpg --show-keys --with-colons "$f" 2>/dev/null | awk -F: '/^fpr/{print $10; exit}')
+    [ "$fp" = "$PEER_FP" ] && die "keys-branch entry $(basename "$f") still resolves to peer (leak #1)"
+done
+ok "manifest + verified.yaml + all keys-branch entries cleared — no resurrection vectors"
+
+printf '\n%s✅ brain e2e PASSED%s — scripted ceremony + gcrypt round-trip + complete remove verified.\n' "$GREEN" "$RESET"

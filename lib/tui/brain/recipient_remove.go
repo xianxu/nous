@@ -1,6 +1,7 @@
 package brain
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -256,31 +257,18 @@ func (m recipientRemoveModel) updateDone(msg tea.Msg) (recipientRemoveModel, tea
 func (m recipientRemoveModel) applyCmd() tea.Cmd {
 	brainPath := m.brainPath
 	chosen := m.chosen
-	short := chosen
-	if len(short) >= 8 {
-		short = strings.ToLower(short[len(short)-8:])
-	}
 	return func() tea.Msg {
-		man, err := libbrain.Read(brainPath)
+		// Route through the shared complete-remove path so the TUI clears
+		// the same state the CLI does — manifest + verified.yaml + keys
+		// branch + GitHub collaborator — instead of just the manifest.
+		// force=true: the TUI already ran its own REMOVE-SELF lockout
+		// ceremony before reaching apply (nous#38). Best-effort cleanup
+		// failures don't fail the flow (the push is the load-bearing step).
+		res, err := brainsync.RemoveRecipient(context.Background(), brainPath, chosen, true)
 		if err != nil {
-			return removeApplyResultMsg{err: fmt.Errorf("read manifest: %w", err)}
-		}
-		// Re-check guard inside the apply phase. The picker enforced
-		// it earlier but the manifest could have changed between the
-		// picker render and the apply (paranoia / race-free).
-		if err := libbrain.CanRemoveRecipient(man); err != nil {
 			return removeApplyResultMsg{err: err}
 		}
-		man.Recipients = libbrain.WithoutRecipient(man.Recipients, chosen)
-		if err := libbrain.RewriteFrontmatter(brainPath, man); err != nil {
-			return removeApplyResultMsg{err: fmt.Errorf("rewrite frontmatter: %w", err)}
-		}
-		// gcrypt-participants derives from the manifest at push time
-		// (nous#24); AddCommitPush below handles the sync.
-		if err := brainsync.AddCommitPush(brainPath, fmt.Sprintf("collaborator: revoke %s", short)); err != nil {
-			return removeApplyResultMsg{err: fmt.Errorf("push: %w", err)}
-		}
-		return removeApplyResultMsg{last8: short}
+		return removeApplyResultMsg{last8: res.ShortFp}
 	}
 }
 

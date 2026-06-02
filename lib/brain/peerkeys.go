@@ -63,14 +63,19 @@ func PublishPubkey(ctx context.Context, brainRoot, fp string) error {
 	return nil
 }
 
-// RevokePubkey removes fp's pubkey entry from the brain's keys
-// store. Idempotent at the filestore layer (no-op when the entry
-// doesn't exist). Does NOT remove the key from the local GPG
-// keyring — that's a separate concern owned by the operator.
+// RevokePubkey removes every keys-branch entry for fp — matched by the
+// pubkey's *content* fingerprint, not by filename. A recipient may be
+// published under more than one name: the legacy `<FP>.asc` (nous#23)
+// AND the `<login>.asc` (nous#26) the GitHub-mediated join writes. A
+// filename-only delete of `<FP>.asc` left `<login>.asc` behind, and
+// since auto-admit derives the fp from contents, the survivor silently
+// re-admitted the revoked peer (nous#38 leak #1). Deleting by content
+// fingerprint covers all naming conventions at once.
 //
-// Symmetric counterpart to PublishPubkey; called by
-// `nous brain recipient remove` after the manifest + gcrypt-
-// participants list have been updated.
+// Idempotent (no-op when nothing matches). Does NOT touch the local GPG
+// keyring — that's the operator's concern. Symmetric counterpart to
+// PublishPubkey; called by the shared remove path after the manifest +
+// gcrypt-participants update.
 func RevokePubkey(ctx context.Context, brainRoot, fp string) error {
 	store, err := filestore.Open(brainRoot, keysBranch)
 	if err != nil {
@@ -78,9 +83,25 @@ func RevokePubkey(ctx context.Context, brainRoot, fp string) error {
 	}
 	defer store.Close()
 
-	name := strings.ToUpper(fp) + pubkeyFilenameSuffix
-	if err := store.Delete(ctx, name); err != nil {
-		return fmt.Errorf("peerkeys: revoke %s: %w", name, err)
+	files, err := store.List(ctx)
+	if err != nil {
+		return fmt.Errorf("peerkeys: list keys store: %w", err)
+	}
+	fpUp := strings.ToUpper(strings.TrimSpace(fp))
+	for name, content := range files {
+		if !strings.HasSuffix(name, pubkeyFilenameSuffix) {
+			continue
+		}
+		key, ierr := identity.Inspect(string(content))
+		if ierr != nil {
+			continue // unparseable entry — not ours to delete; leave it
+		}
+		if strings.ToUpper(key.Fingerprint) != fpUp {
+			continue
+		}
+		if derr := store.Delete(ctx, name); derr != nil {
+			return fmt.Errorf("peerkeys: revoke %s: %w", name, derr)
+		}
 	}
 	return nil
 }

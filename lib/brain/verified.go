@@ -117,6 +117,36 @@ func WriteVerified(brainRoot string, v Verified) error {
 	return os.Rename(tmp, path)
 }
 
+// RemoveVerifiedFor drops every verified.yaml entry whose fingerprint
+// matches fp (case-insensitive) and returns the login(s) removed — the
+// caller uses them to revoke the matching GitHub collaborator. No-op
+// (returns nil, nil) when nothing matches, so it's safe to call on a
+// brain that never recorded a verification. Without this, `recipient
+// remove` leaves the login→fp mapping "verified", letting auto-admit
+// silently re-admit on the next keys-branch re-publish (nous#38 leak #2).
+func RemoveVerifiedFor(brainRoot, fp string) ([]string, error) {
+	v, err := ReadVerified(brainRoot)
+	if err != nil {
+		return nil, err
+	}
+	fpUp := strings.ToUpper(strings.TrimSpace(fp))
+	var removed []string
+	for login, e := range v {
+		if strings.ToUpper(e.Fingerprint) == fpUp {
+			removed = append(removed, login)
+			delete(v, login)
+		}
+	}
+	if len(removed) == 0 {
+		return nil, nil
+	}
+	sort.Strings(removed)
+	if err := WriteVerified(brainRoot, v); err != nil {
+		return removed, err
+	}
+	return removed, nil
+}
+
 // LoginForFingerprint scans the brain's keys branch for a
 // `<login>.asc` whose pubkey content has fingerprint `fp`, and
 // returns the login (filename stem). Returns ("", nil) when no
