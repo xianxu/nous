@@ -246,6 +246,16 @@ target brain enters via `nous brain clone gcrypt::…` or
 (it holds only throwaway Ying/Emma identities), which is what makes the
 hardcoded-passphrase shim safe.
 
+**`scripts/brain-vm-e2e.sh`** is the VM-free, GitHub-free companion: it
+drives the real `nous` CLI through the full two-peer scripted ceremony
+(`identity import` / `brain recipient add --verified-last8`, plus the
+wrong-last8 rejection) against a `file://` bare gcrypt remote, then proves
+a complete `recipient remove` clears every resurrection vector (manifest +
+verified.yaml + all keys-branch entries; nous#38). It uses `%no-protection`
+throwaway keys so gpg/gcrypt never prompt, so it runs anywhere gpg + git +
+git-remote-gcrypt are present — the scriptable-ceremony substrate check
+that needs neither a VM nor operator keys.
+
 ## When this doc gets stale
 
 This atlas should be revised when:
