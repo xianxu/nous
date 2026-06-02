@@ -41,9 +41,10 @@ handoff() {
     exec make bootstrap
 }
 
-# No go.mod at all → no peers to clone; hand off.
-if [[ ! -f construct/go.mod && ! -f go.mod ]]; then
-    echo "bootstrap: no go.mod / construct/go.mod (no substrate peers) — handing off to make." >&2
+# No substrate source at all → no peers to clone; hand off. (#60: construct/deps
+# is a third carrier — a deps-only derivative has no go.mod.)
+if [[ ! -f construct/go.mod && ! -f go.mod && ! -f construct/deps ]]; then
+    echo "bootstrap: no go.mod / construct/go.mod / construct/deps (no substrate peers) — handing off to make." >&2
     handoff
 fi
 
@@ -117,6 +118,53 @@ walk_gomod() {
     done < "$gm"
 }
 
+# walk_deps <repo-root> <origin> <this-name> <depth>
+# INLINE copy of construct/scripts/lib-deps.sh:deps_substrate_targets + walk_gomod's
+# clone/enqueue — bootstrap.sh can't source the symlinked lib on a bare clone.
+# Locked to deps_substrate_targets() by construct/scripts/test/bootstrap-transitive.test.sh;
+# keep the parse identical. construct/deps `substrate` rows carry sibling paths
+# relative to the REPO ROOT (not construct/), already absolute after resolution.
+walk_deps() {
+    local root="$1" origin="$2" this_name="$3" depth="$4"
+    local deps="$root/construct/deps" line kind target raw parent peer name url real
+    [[ -f "$deps" ]] || return 0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%%#*}"
+        # shellcheck disable=SC2086
+        set -- $line
+        [[ $# -ge 2 ]] || continue
+        kind="$1"; target="$2"
+        [[ "$kind" == "substrate" ]] || continue
+        if [[ "$target" == /* ]]; then raw="$target"; else raw="$root/$target"; fi
+        parent="$(cd "$(dirname "$raw")" 2>/dev/null && pwd -P || true)"
+        # Clone-driver semantics: abort loudly on an unresolvable manifest path.
+        # lib-deps.sh:deps_substrate_targets DELIBERATELY differs (skips silently)
+        # — the drift test only locks the all-peers-present case, so keep these in sync.
+        [[ -n "$parent" ]] || { echo "bootstrap: cannot resolve peer path for '$target' (in $deps)" >&2; exit 1; }
+        peer="$parent/$(basename "$raw")"
+        name="$(basename "$peer")"
+
+        if [[ ! -d "$peer" ]]; then
+            if [[ -n "$DRY_RUN" ]]; then
+                echo "bootstrap: (dry-run) would clone '$name' → $peer" >&2
+            else
+                url="$(peer_url "$name" "$origin" "$this_name")" || exit 1
+                echo "bootstrap: cloning peer '$name'" >&2
+                echo "    from $url" >&2
+                echo "    into $peer" >&2
+                mkdir -p "$(dirname "$peer")"
+                git clone "$url" "$peer"
+            fi
+        else
+            echo "bootstrap: peer '$name' already present ($peer)" >&2
+        fi
+
+        if [[ -d "$peer" ]]; then real="$(cd "$peer" && pwd -P)"; else real="$peer"; fi
+        discovered+=("$real")
+        queue+=("$((depth + 1)):$real")
+    done < "$deps"
+}
+
 while [[ ${#queue[@]} -gt 0 ]]; do
     entry="${queue[0]}"
     queue=("${queue[@]:1}")
@@ -138,9 +186,12 @@ while [[ ${#queue[@]} -gt 0 ]]; do
     origin="$(git -C "$dir" remote get-url origin 2>/dev/null || true)"
     this_name="$(basename "$dir")"
 
-    # Substrate replaces live in root go.mod and/or construct/go.mod — walk both.
+    # Substrate lives in root go.mod and/or construct/go.mod (legacy) and/or
+    # construct/deps (#60). Walk all three; the main loop's seen-set dedups a
+    # peer declared in more than one carrier during the transition.
     walk_gomod "$dir/go.mod" "$dir" "$origin" "$this_name" "$depth"
     walk_gomod "$dir/construct/go.mod" "$dir/construct" "$origin" "$this_name" "$depth"
+    walk_deps "$dir" "$origin" "$this_name" "$depth"
 done
 
 if [[ -n "$DRY_RUN" ]]; then
