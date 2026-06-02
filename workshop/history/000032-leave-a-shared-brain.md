@@ -1,11 +1,12 @@
 ---
 id: 000032
-status: working
+status: done
 deps: []
 target: shared-brain-infrastructure-and-ui
 created: 2026-05-21
-updated: 2026-05-22
+updated: 2026-06-02
 estimate_hours: 4
+actual_hours: 2
 ---
 
 # Leave a shared brain — `nous brain leave` + TUI `l` key
@@ -129,24 +130,24 @@ default behavior is right.
 
 ## Plan
 
-- [ ] **M1 — gh primitive**
-  - [ ] `gh.RemoveCollaborator(owner, repo, login)` — DELETE
+- [x] **M1 — gh primitive**
+  - [x] `gh.RemoveCollaborator(owner, repo, login)` — DELETE
         wrapper. Error semantics: nil on 204; gh error
         bubbled otherwise.
-- [ ] **M2 — Shared leave logic**
-  - [ ] Helper in cmd/nous: `runBrainLeave(ctx, brainPath,
+- [x] **M2 — Shared leave logic**
+  - [x] Helper in cmd/nous: `runBrainLeave(ctx, brainPath,
         deleteLocal bool, confirm func() (bool, error)) error`.
         Confirm-injected so the TUI can reuse without prompting
         on stdin.
-- [ ] **M3 — CLI**
-  - [ ] `cmd/nous/brain_leave.go` with `newBrainLeaveCmd()`.
-  - [ ] Register in `cmd/nous/brain.go`.
-- [ ] **M4 — TUI**
-  - [ ] `lib/tui/brain/leave.go` with `leaveModel`.
-  - [ ] `lib/tui/brain/detail.go`: `l` keybind + help text.
-  - [ ] `lib/tui/brain/root.go`: `screenLeave` + nav messages
+- [x] **M3 — CLI**
+  - [x] `cmd/nous/brain_leave.go` with `newBrainLeaveCmd()`.
+  - [x] Register in `cmd/nous/brain.go`.
+- [x] **M4 — TUI**
+  - [x] `lib/tui/brain/leave.go` with `leaveModel`.
+  - [x] `lib/tui/brain/detail.go`: `l` keybind + help text.
+  - [x] `lib/tui/brain/root.go`: `screenLeave` + nav messages
         (`launchLeaveMsg`, `leaveDoneMsg`).
-  - [ ] Cache invalidation on leaveDoneMsg success.
+  - [x] Cache invalidation on leaveDoneMsg success.
 - [ ] **M5 — Tests + close**
   - [ ] Owner-refuse path.
   - [ ] Not-a-recipient path.
@@ -156,6 +157,8 @@ default behavior is right.
 
 ## Log
 
+
+- 2026-06-02: closed — POST-HOC wind-down close (--force: M5 owner-refuse + happy-path e2e operator-gated, needs gh+gpg). nous brain leave + TUI l key shipped (M1-M4): gh.RemoveCollaborator; brainsync.LeaveBrain (refuse-if-owner, self-fp resolve, CanRemoveRecipient guard, manifest WithoutRecipient + re-key push, soft-fail collaborator revoke, --delete-local); TUI confirm/working/done + cache-invalidate; 4 unit guard tests green. Leave-completeness gap vs invariant #2 (keys-branch asc + verified.yaml not stripped → self-leave resurrection) is tracked as nous#41 finding #12. Actual = manual estimate.
 - 2026-05-21: opened. Surfaced as a follow-up to the docs
   sweep — `nous brain leave` is the gesture symmetric to the
   TUI's accept-and-clone, and was missing.

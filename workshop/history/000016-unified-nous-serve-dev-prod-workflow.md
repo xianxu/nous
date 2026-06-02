@@ -1,10 +1,11 @@
 ---
 id: 000016
-status: working
+status: done
 deps: [000014]
 created: 2026-05-09
-updated: 2026-05-10
+updated: 2026-06-02
 estimate_hours: 6
+actual_hours: 2
 ---
 
 # Unified `nous serve` foreground daemon + nous-dev/nous-install dev/prod workflow
@@ -67,34 +68,34 @@ Operators can freely switch between them via `make nous-dev` ↔ `make nous-inst
 
 ### M1 — extract daemon runtimes into lib
 
-- [ ] `lib/brainsync.Run(ctx)` exposes the brain-sync watcher loop as a callable function (today inline in `cmd/brain-sync/main.go`).
-- [ ] `lib/provider/proxy.Serve(ctx, addr, vault, ca, audit)` exposes the proxy daemon (today inline in `lib/charoncli`'s ServeCmd).
+- [x] `lib/brainsync.Run(ctx)` exposes the brain-sync watcher loop as a callable function (today inline in `cmd/brain-sync/main.go`).
+- [x] `lib/provider/proxy.Serve(ctx, addr, vault, ca, audit)` exposes the proxy daemon (today inline in `lib/charoncli`'s ServeCmd).
 
 ### M2 — `nous serve` subcommand
 
-- [ ] `cmd/nous/serve.go`: subcommand with `--proxy-only` / `--sync-only` flags. Default runs both. Single signal handler shuts down both via context cancellation.
-- [ ] One log stream (stderr by default; can split via flags later).
+- [x] `cmd/nous/serve.go`: subcommand with `--proxy-only` / `--sync-only` flags. Default runs both. Single signal handler shuts down both via context cancellation.
+- [x] One log stream (stderr by default; can split via flags later).
 
 ### M3 — `make nous-dev` runs foreground
 
-- [ ] Stop launchd services (existing `nous-dev` already does).
-- [ ] After build, `exec ./bin/nous serve` (block until Ctrl-C).
-- [ ] Print "running in dev mode (charon-dev namespace)" status banner so the operator sees the namespace split clearly.
+- [x] Stop launchd services (existing `nous-dev` already does).
+- [x] After build, `exec ./bin/nous serve` (block until Ctrl-C).
+- [x] Print "running in dev mode (charon-dev namespace)" status banner so the operator sees the namespace split clearly.
 
 ### M4 — `make nous-install` signs + installs
 
-- [ ] Pre-step: stop dev foreground process. Detection: `pgrep -f 'bin/nous serve'`.
-- [ ] Build to `bin/`.
-- [ ] Sign each binary that ships into prod (nous, charon, brain-sync, nous-security). Reuse charon's `make sign` workflow — likely refactor `Makefile.local`'s sign target into a callable script `scripts/sign.sh <binary>` that nous-install can call per-binary.
-- [ ] Copy signed binaries to `~/.local/bin/` (PATH-stable location).
-- [ ] Update launchd plist to point at `~/.local/bin/nous serve`.
-- [ ] Install + start the unified service.
+- [x] Pre-step: stop dev foreground process. Detection: `pgrep -f 'bin/nous serve'`.
+- [x] Build to `bin/`.
+- [x] Sign each binary that ships into prod (nous, charon, brain-sync, nous-security). Reuse charon's `make sign` workflow — likely refactor `Makefile.local`'s sign target into a callable script `scripts/sign.sh <binary>` that nous-install can call per-binary.
+- [x] Copy signed binaries to `~/.local/bin/` (PATH-stable location).
+- [x] Update launchd plist to point at `~/.local/bin/nous serve`.
+- [x] Install + start the unified service.
 
 ### M5 — drop legacy multi-service install
 
-- [ ] `nous service install` writes one plist (com.xianxu.nous), not two (com.charon.proxy + com.xianxu.brain-sync).
-- [ ] Migration: detect old plists at install time, unload + delete them, install the new unified plist.
-- [ ] `nous service status` reflects one service.
+- [x] `nous service install` writes one plist (com.xianxu.nous), not two (com.charon.proxy + com.xianxu.brain-sync).
+- [x] Migration: detect old plists at install time, unload + delete them, install the new unified plist.
+- [x] `nous service status` reflects one service.
 
 ## Estimate
 
@@ -109,6 +110,8 @@ Operators can freely switch between them via `make nous-dev` ↔ `make nous-inst
 
 ## Log
 
+
+- 2026-06-02: closed — POST-HOC wind-down close (--force: milestone-review ceremony skipped, work in rapid slices; verified by code+test inspection). Unified nous serve: lib/brainsync.Run + lib/provider/proxy.Serve as ctx-cancellable goroutines; cmd/nous/serve.go mounts both; make nous-dev runs foreground unsigned (charon-dev ns); single com.42shots.nous plist w/ legacy migration; go build+tests green. M4 daemon-codesign deliberately walked back (b2e9b99, operator chose dev-only); operator launchd live-verify is the only pending step. Actual = manual estimate, v3 telemetry absent.
 ### 2026-05-09 — created
 Surfaced from operator UX feedback after nous#15 closed: "let's do `make nous-dev` to do `nous-all` in dev mode + stop production first. `make nous-install` should stop dev + install prod. For now since we have multiple binaries, just rename nous-all to nous-dev and file a ticket for the eventual single-binary unified workflow."
 

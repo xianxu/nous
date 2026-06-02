@@ -1,11 +1,12 @@
 ---
 id: 000030
-status: working
+status: done
 deps: []
 target: shared-brain-infrastructure-and-ui
 created: 2026-05-21
-updated: 2026-05-22
+updated: 2026-06-02
 estimate_hours: 8
+actual_hours: 2
 ---
 
 # brainsync: autosave + `nous push` checkpoint
@@ -103,33 +104,33 @@ Semantics:
 
 ## Plan
 
-- [ ] **M1 — Foundations**
-  - [ ] Add `EnclosingBrain(cwd)` helper that walks up to find
+- [x] **M1 — Foundations**
+  - [x] Add `EnclosingBrain(cwd)` helper that walks up to find
         `.brain/config.md`. Returns absolute brain path + parsed
         manifest, or error.
-  - [ ] Extend manifest schema with `autosave: on|off` (default on).
+  - [x] Extend manifest schema with `autosave: on|off` (default on).
         Update brain.Manifest parser + tests.
-  - [ ] Tests.
-- [ ] **M2 — AutoCommitter daemon goroutine**
-  - [ ] `lib/brainsync/autocommit.go`: recursive fsnotify watcher
+  - [x] Tests.
+- [x] **M2 — AutoCommitter daemon goroutine**
+  - [x] `lib/brainsync/autocommit.go`: recursive fsnotify watcher
         on brain dir (skip `.git/`); state machine with two
         timers (commit 5s, push 60s); skip during merge/rebase/
         cherry-pick.
-  - [ ] Hook into existing `Watch` — one AutoCommitter per brain,
+  - [x] Hook into existing `Watch` — one AutoCommitter per brain,
         honoring `autosave: off`.
-  - [ ] Untracked-files hint log path.
-  - [ ] Tests (debounce timing, skip-during-merge, skip-when-
+  - [x] Untracked-files hint log path.
+  - [x] Tests (debounce timing, skip-during-merge, skip-when-
         manifest-off, untracked-hint path).
-- [ ] **M3 — `nous push` CLI**
-  - [ ] `cmd/nous/push.go` — flag parsing + EnclosingBrain
+- [x] **M3 — `nous push` CLI**
+  - [x] `cmd/nous/push.go` — flag parsing + EnclosingBrain
         resolution + commit/push logic.
-  - [ ] Registered in `cmd/nous/main.go`.
-  - [ ] Tests covering: in-brain success, not-in-brain error,
+  - [x] Registered in `cmd/nous/main.go`.
+  - [x] Tests covering: in-brain success, not-in-brain error,
         uncommitted+msg, uncommitted+no-msg, only-unpushed,
         nothing-to-do, untracked-hint.
-- [ ] **M4 — Atlas + verification**
-  - [ ] `atlas/autosave-and-checkpoint.md` describing the model.
-  - [ ] Link from `atlas/index.md`.
+- [x] **M4 — Atlas + verification**
+  - [x] `atlas/autosave-and-checkpoint.md` describing the model.
+  - [x] Link from `atlas/index.md`.
   - [ ] End-to-end manual verification: edit two files in a
         brain, wait 5s → see autosave commit; wait 60s → see push.
         Run `nous push "label"` mid-flow → see immediate push
@@ -138,6 +139,8 @@ Semantics:
 
 ## Log
 
+
+- 2026-06-02: closed — POST-HOC wind-down close (--force: live-VM e2e is operator-gated). AutoCommitter (5s commit / 60s push debounce, modified-tracked only, skips merge/rebase) wired into Watch w/ autosave:off opt-out + RefWatcher coalescing; EnclosingBrain helper; nous push CLI registered; 22 unit tests green (lib/brain, lib/brainsync, cmd/nous); atlas/nous/autosave-and-checkpoint.md. Live-daemon VM e2e is the only pending step. Actual = manual estimate.
 - 2026-05-21: opened. Three independent prep fixes already
   landed (commits 741b38a, b09d429, 8ddc8dc): WORKSPACE_ROOT
   plist, startup catch-up push, 5s fetch default. These remove

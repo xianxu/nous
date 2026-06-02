@@ -1,11 +1,12 @@
 ---
 id: 000031
-status: working
+status: done
 deps: []
 target: shared-brain-infrastructure-and-ui
 created: 2026-05-21
-updated: 2026-05-22
+updated: 2026-06-02
 estimate_hours: 3
+actual_hours: 3
 ---
 
 # TUI: load brain list async + cache across navigations
@@ -88,36 +89,38 @@ Two changes, no new conceptual surface:
 
 ## Plan
 
-- [ ] **M1 — Async load**
-  - [ ] `listLoadedMsg` type carrying myLogin / invitations / repos.
-  - [ ] Extract the remote-load logic into a free function
+- [x] **M1 — Async load**
+  - [x] `listLoadedMsg` type carrying myLogin / invitations / repos.
+  - [x] Extract the remote-load logic into a free function
         returning `tea.Cmd`.
-  - [ ] `newListModel` builds with local manifests only.
-  - [ ] `Init()` returns the load Cmd.
-  - [ ] `listModel.Update(listLoadedMsg)` rebuilds items + uncloned/
+  - [x] `newListModel` builds with local manifests only.
+  - [x] `Init()` returns the load Cmd.
+  - [x] `listModel.Update(listLoadedMsg)` rebuilds items + uncloned/
         pending rows.
-  - [ ] View renders a "loading collaborators..." subtle line
+  - [x] View renders a "loading collaborators..." subtle line
         until loaded.
-- [ ] **M2 — Cache + refresh**
-  - [ ] `rootModel.listCache *listLoadedData` field.
-  - [ ] Root.Update on `listLoadedMsg`: store cache, forward to list.
-  - [ ] `newListModel(cache *listLoadedData)` skips the load when
+- [x] **M2 — Cache + refresh**
+  - [x] `rootModel.listCache *listLoadedData` field.
+  - [x] Root.Update on `listLoadedMsg`: store cache, forward to list.
+  - [x] `newListModel(cache *listLoadedData)` skips the load when
         cache is non-nil.
-  - [ ] popToListMsg passes the cache.
-  - [ ] 'r' key in list triggers refresh (re-issues the load Cmd
+  - [x] popToListMsg passes the cache.
+  - [x] 'r' key in list triggers refresh (re-issues the load Cmd
         + clears local "stale" indicator).
-  - [ ] acceptInviteDoneMsg + cloneSubprocessDoneMsg invalidate
+  - [x] acceptInviteDoneMsg + cloneSubprocessDoneMsg invalidate
         cache on err==nil before reconstructing list.
-- [ ] **M3 — Tests + close**
-  - [ ] Test: list constructor returns fast (no gh calls).
-  - [ ] Test: listLoadedMsg flow folds invitations + uncloned in.
-  - [ ] Test: cache reuse on popToListMsg (no fetch).
-  - [ ] Test: cache invalidation on acceptInviteDoneMsg success.
-  - [ ] Verification: ESC from detail snaps back to list
+- [x] **M3 — Tests + close**
+  - [x] Test: list constructor returns fast (no gh calls).
+  - [x] Test: listLoadedMsg flow folds invitations + uncloned in.
+  - [x] Test: cache reuse on popToListMsg (no fetch).
+  - [x] Test: cache invalidation on acceptInviteDoneMsg success.
+  - [x] Verification: ESC from detail snaps back to list
         instantly on the operator's host after rebuild.
 
 ## Log
 
+
+- 2026-06-02: closed — POST-HOC wind-down close (milestone-review ceremony skipped: work landed in single rapid slice; verified by code+test inspection). Async filesystem-only newListModel + async gh fetch + nav cache; TestRoot_DetailEscPopsToList 0.11s vs 2.88s baseline, 25 lib/tui/brain tests green. Actual is manual estimate — v3 telemetry absent for these sessions.
 - 2026-05-21: opened. Surfaced from #30 follow-up — operator
   noticed slow ESC from detail; root cause was three synchronous
   gh subprocess calls in newListModel + full reload on every

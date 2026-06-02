@@ -1,10 +1,11 @@
 ---
 id: 000020
-status: working
+status: done
 deps: [000016]
 created: 2026-05-10
-updated: 2026-05-10
+updated: 2026-06-02
 estimate_hours: 2
+actual_hours: 1.5
 ---
 
 # Retire standalone `charon` + `brain-sync` binaries
@@ -167,6 +168,8 @@ file a follow-up issue when wanted.
 
 ## Log
 
+
+- 2026-06-02: closed — POST-HOC wind-down close (--force: M4 install-verify is operator-gated, cannot run codesign+launchctl in sandbox). cmd/charon + cmd/brain-sync deleted; 9 verbs (run/arm/disarm/vault/status/provider gcp|who|stats|scopes) mounted on nous; Makefile build/sign/install collapsed to one binary; doctor/audit unified to nous.log; ad-hoc signing dropped; go build + lib tests green. M4 operator install-run pending. Actual = manual estimate.
 **2026-05-10 — side-quest: dropped ad-hoc signing path from
 `make nous-install`.** Followed naturally from the operator
 conversation that filed this issue: ad-hoc signing produces a

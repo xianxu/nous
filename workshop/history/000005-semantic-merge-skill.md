@@ -1,10 +1,11 @@
 ---
 id: 000005
-status: working
+status: done
 deps: [nous#4 M3]
 created: 2026-05-05
-updated: 2026-05-08
+updated: 2026-06-02
 estimate_hours: 7
+actual_hours: 1.5
 ---
 
 # semantic merge skill
@@ -82,15 +83,17 @@ M4's range is conditional (won't ship unless dogfood reveals real failures); app
 - [x] Document the trail: SKILL.md `## Trail` section covers `git log --grep '^merge: .* via /nous-resolve$'` for finding past merges; manual `rm -rf .brain/merges/<old>/` for pruning; targeted older-revert via explicit SHA passed to `git revert`. No automated prune yet (revisit if `.brain/merges/` becomes large).
 - [x] Pulled in early (rather than last) because undo is the safety net that makes non-deterministic AI merges acceptable in the first place. Confirmed: now in hand before `nous#12` dogfood starts.
 
-### M3 — dogfood with travel-plan as guinea pig
+### M3 — dogfood with travel-plan as guinea pig — DEFERRED (fix-forward)
+
+> Deferred at issue close (2026-06-02): the shipped M1/M2 skill is the deliverable; real-conflict calibration happens as merge behavior shows up in real life, tracked under the relaxed dogfood (`nous#12`) and the shared-brain project Closeout. Not gating.
 
 - [ ] Run M1 on every real conflict that arises in the wife/me Paris-trip dogfood (issue #4 M4).
 - [ ] Log each conflict, the merged output, and a verdict: *clean* (LLM did the obvious right thing), *acceptable-but-prose-y* (LLM did something fine but more verbose than ideal), or *wrong* (LLM dissolved structure or invented content).
 - [ ] After ~5–10 conflicts, evaluate: do we need M4? If `wrong` count is zero or rare, stop here. Travel-plan-only annotation is also an option (M4 scoped down).
 
-### M4 — *(conditional)* prototype merge declarations + section-aware merge
+### M4 — *(conditional)* prototype merge declarations + section-aware merge — DEFERRED (fix-forward)
 
-Only ship if M3 dogfood shows real failures the LLM can't be coaxed out of with prompt tweaks.
+Only ship if M3 dogfood shows real failures the LLM can't be coaxed out of with prompt tweaks. Deferred at issue close (2026-06-02) — conditional refinement, builds only if real-life merges reveal failures the prompt-guided merger can't handle.
 
 - [ ] Extend datatype frontmatter / body schema to carry per-section `merge:` declarations.
 - [ ] Define the vocabulary precisely: `union`, `latest-wins`, `by-key(<field>)`, `ai-prose`. Document each.
@@ -103,6 +106,8 @@ Only ship if M3 dogfood shows real failures the LLM can't be coaxed out of with 
 
 
 
+
+- 2026-06-02: closed — POST-HOC wind-down close (--force: M3/M4 deferred to fix-forward, operator decision). /nous-resolve v1 shipped: whole-file AI-prose merge (SKILL.md 7-step procedure + find-conflicts.sh + preserve.py snapshot) + git-revert undo path; test-synthetic.sh exercises full mechanical chain (find→preserve→write→cleanup→commit→undo) all green; atlas/nous/brain-conflict-resolution.md. M3 real-conflict calibration + M4 declarative section-merge deferred to real-life merge behavior (relaxed dogfood nous#12). Actual = M1 0.5h + M2 1.0h from detail blocks.
 - 2026-05-08: closed M2 — ran nous/skills/nous-resolve/test-synthetic.sh end-to-end (resolve + undo paths), all assertions green: revert restores canonical + conflict file, snapshot files removed, revert commit subject correct
 - 2026-05-08: closed M1 — ran nous/skills/nous-resolve/test-synthetic.sh end-to-end, all assertions green: find-conflicts emits expected tuple, preserve.py creates .brain/merges snapshot with correct meta.json, git ops path commits with descriptive message, canonical updated + conflict file removed
 ### 2026-05-08 — M2 shipped (undo path)
