@@ -755,6 +755,22 @@ func TestEndToEnd_RotationSupersede(t *testing.T) {
 			t.Errorf("operator fp %s wrongly removed by ying's rotation: %v", operator.fp, m.Recipients)
 		}
 	})
+
+	// Idempotence: re-running auto-admit after the rotation does NOT
+	// re-rotate (recipient_logins[ying] now equals the keys-branch fp, so
+	// the existing-and-not-rotated guard short-circuits).
+	withPeer(t, operator, func() {
+		added, drift, err := brain.AutoAdmitFromKeysBranch(context.Background(), operator.brainPath)
+		if err != nil {
+			t.Fatalf("auto-admit v3 (idempotence): %v", err)
+		}
+		if len(drift) != 0 {
+			t.Errorf("unexpected drift on idempotence re-run: %+v", drift)
+		}
+		if len(added) != 0 {
+			t.Errorf("idempotence: expected 0 admissions after rotation settled, got %d: %+v", len(added), added)
+		}
+	})
 }
 
 // TestEndToEnd_OperatorPubkeyMissingThenRepublish pins the recovery

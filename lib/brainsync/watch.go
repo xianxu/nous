@@ -314,9 +314,9 @@ func autoAdmitBrain(ctx context.Context, brainRoot string, verbose bool) {
 			// Key rotation: note the evicted old fp so the git log + daemon
 			// log show the one-active-fp-per-login transition (nous#41 #7/#8).
 			parts = append(parts, fmt.Sprintf("%s (%s, rotated from %s)",
-				r.Login, r.Fingerprint[len(r.Fingerprint)-8:], r.SupersededFingerprint[len(r.SupersededFingerprint)-8:]))
+				r.Login, shortFpLast8(r.Fingerprint), shortFpLast8(r.SupersededFingerprint)))
 		} else {
-			parts = append(parts, fmt.Sprintf("%s (%s)", r.Login, r.Fingerprint[len(r.Fingerprint)-8:]))
+			parts = append(parts, fmt.Sprintf("%s (%s)", r.Login, shortFpLast8(r.Fingerprint)))
 		}
 	}
 	msg := "auto-admit " + strings.Join(parts, ", ")
