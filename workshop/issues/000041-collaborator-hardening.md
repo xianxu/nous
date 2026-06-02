@@ -5,7 +5,7 @@ deps: []
 github_issue:
 created: 2026-06-02
 updated: 2026-06-02
-estimate_hours: 5
+estimate_hours: 9
 target: collaborator-state-machine
 ---
 
@@ -19,7 +19,15 @@ resurrection bug, already fixed (`f2cb9de`). The rest are real drift/edge gaps i
 the per-brain collaborator lifecycle and are in scope for THIS testing round.
 (Cross-brain ban list stays nous#37 — not here.)
 
-## Spec / findings
+## Spec
+
+**Design fork resolved (2026-06-02, operator-confirmed):** the durable
+login→admitted-fp record for #7/#8 lives as an additive inline map in the
+manifest — `recipient_logins: {login: FP, ...}` in `.brain/config.md`, co-located
+with `recipients:`. Chosen over a separate `members.yaml` (fewer stores → stronger
+invariant #2) and over git-history mining (breaks under nous#35 compaction). It
+also becomes the primary login→fp resolution source (#3). Full plan:
+`~/.claude/plans/parsed-tumbling-mccarthy.md`.
 
 Code fixes:
 - [x] **#1** non-recipient removal didn't strip keys-branch pubkey — FIXED `f2cb9de`.

@@ -234,51 +234,102 @@ func RemoveRecipient(ctx context.Context, brainPath, fpArg string, force bool) (
 		return res, fmt.Errorf("removing %s leaves no decrypt path on %s — pass force to override", res.ShortFp, filepath.Base(brainPath))
 	}
 
+	sr, serr := stripMember(ctx, brainPath, m, match, fmt.Sprintf("recipient: revoke %s", res.ShortFp), "")
+	res.RemovedLogins = sr.RemovedLogins
+	res.VerifiedErr = sr.VerifiedErr
+	res.Login = sr.Login
+	res.Pushed = sr.Pushed
+	res.KeysBranchErr = sr.KeysBranchErr
+	res.HadRemote = sr.HadRemote
+	res.Owner, res.Repo = sr.Owner, sr.Repo
+	res.CollaboratorRevoked = sr.CollaboratorRevoked
+	res.CollaboratorErr = sr.CollaboratorErr
+	res.LoginUnresolved = sr.LoginUnresolved
+	if serr != nil {
+		return res, serr
+	}
+	return res, nil
+}
+
+// stripMemberResult records which stores stripMember cleared for one
+// fingerprint. The manifest re-key push (Pushed) is load-bearing — a
+// non-nil return error means it failed; the verified.yaml / keys-branch /
+// collaborator steps are best-effort cleanups whose errors are recorded
+// here, not returned, once the push has landed.
+type stripMemberResult struct {
+	Login         string
+	RemovedLogins []string
+	Pushed        bool
+	VerifiedErr   error
+	KeysBranchErr error
+
+	HadRemote           bool
+	Owner, Repo         string
+	CollaboratorRevoked bool
+	CollaboratorErr     error
+	LoginUnresolved     bool
+}
+
+// stripMember performs the full "clear every store" removal of fp from a
+// brain — the sequence the collaborator-state-machine target's invariant #2
+// demands. Shared by RemoveRecipient (operator removes another) and
+// LeaveBrain (operator removes self) so the two can never drift (invariant
+// #4); before this was extracted, LeaveBrain cleared only the manifest +
+// collaborator and left the leaver's keys-branch <login>.asc + verified.yaml
+// behind, so a peer's auto-admit could resurrect them (nous#41 #12).
+//
+// The caller runs the guards (last-recipient, owner-refuse, would-lock-out)
+// and supplies the already-read manifest m + the commit message. stripMember
+// owns the ordering that encodes nous#40 bug A: resolve the login BEFORE
+// RevokePubkey deletes the keys-branch <login>.asc that LoginForFingerprint
+// reads. knownLogin lets the self-leave caller pass its authoritative login
+// (gh.AuthLogin) directly; pass "" to resolve from the brain's stores
+// (verified.yaml → keys branch → peer sidecar).
+func stripMember(ctx context.Context, brainPath string, m brain.Manifest, fp, commitMsg, knownLogin string) (*stripMemberResult, error) {
+	res := &stripMemberResult{}
+
 	// (#2) Clear verified.yaml BEFORE the push so manifest + verified land
 	// in one commit. Capture the login(s) for the collaborator removal.
-	logins, verr := brain.RemoveVerifiedFor(brainPath, match)
+	logins, verr := brain.RemoveVerifiedFor(brainPath, fp)
 	res.RemovedLogins = logins
 	if verr != nil {
 		res.VerifiedErr = verr
 	}
 
 	// Resolve the GitHub login NOW — before RevokePubkey deletes the
-	// keys-branch <login>.asc that LoginForFingerprint reads. Auto-admitted
-	// recipients have no verified.yaml entry, so resolving only after the
-	// delete left login=="" and silently skipped the collaborator revoke
-	// (nous#40 bug A). Sources in order: verified.yaml → keys branch → peer
-	// sidecar.
-	login := ""
-	if len(logins) > 0 {
+	// keys-branch <login>.asc that LoginForFingerprint reads (nous#40 bug A).
+	login := knownLogin
+	if login == "" && len(logins) > 0 {
 		login = logins[0]
 	}
 	if login == "" {
-		login, _ = brain.LoginForFingerprint(ctx, brainPath, match)
+		login, _ = brain.LoginForFingerprint(ctx, brainPath, fp)
 	}
 	if login == "" {
-		if pm, perr := identity.LoadPeerMeta(match); perr == nil {
+		if pm, perr := identity.LoadPeerMeta(fp); perr == nil {
 			login = pm.GithubUser
 		}
 	}
 	res.Login = login
 
-	// Manifest update + re-key push (load-bearing).
-	m.Recipients = brain.WithoutRecipient(m.Recipients, match)
+	// Manifest re-key push (load-bearing).
+	m.Recipients = brain.WithoutRecipient(m.Recipients, fp)
 	if err := brain.RewriteFrontmatter(brainPath, m); err != nil {
 		return res, fmt.Errorf("rewrite frontmatter: %w", err)
 	}
-	if err := AddCommitPush(brainPath, fmt.Sprintf("recipient: revoke %s", res.ShortFp)); err != nil {
+	if err := AddCommitPush(brainPath, commitMsg); err != nil {
 		return res, fmt.Errorf("push: %w (manifest committed locally; re-run to retry)", err)
 	}
 	res.Pushed = true
 
-	// (#1) Strip every keys-branch pubkey for the fp — best-effort.
-	if kerr := brain.RevokePubkey(ctx, brainPath, match); kerr != nil {
+	// (#1/#12) Strip every keys-branch pubkey for the fp — best-effort.
+	if kerr := brain.RevokePubkey(ctx, brainPath, fp); kerr != nil {
 		res.KeysBranchErr = kerr
 	}
 
 	// (#3) Remove the GitHub collaborator — only for brains with a remote.
-	// login was resolved above (before RevokePubkey ran).
+	// login was resolved above (before RevokePubkey ran). Self-removal
+	// (knownLogin == own login) is allowed by GitHub's DELETE collaborator.
 	if originURL := brain.ReadOriginURL(brainPath); originURL != "" {
 		if owner, repo, oerr := brain.GitHubOwnerRepo(originURL); oerr == nil {
 			res.HadRemote = true

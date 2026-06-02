@@ -1,12 +1,39 @@
 package brain
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+// TestFingerprintForLogin_IgnoresVerifiedYaml pins nous#41 #3: verified.yaml
+// is an offline-GPG-signature-verification record, NOT the login→fp mapping
+// source (collaborator-state-machine invariant 3 + footnote ²). A login known
+// ONLY to verified.yaml — no keys-branch <login>.asc, no peer sidecar — must
+// NOT resolve. Before the fix, FingerprintForLogin consulted verified.yaml
+// first and would have returned the fingerprint.
+func TestFingerprintForLogin_IgnoresVerifiedYaml(t *testing.T) {
+	dir := t.TempDir()
+	// A login string unlikely to match any real peer sidecar on the host
+	// (ListPeerMeta reads the machine's peer store) so the assertion is about
+	// verified.yaml alone.
+	login := "zz-nous41-verified-only-login"
+	if err := WriteVerified(dir, Verified{
+		login: {Fingerprint: "43C27DAAFD09B0A91E1B910BA98D15E8DD4F88C4", VerifiedBy: "xianxu", VerifiedAt: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)},
+	}); err != nil {
+		t.Fatalf("seed verified.yaml: %v", err)
+	}
+	fp, err := FingerprintForLogin(context.Background(), dir, login)
+	if err != nil {
+		t.Fatalf("FingerprintForLogin: %v", err)
+	}
+	if fp != "" {
+		t.Errorf("FingerprintForLogin resolved %q from verified.yaml (got %q) — verified.yaml must not be a mapping source", login, fp)
+	}
+}
 
 func TestRemoveVerifiedFor(t *testing.T) {
 	at := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)

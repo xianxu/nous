@@ -214,17 +214,22 @@ type InviteResult struct {
 // nothing. This deletes any existing repo invitation for `login` first,
 // then PUTs, so a re-invite always re-sends.
 //
-// The pending-invitation lookup is best-effort: if listing fails we
-// proceed to the PUT anyway (no worse than the old behavior).
+// The stale-invitation clearing is load-bearing, not best-effort: if we
+// can't confirm there's no existing invitation, the PUT may silently
+// no-op (sending no email), so list/delete failures are hard errors
+// rather than swallowed. nous#41 #11.
 func InviteCollaborator(owner, repo, login, permission string) (InviteResult, error) {
 	var res InviteResult
-	if invs, err := RepoPendingInvitations(owner, repo); err == nil {
-		for _, inv := range invs {
-			if strings.EqualFold(inv.Invitee.Login, login) {
-				if derr := DeleteRepoInvitation(owner, repo, inv.ID); derr == nil {
-					res.ReplacedStale = true
-				}
+	invs, err := RepoPendingInvitations(owner, repo)
+	if err != nil {
+		return res, fmt.Errorf("list pending invitations for %s/%s: %w (can't guarantee a stale invitation won't no-op the re-invite)", owner, repo, err)
+	}
+	for _, inv := range invs {
+		if strings.EqualFold(inv.Invitee.Login, login) {
+			if derr := DeleteRepoInvitation(owner, repo, inv.ID); derr != nil {
+				return res, fmt.Errorf("delete stale invitation %d for %s on %s/%s: %w (PUT would no-op against it)", inv.ID, login, owner, repo, derr)
 			}
+			res.ReplacedStale = true
 		}
 	}
 	if err := AddCollaborator(owner, repo, login, permission); err != nil {
