@@ -203,3 +203,5 @@ fmt.Fprintf(w, "%s %-22s ...", prefix, ...)
   saves them the round-trip.
 
 ## Log
+
+- 2026-05-31: closed — est 1.5h / actual 1.2h. Three onboarding polishes shipped (operator marker on the invite path, clone-side pubkey import, and the third polish per the Plan). Substance is in the inline Plan notes; this is the close marker. Part of the shared-brain project (declared done 2026-06-02).

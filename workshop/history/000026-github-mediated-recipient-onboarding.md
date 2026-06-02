@@ -377,3 +377,5 @@ if v, ok := verified[login]; ok && v.Fingerprint != fp {
   who-can-invite-others.
 
 ## Log
+
+- 2026-05-31: closed — est 6h / actual 7h. GitHub-mediated onboarding shipped: `nous brain invite`/`join` publish pubkeys to the `keys` branch; operator brain-sync `ImportAllPubkeys` + `AutoAdmitFromKeysBranch` auto-import/admit (no sneakernet for GitHub-backed brains). Verified on the two-machine path. Substance is in the inline M1–M8 Plan notes; this is the close marker. Part of the shared-brain project (declared done 2026-06-02).

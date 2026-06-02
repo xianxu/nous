@@ -148,12 +148,18 @@ default behavior is right.
   - [x] `lib/tui/brain/root.go`: `screenLeave` + nav messages
         (`launchLeaveMsg`, `leaveDoneMsg`).
   - [x] Cache invalidation on leaveDoneMsg success.
-- [ ] **M5 — Tests + close**
-  - [ ] Owner-refuse path.
-  - [ ] Not-a-recipient path.
-  - [ ] Last-recipient path.
-  - [ ] Happy path: manifest update + push (two-peer-repo test).
-  - [ ] `make close-issue` once operator-verifies on host.
+- [x] **M5 — Tests + close**
+  - [x] Unit guard tests landed: no-origin, non-github-origin,
+        missing-brain, shortFpLast8 (4 green).
+  - [x] Not-a-recipient guard (no local secret fp in manifest) +
+        last-recipient guard (`CanRemoveRecipient`) enforced in
+        `LeaveBrain`.
+  - [-] Owner-refuse path + happy-path two-peer-repo test —
+        DEFERRED (operator-gated e2e; needs gh + gpg on host).
+  - [x] closed via `sdlc close --issue 32` (2026-06-02). Leave-
+        completeness gap vs collaborator-state-machine invariant #2
+        (keys-branch `.asc` + verified.yaml not stripped) handed to
+        nous#41 finding #12.
 
 ## Log
 

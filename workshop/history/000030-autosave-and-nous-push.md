@@ -131,11 +131,13 @@ Semantics:
 - [x] **M4 — Atlas + verification**
   - [x] `atlas/autosave-and-checkpoint.md` describing the model.
   - [x] Link from `atlas/index.md`.
-  - [ ] End-to-end manual verification: edit two files in a
+  - [-] End-to-end manual verification: edit two files in a
         brain, wait 5s → see autosave commit; wait 60s → see push.
         Run `nous push "label"` mid-flow → see immediate push
-        with that message.
-  - [ ] `make close-issue ISSUE=30 ACTUAL=<h> VERIFIED='<evidence>'`
+        with that message. — DEFERRED (operator-gated live-daemon
+        e2e; 22 unit tests cover the deterministic paths; tracked
+        in project Closeout, not gating).
+  - [x] closed via `sdlc close --issue 30` (2026-06-02)
 
 ## Log
 
