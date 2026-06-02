@@ -26,7 +26,13 @@ atlas entry is the code map.
 - **Auto-admit** — `lib/brain/autoadmit.go` `AutoAdmitFromKeysBranch` +
   `lib/brain/peerkeys.go` `ImportAllPubkeys`, driven by the brain-sync watcher
   (`lib/brainsync/watch.go`). Appends keys-branch pubkeys to the manifest +
-  re-keys; verified.yaml gates drift.
+  re-keys; verified.yaml gates drift. On a **key rotation** — a login's
+  `<login>.asc` overwritten with a new fp — it supersedes: evicts the old fp
+  (looked up in the manifest `recipient_logins` map) from `recipients:`, admits
+  the new one, updates the map, and surfaces it as `AdmittedRecipient.
+  SupersededFingerprint` (the watcher logs "rotated from <old8>"). The verified.yaml
+  drift gate still wins first — an operator-pinned login refuses the rotation
+  until re-verified (`nous#41` #7/#8).
 - **Remove (any stage)** — `nous brain recipient remove <fp|login>`
   (`cmd/nous/brain_recipient.go`) + TUI `recipient_remove.go` →
   `brainsync.RemovePerson` (`lib/brainsync/recipient.go`). Recipient path runs
@@ -55,7 +61,7 @@ forward-only.
 
 `nous#41` tracks the codex-review findings. **M1 landed** (#3 verified.yaml is no
 longer a login→fp mapping source, #11 re-invite list/delete are hard errors, #12
-leave clears every store via the shared `stripMember`). **Still to land:** key
-rotation / one-fp-per-login via a manifest `recipient_logins:` map (M2), concurrent-
-operator push races + login rename (M3), target doc reconciliations (M4). Cross-
-brain revocation + ban list is `nous#37`.
+leave clears every store via the shared `stripMember`). **M2 landed** (#7/#8 key
+rotation / one-fp-per-login via the manifest `recipient_logins:` map + auto-admit
+supersede). **Still to land:** concurrent-operator push races + login rename (M3),
+target doc reconciliations (M4). Cross-brain revocation + ban list is `nous#37`.

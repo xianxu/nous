@@ -34,6 +34,15 @@ type Manifest struct {
 	Recipients    []string // GPG fingerprints (full 40-char uppercase hex)
 	SyncSubstrate string   // "syncthing" | "git-daemon" | "none"
 
+	// RecipientLogins maps a GitHub login to the fingerprint it was
+	// admitted as — the durable login→admitted-fp record auto-admit writes
+	// so a key rotation (keys-branch `<login>.asc` overwritten with a new
+	// fp) can retire the superseded fp from Recipients instead of leaving it
+	// as a stale recipient (nous#41 #7/#8). Sparse: sneakernet recipients
+	// added by fingerprint with no GitHub login have no entry. Encoded
+	// inline in the manifest as `recipient_logins: {login: FP, ...}`.
+	RecipientLogins map[string]string
+
 	// Autosave controls whether the brainsync daemon auto-commits
 	// tracked-file edits in this brain (debounced) and pushes them on
 	// a slower debounce. Values: "" (unset → on), "on", "off". Use
@@ -150,6 +159,8 @@ func parseManifest(content string) (Manifest, error) {
 			m.SyncSubstrate = unquote(val)
 		case "recipients":
 			m.Recipients = parseList(val)
+		case "recipient_logins":
+			m.RecipientLogins = parseInlineMap(val)
 		case "autosave":
 			m.Autosave = unquote(val)
 		}
@@ -190,6 +201,37 @@ func parseList(val string) []string {
 		if v != "" {
 			out = append(out, v)
 		}
+	}
+	return out
+}
+
+// parseInlineMap parses an inline YAML map `{a: x, b: "y"}` to a
+// map[string]string. Mirrors parseList's flat, dependency-free posture
+// (the manifest schema is intentionally flat — see parseManifest). Keys
+// and values are trimmed + unquoted; fingerprint values are uppercased so
+// membership tests against Recipients stay case-insensitive. Returns nil
+// for an empty `{}` or malformed entry-with-no-colon.
+func parseInlineMap(val string) map[string]string {
+	val = strings.TrimSpace(val)
+	val = strings.TrimPrefix(val, "{")
+	val = strings.TrimSuffix(val, "}")
+	if strings.TrimSpace(val) == "" {
+		return nil
+	}
+	out := make(map[string]string)
+	for _, pair := range strings.Split(val, ",") {
+		k, v, found := strings.Cut(pair, ":")
+		if !found {
+			continue
+		}
+		k = unquote(strings.TrimSpace(k))
+		v = strings.ToUpper(unquote(strings.TrimSpace(v)))
+		if k != "" && v != "" {
+			out[k] = v
+		}
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

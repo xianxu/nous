@@ -316,6 +316,14 @@ func stripMember(ctx context.Context, brainPath string, m brain.Manifest, fp, co
 
 	// Manifest re-key push (load-bearing).
 	m.Recipients = brain.WithoutRecipient(m.Recipients, fp)
+	// Keep the recipient_logins map in sync (nous#41 #7/#8): drop any entry
+	// pointing at the removed fp, else a later re-admit of that login would
+	// look like a rotation and wrongly evict the freshly-admitted key.
+	for login, lfp := range m.RecipientLogins {
+		if strings.EqualFold(lfp, fp) {
+			delete(m.RecipientLogins, login)
+		}
+	}
 	if err := brain.RewriteFrontmatter(brainPath, m); err != nil {
 		return res, fmt.Errorf("rewrite frontmatter: %w", err)
 	}

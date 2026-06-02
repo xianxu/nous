@@ -16,6 +16,13 @@ type AdmittedRecipient struct {
 	Login       string // github login (filename stem, e.g., "yingtest42")
 	Fingerprint string // 40-hex uppercase, derived from the pubkey
 	UID         string // first GPG UID on the imported pubkey
+
+	// SupersededFingerprint is set (40-hex uppercase) when this admission
+	// is a key rotation: the login was previously admitted as this old
+	// fingerprint (recorded in the manifest's recipient_logins map), which
+	// auto-admit just evicted from Recipients in favor of Fingerprint
+	// (nous#41 #7/#8). Empty for a first-time admission.
+	SupersededFingerprint string
 }
 
 // DriftEvent describes a recipient whose keys-branch fingerprint has
@@ -81,6 +88,9 @@ func AutoAdmitFromKeysBranch(ctx context.Context, brainRoot string) ([]AdmittedR
 	}
 
 	existing := setOfUpper(m.Recipients)
+	if m.RecipientLogins == nil {
+		m.RecipientLogins = map[string]string{}
+	}
 	var added []AdmittedRecipient
 	var drift []DriftEvent
 
@@ -122,15 +132,41 @@ func AutoAdmitFromKeysBranch(ctx context.Context, brainRoot string) ([]AdmittedR
 			continue
 		}
 
-		if existing[fpUp] {
+		// Rotation supersede: this login was admitted before as a different
+		// fingerprint (recorded in recipient_logins). Evict the old fp from
+		// Recipients so the rotated-away key can't decrypt future pushes —
+		// the one-active-fp-per-login invariant (nous#41 #7/#8). The
+		// verified-drift gate above already refused the rotation if the
+		// operator had pinned the old fp in verified.yaml, so reaching here
+		// means the supersede is consent-consistent.
+		prevFp, hasPrev := m.RecipientLogins[stem]
+		rotated := hasPrev && !strings.EqualFold(prevFp, fpUp)
+
+		if existing[fpUp] && !rotated {
+			// Already a recipient and not a rotation — nothing to do. (A
+			// pre-map recipient with no recipient_logins entry is left as-is;
+			// backfilling here would be a manifest write the caller won't
+			// commit. It gains an entry the next time this login is admitted
+			// or rotated.)
 			continue
 		}
-		m.Recipients = append(m.Recipients, fpUp)
-		existing[fpUp] = true
+
+		var superseded string
+		if rotated {
+			m.Recipients = WithoutRecipient(m.Recipients, prevFp)
+			delete(existing, strings.ToUpper(prevFp))
+			superseded = strings.ToUpper(prevFp)
+		}
+		if !existing[fpUp] {
+			m.Recipients = append(m.Recipients, fpUp)
+			existing[fpUp] = true
+		}
+		m.RecipientLogins[stem] = fpUp
 		added = append(added, AdmittedRecipient{
-			Login:       stem,
-			Fingerprint: fpUp,
-			UID:         key.UID,
+			Login:                 stem,
+			Fingerprint:           fpUp,
+			UID:                   key.UID,
+			SupersededFingerprint: superseded,
 		})
 	}
 

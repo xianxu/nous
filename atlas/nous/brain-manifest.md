@@ -9,6 +9,7 @@ A repo is a **brain** iff it contains `.brain/config.md` at its root. The manife
 - `mode: private | shared` — derivable from `recipients:` length, kept for legibility
 - `name: <slug>` — brain identity for cross-brain references, decoupled from directory and remote name
 - `recipients: [<gpg-fingerprint>, ...]` — always present; the GPG public-key fingerprints admitted to the brain. Private brains have a list of one (the user); shared brains have multiple
+- `recipient_logins: {<github-login>: <gpg-fingerprint>, ...}` — optional, sparse. The durable login→admitted-fp record auto-admit maintains so a key rotation (a recipient republishes a new pubkey under the same `<login>.asc`) can retire the superseded old fp from `recipients:` instead of leaving it stale — the one-active-fp-per-login invariant (`nous#41` #7/#8). Sneakernet recipients added by fingerprint with no GitHub login have no entry. It's also the primary source for login→fp resolution (`FingerprintForLogin`); `verified.yaml` is NOT (offline-sig-verification only)
 - `sync_substrate: syncthing | git-daemon | none` — for shared mode
 
 All brains use the same encryption mechanism: gcrypt with a GPG recipient list. The daily unlock chain is uniform on every machine — GPG private key in `~/.gnupg/`, passphrase in macOS login Keychain, fed to gpg-agent via pinentry-mac. The manifest does not declare per-machine unlock paths.
