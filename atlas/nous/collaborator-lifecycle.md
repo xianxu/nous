@@ -9,8 +9,9 @@ atlas entry is the code map.
 
 - **GitHub (transport/ACL)**, keyed by login: pending *invitation* or accepted
   *collaborator*. `lib/gh/gh.go` — `InviteCollaborator` (clears stale invite then
-  PUT, so re-invite re-sends), `RemoveCollaborator`, `RepoPendingInvitations`,
-  `DeleteRepoInvitation`, `CollaboratorPermission`.
+  PUT, so re-invite re-sends; list/delete failures are hard errors — a swallowed
+  failure lets the PUT silently no-op, #41 #11), `RemoveCollaborator`,
+  `RepoPendingInvitations`, `DeleteRepoInvitation`, `CollaboratorPermission`.
 - **Crypto (decryption)**, keyed by GPG fingerprint: manifest `recipients:` +
   the `keys` branch pubkey(s). The keys-branch `<login>.asc` is the canonical
   login↔fp link. `verified.yaml` is offline-signature-verification only (not the
@@ -33,9 +34,16 @@ atlas entry is the code map.
   + pending invite) via `RemoveRecipient`; non-recipient path (pending /
   collaborator-only) cancels the invite + revokes collaborator + strips any
   keys-branch pubkey. login↔fp resolved via `brain.LoginForFingerprint` /
-  `FingerprintForLogin` + peer sidecar.
+  `FingerprintForLogin` + peer sidecar — `FingerprintForLogin` reads the
+  keys-branch `<login>.asc` then the peer sidecar, NOT verified.yaml (#41 #3).
+  The store-strip sequence (verified → resolve-login → manifest re-key push →
+  keys-branch → collaborator) lives in one shared `stripMember`
+  (`lib/brainsync/recipient.go`) that both `RemoveRecipient` and `LeaveBrain`
+  call, so the two can't drift (target invariant #4).
 - **Leave (self)** — `nous brain leave` (`cmd/nous/brain_leave.go`) →
-  `brainsync.LeaveBrain`.
+  `brainsync.LeaveBrain`, which routes through `stripMember` so leaving clears
+  EVERY store (not just the manifest) — a lingering keys-branch pubkey would let
+  a peer's auto-admit resurrect the leaver (#41 #12).
 
 ## Invariants (see the target for the full list)
 
@@ -45,7 +53,9 @@ forward-only.
 
 ## Open hardening
 
-`nous#41` tracks the codex-review findings still to land (key rotation /
-one-fp-per-login, concurrent-operator push races, login rename, leave
-completeness, verified.yaml resolution order). Cross-brain revocation + ban list
-is `nous#37`.
+`nous#41` tracks the codex-review findings. **M1 landed** (#3 verified.yaml is no
+longer a login→fp mapping source, #11 re-invite list/delete are hard errors, #12
+leave clears every store via the shared `stripMember`). **Still to land:** key
+rotation / one-fp-per-login via a manifest `recipient_logins:` map (M2), concurrent-
+operator push races + login rename (M3), target doc reconciliations (M4). Cross-
+brain revocation + ban list is `nous#37`.

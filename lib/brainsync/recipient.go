@@ -283,8 +283,10 @@ type stripMemberResult struct {
 // owns the ordering that encodes nous#40 bug A: resolve the login BEFORE
 // RevokePubkey deletes the keys-branch <login>.asc that LoginForFingerprint
 // reads. knownLogin lets the self-leave caller pass its authoritative login
-// (gh.AuthLogin) directly; pass "" to resolve from the brain's stores
-// (verified.yaml → keys branch → peer sidecar).
+// (gh.AuthLogin) directly; pass "" to resolve it from: the login of the
+// just-cleared verified.yaml entry (a removal hint from RemoveVerifiedFor's
+// return — NOT verified.yaml as a canonical mapping, which #3 dropped), then
+// the keys-branch <login>.asc (LoginForFingerprint), then the peer sidecar.
 func stripMember(ctx context.Context, brainPath string, m brain.Manifest, fp, commitMsg, knownLogin string) (*stripMemberResult, error) {
 	res := &stripMemberResult{}
 
