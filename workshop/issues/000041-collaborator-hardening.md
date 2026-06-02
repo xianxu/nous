@@ -71,7 +71,7 @@ Doc reconciliations (in the target):
 
 ## Plan
 
-- [ ] M1 — drift-class code fixes: #3, #11, #12 (+ tests).
+- [x] M1 — drift-class code fixes: #3, #11, #12 (+ tests).
 - [ ] M2 — rotation / one-fp-per-login: #7/#8 (durable login→fp record + auto-admit
   supersede). *(confirm the store fork first.)*
 - [ ] M3 — #6 push-rebase-retry, #10 login-rename handling.
@@ -80,6 +80,8 @@ Doc reconciliations (in the target):
 ## Log
 
 ### 2026-06-02
+- 2026-06-02: closed M1 (#3, #11, #12) — #41 is a follow-on under target collaborator-state-machine, not a shared-brain project milestone (project closed) — no project detail block. go build/vet + full suite green (unsandboxed for gpg); TestFingerprintForLogin_IgnoresVerifiedYaml pins #3; InviteCollaborator list/delete now hard-error (#11); LeaveBrain routes through the shared `stripMember` so leave clears every store (#12). The `stripMember` strip itself is e2e-proven via the `recipient remove` assertion in brain-vm-e2e.sh; the *leave wiring* is verified by construction (1-line call) + dogfood, because LeaveBrain is GitHub-coupled (refuses on the file:// e2e origin) so its full flow can't run GitHub-free. review verdict: unknown (no Critical; Important findings dispositioned below).
+- 2026-06-02: M1 milestone-review (sdlc judge) dispositions — (Imp#1 leave has no isolated test) → architectural: LeaveBrain is GitHub-coupled; strip proven via recipient-remove e2e + leave live-verification carried to the dogfood (issue done-when already designates GitHub-layer effects for the dogfood). (Imp#2 fp→login revoke-target prefers verified-hint over canonical keys-branch) → pre-existing nous#40 behavior, best-effort; **flagged for M3 #10** (login-rename is where source precedence gets decided). Minors fixed: leave.go error-prefix + stale mid-flow doc comment. Test-hermeticity nit on the #3 test acknowledged (unlikely-login guard).
 
 Filed from the codex review (run via `codex exec -s read-only`). #1 already fixed.
 **#7/#8 design fork:** handling rotation cleanly needs a durable login→fp record

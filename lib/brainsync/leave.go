@@ -71,8 +71,11 @@ type LeaveResult struct {
 // of unique decrypted-by-me work; let the operator delete by hand.
 //
 // Mid-flow failure semantics:
-//   - manifest commit/push fails → returns error; LeaveResult zero-
-//     value. Nothing on the GitHub side has changed.
+//   - manifest rewrite or re-key push fails → returns error. Nothing on
+//     the GitHub side has changed; the keys-branch strip + collaborator
+//     revoke (which run only after a successful push) didn't fire. The
+//     returned LeaveResult carries the fields populated before the push
+//     (Owner/Repo/MyLogin/ShortFp) but ManifestPushed=false.
 //   - collaborator revoke fails → returns nil error, LeaveResult with
 //     ManifestPushed=true and CollaboratorRevoked=false +
 //     CollaboratorRevokeErr populated. The leave is semantically
@@ -137,7 +140,9 @@ func LeaveBrain(ctx context.Context, brainPath string, deleteLocal bool) (LeaveR
 	res.CollaboratorRevoked = sr.CollaboratorRevoked
 	res.CollaboratorRevokeErr = sr.CollaboratorErr
 	if serr != nil {
-		return res, fmt.Errorf("commit + push manifest update: %w", serr)
+		// serr is already prefixed by stripMember ("rewrite frontmatter: …"
+		// or "push: …"); wrap with the gesture, not a push-specific phrase.
+		return res, fmt.Errorf("leave: %w", serr)
 	}
 
 	if deleteLocal {
