@@ -1,11 +1,12 @@
 ---
 id: 000036
-status: working
+status: done
 deps: [ariadne#59]
 github_issue:
 created: 2026-06-01
-updated: 2026-06-01
+updated: 2026-06-02
 estimate_hours: 4
+actual_hours: 5
 ---
 
 # scriptable headless brain testing in tart VM
@@ -84,40 +85,61 @@ still required.
 ## Plan
 
 ### M1 — VM GPG-unattended (depends ariadne#59)
-- [ ] `scripts/brain-vm-setup.sh` — idempotent: persistent pinentry shim +
+- [x] `scripts/brain-vm-setup.sh` — idempotent: persistent pinentry shim +
   `gpg-agent.conf` + `GPG_TTY`; passphrase from
-  `testdata/test-bootstrap/test-key.passphrase`.
-- [ ] `.tart/vm-hooks.d/00-gpg-setup.sh` — thin wrapper `exec`ing the script
+  `testdata/test-bootstrap/test-key.passphrase`. (`6be5a1c` + fixes `4a11dc6`/`0dba047`)
+- [x] `.tart/vm-hooks.d/00-gpg-setup.sh` — thin wrapper `exec`ing the script
   (consumes ariadne#59's run-parts convention).
-- [ ] Verify on a real `make tart` from nous: GPG decrypt/sign work with no
-  prompt.
+- [x] Verify on a real `make tart` from nous: GPG decrypt/sign work with no
+  prompt. (live VM smoke, 2026-06-02)
 
 ### M2 — scriptable verify-fingerprint ceremony
-- [ ] `verifyLast8` wrapper around `promptVerify`; `--verified-last8` flag on
+- [x] `verifyLast8` wrapper around `promptVerify`; `--verified-last8` flag on
   `nous identity import` + `nous brain recipient add`; lift TTY gate only when
-  the flag is set.
-- [ ] Unit tests: match / mismatch / empty-falls-back-to-prompt; gate-lift only
+  the flag is set. (`9e4e29c`)
+- [x] Unit tests: match / mismatch / empty-falls-back-to-prompt; gate-lift only
   with flag.
 
 ### M3 — non-interactive `nous identity init`
-- [ ] `--name/--email/--expiry` (or `IDENTITY_*` env) path; lift TTY gate when
-  inputs present; passphrase via shim. Verify keygen unattended in the VM.
+- [x] `--name/--email/--expiry` (or `IDENTITY_*` env) path; lift TTY gate when
+  inputs present; passphrase via shim. Verify keygen unattended in the VM. (`9574377`)
 
-### M4 — host-driven e2e + docs
-- [ ] e2e script (host-driven, plain `ssh` — flags lift the gates): VM
-  `identity init` → `identity export` → host `identity import --verified-last8`
-  → host `brain recipient add <brain> --verified-last8` → VM clone/edit/push,
-  asserting recipient set + decrypt round-trip.
-- [ ] Threat-model `## Revisions` note; `atlas/` update.
-- [ ] Log to brain `data/project/shared-brain.md` (nous#12) as the dry-run.
+### M4 — e2e + docs
+- [x] Threat-model `## Revisions` note (brain `2a3d82b`); `atlas/` update
+  (nous `e3ade8b` — e2e-integration-testing.md).
+- [x] `scripts/brain-vm-e2e.sh` — self-contained, GitHub-free CLI-level e2e
+  against a `file://` bare gcrypt remote with two throwaway per-`GNUPGHOME`
+  identities: `identity init` (non-interactive) → `export` → `import
+  --verified-last8` → `brain recipient add --verified-last8` → gcrypt clone
+  (unattended via shim) → edit → push → pull → assert the peer's edit
+  decrypts. (`6976f25`, green end-to-end)
+- [x] Live VM smoke (the runbook below) — boot from nous, confirm the
+  `00-gpg-setup.sh` hook fires + `identity init` runs unattended. (2026-06-02)
+- [ ] *(deferred → nous#12)* Log to brain `data/project/shared-brain.md` as the
+  dry-run — folds into nous#12's durable continuous-use run, not this issue.
 
 ## Test plan
 
-M2/M3 carry colocated unit tests (PURE comparison + flag plumbing). M1 + M4 are
-INTEGRATION — verified by the e2e walkthrough against a real tart VM + a
-throwaway brain, since the surface is process-level (gpg-agent, gcrypt, ssh).
+M2/M3 carry colocated unit tests (PURE comparison + flag plumbing). M1 is
+verified by `scripts/brain-vm-e2e.sh` (the shim drives gpg/gcrypt unattended)
++ the live VM smoke. M4's e2e is the CLI-level integration net — process-level
+(gpg-agent, gcrypt) so it lives in a script, not a `go test`.
+
+**Live VM runbook** (boot from nous on this branch):
+- VM shell (after `make tart`): `nous identity init --name "Ying Test" --email
+  "xianxu+yingtest@gmail.com"` → no prompt, no TTY error (the dev-aliases
+  `nous` function builds-on-demand; no manual build needed) → `nous identity
+  export > ~/ying.pub`.
+- Host: `scp admin@$(tart ip nous-test):ying.pub /tmp/ying.pub`, then
+  `nous brain recipient add ~/workspace/brain-shared-test /tmp/ying.pub
+  --verified-last8 <last8> </dev/null`.
+- If building a binary explicitly, use `~/repo/bin` (the dev slot, first on
+  PATH) — NOT `~/.local/bin` (reserved for `make nous-install`'s signed prod
+  binary).
 
 ## Log
+
+- 2026-06-02: closed — headless tart VM does brain ops over SSH unattended (fake-pinentry shim) + scriptable ceremony; brain-vm-e2e.sh green end-to-end; live VM smoke confirmed init unattended. --force: codex read-only review served as the milestone review; Review-Verdict trailers not used this session
 
 ### 2026-06-01
 

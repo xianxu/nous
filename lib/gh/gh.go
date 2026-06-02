@@ -187,6 +187,52 @@ func AddCollaborator(owner, repo, login, permission string) error {
 	return err
 }
 
+// DeleteRepoInvitation deletes a pending repository invitation by id —
+// the owner-side `DELETE /repos/{owner}/{repo}/invitations/{id}`
+// (distinct from DeclineInvitation, which is the invitee-side decline).
+// Needed because a lingering invitation (pending OR expired) makes
+// AddCollaborator's PUT a silent no-op, so it must be cleared before a
+// re-invite can actually re-send.
+func DeleteRepoInvitation(owner, repo string, id int) error {
+	_, err := run("api", "-X", "DELETE",
+		fmt.Sprintf("repos/%s/%s/invitations/%d", owner, repo, id),
+		"--silent")
+	return err
+}
+
+// InviteResult reports what InviteCollaborator did.
+type InviteResult struct {
+	// ReplacedStale is true when an existing (pending or expired)
+	// invitation for the login was deleted before re-inviting.
+	ReplacedStale bool
+}
+
+// InviteCollaborator sends a FRESH collaborator invitation, working
+// around GitHub's behavior where `PUT /collaborators/{login}` is a
+// no-op (204, no email) when an invitation already exists for that
+// login — INCLUDING an expired one. A naive re-invite therefore sends
+// nothing. This deletes any existing repo invitation for `login` first,
+// then PUTs, so a re-invite always re-sends.
+//
+// The pending-invitation lookup is best-effort: if listing fails we
+// proceed to the PUT anyway (no worse than the old behavior).
+func InviteCollaborator(owner, repo, login, permission string) (InviteResult, error) {
+	var res InviteResult
+	if invs, err := RepoPendingInvitations(owner, repo); err == nil {
+		for _, inv := range invs {
+			if strings.EqualFold(inv.Invitee.Login, login) {
+				if derr := DeleteRepoInvitation(owner, repo, inv.ID); derr == nil {
+					res.ReplacedStale = true
+				}
+			}
+		}
+	}
+	if err := AddCollaborator(owner, repo, login, permission); err != nil {
+		return res, err
+	}
+	return res, nil
+}
+
 // PendingInvitations lists all repository invitations the
 // authenticated user has not yet accepted/declined. Returns an empty
 // slice (not nil) when there are none.

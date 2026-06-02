@@ -214,6 +214,38 @@ becomes a recurrent change point.
   is a design choice (one TestEndToEnd_* per story rather than
   one per micro-assertion).
 
+## Headless VM brain testing (CLI-level, nous#36)
+
+The lib-layer test above simulates multi-peer with per-`GNUPGHOME`
+env-switching in one process. A complementary, higher-fidelity layer
+runs the *actual CLI* in a real macOS tart VM — the only way to catch
+process-level interaction bugs (gpg-agent, pinentry, gcrypt over SSH,
+launchd) that the in-process simulation can't.
+
+The blocker it solves: a headless `make tart` VM has no window server,
+so `pinentry-mac` can't draw and every passphrase prompt fails. Pieces:
+
+- **`scripts/brain-vm-setup.sh`** — installs a persistent fake pinentry
+  (`~/.local/bin/pinentry-brain-test`, returns the throwaway test
+  passphrase) and points gpg-agent at it, so gpg/gcrypt run unattended.
+  Idempotent; refuses outside a disposable tart VM (admin user +
+  `~/.tart-current-repo`) unless `NOUS_BRAIN_VM_FORCE=1`.
+- **`.tart/vm-hooks.d/00-gpg-setup.sh`** — auto-runs the above on every
+  boot via ariadne#59's vm-hooks convention. So `make tart` from nous
+  yields a GPG-unattended VM with no manual step.
+- **`--verified-last8 <8hex>`** on `nous identity import` / `nous brain
+  recipient add`, and the non-interactive `nous identity init`
+  (`--name`/`--email`/`--expiry` or `IDENTITY_*`) — let the otherwise
+  TTY-only ceremony be driven over `ssh admin@$(tart ip nous-test) '…'`.
+  Security delta recorded in `brain/atlas/threat-model-shared-brain.md`
+  (`## Revisions`, 2026-06-01).
+
+Boot-from-nous is deliberate: the VM is a generic brain-client; the
+target brain enters via `nous brain clone gcrypt::…` or
+`make tart SYNC=../<brain>`. The operator's real key never enters the VM
+(it holds only throwaway Ying/Emma identities), which is what makes the
+hardcoded-passphrase shim safe.
+
 ## When this doc gets stale
 
 This atlas should be revised when:

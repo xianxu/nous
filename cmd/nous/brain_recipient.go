@@ -125,6 +125,7 @@ func buildKeyAnnotator() (func(string) string, error) {
 
 func newBrainRecipientAddCmd() *cobra.Command {
 	var fingerprint string
+	var verifiedLast8 string
 
 	cmd := &cobra.Command{
 		Use:   "add BRAIN [PUBKEY-FILE]",
@@ -149,8 +150,8 @@ TTY-only: identity admission is a delegation boundary. See
 brain/atlas/threat-model-shared-brain.md.`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !term.IsTerminal(int(os.Stdin.Fd())) {
-				return fmt.Errorf("nous brain recipient add requires an interactive terminal (TTY-only safeguard)")
+			if verifiedLast8 == "" && !term.IsTerminal(int(os.Stdin.Fd())) {
+				return fmt.Errorf("nous brain recipient add requires an interactive terminal, or pass --verified-last8 <8hex> for scripted use (TTY-only safeguard)")
 			}
 			brainPath := args[0]
 			out := cmd.OutOrStdout()
@@ -161,7 +162,7 @@ brain/atlas/threat-model-shared-brain.md.`,
 				return fmt.Errorf("pass either PUBKEY-FILE or --fingerprint, not both")
 			case len(args) == 2:
 				// Import path. Reuse the identity-import ceremony.
-				k, err := importPubkeyFromFile(out, args[1])
+				k, err := importPubkeyFromFile(out, args[1], verifiedLast8)
 				if err != nil {
 					return err
 				}
@@ -175,7 +176,7 @@ brain/atlas/threat-model-shared-brain.md.`,
 					return err
 				}
 				key = k
-				if err := confirmKey(out, key); err != nil {
+				if err := confirmKey(out, key, verifiedLast8); err != nil {
 					return err
 				}
 			default:
@@ -230,6 +231,7 @@ brain/atlas/threat-model-shared-brain.md.`,
 		},
 	}
 	cmd.Flags().StringVar(&fingerprint, "fingerprint", "", "use an already-imported pubkey by fingerprint")
+	cmd.Flags().StringVar(&verifiedLast8, "verified-last8", "", "last-8 hex of the recipient's fingerprint, verified out-of-band — satisfies the ceremony non-interactively (scripted/test use; lifts the TTY gate)")
 	return cmd
 }
 
@@ -237,7 +239,7 @@ brain/atlas/threat-model-shared-brain.md.`,
 // import RunE — read the file, Inspect, prompt for last-8 confirmation,
 // commit. Lifted into a helper so brain recipient add can reuse it
 // without re-prompting twice.
-func importPubkeyFromFile(out io.Writer, path string) (identity.Key, error) {
+func importPubkeyFromFile(out io.Writer, path, verifiedLast8 string) (identity.Key, error) {
 	var data []byte
 	var err error
 	if path == "-" {
@@ -263,7 +265,7 @@ func importPubkeyFromFile(out io.Writer, path string) (identity.Key, error) {
 	fmt.Fprintln(out, "(phone, in-person, signed message — NOT the same channel as the pubkey).")
 	fmt.Fprintln(out)
 
-	if err := promptVerify(os.Stdin, out, peer.Last8()); err != nil {
+	if err := verifyLast8(os.Stdin, out, peer.Last8(), verifiedLast8); err != nil {
 		return identity.Key{}, err
 	}
 	if _, err := identity.Import(armor); err != nil {
@@ -315,13 +317,13 @@ func lookupKey(fingerprint string) (identity.Key, error) {
 
 // confirmKey runs a one-shot verify-fingerprint prompt against an
 // already-imported key. Same form as the import-time ceremony.
-func confirmKey(out io.Writer, k identity.Key) error {
+func confirmKey(out io.Writer, k identity.Key, verifiedLast8 string) error {
 	fmt.Fprintf(out, "About to admit:\n")
 	fmt.Fprintf(out, "  fingerprint: %s\n", k.Fingerprint)
 	fmt.Fprintf(out, "  last-8:      %s\n", k.Last8())
 	fmt.Fprintf(out, "  uid:         %s\n", displayUID(k))
 	fmt.Fprintln(out)
-	return promptVerify(os.Stdin, out, k.Last8())
+	return verifyLast8(os.Stdin, out, k.Last8(), verifiedLast8)
 }
 
 // ─── remove ───────────────────────────────────────────────────────────
@@ -330,13 +332,22 @@ func newBrainRecipientRemoveCmd() *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:   "remove BRAIN FINGERPRINT",
-		Short: "Revoke a recipient from a brain (TTY-only; safeguards)",
-		Long: `Remove a recipient from a brain. Updates the manifest +
-gcrypt-participants and pushes so future encryptions exclude the
-removed recipient.
+		Use:   "remove BRAIN FINGERPRINT-OR-LOGIN",
+		Short: "Remove a person from a brain at any stage (TTY-only; safeguards)",
+		Long: `Remove a person from a brain — by fingerprint/last-8 OR by GitHub
+login. Acts at whatever lifecycle stage they're in:
 
-Three safeguards:
+  - manifest recipient → drop from manifest + gcrypt re-key on push,
+    clear verified.yaml, strip their keys-branch pubkey(s), and revoke
+    their GitHub collaborator status;
+  - accepted collaborator not yet admitted, or a still-pending
+    invitation → cancel the invitation + revoke collaborator.
+
+A login is resolved to a recipient when possible (verified.yaml → keys
+branch → peer sidecar); if it isn't a recipient, the GitHub-layer removal
+runs so you can retract someone who never finished joining.
+
+Three safeguards (recipient removals):
 
   1. Last-recipient guard: refuse to remove the only recipient
      (would orphan the brain — nobody could decrypt future pushes).
@@ -347,50 +358,82 @@ Three safeguards:
      removed recipient if they retained their refs. True revocation
      requires re-keying (out of scope here; document for the operator).
 
-TTY-only.`,
+TTY-only (or --force for scripted use).`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !term.IsTerminal(int(os.Stdin.Fd())) {
-				return fmt.Errorf("nous brain recipient remove requires an interactive terminal (TTY-only safeguard)")
+			if !force && !term.IsTerminal(int(os.Stdin.Fd())) {
+				return fmt.Errorf("nous brain recipient remove requires an interactive terminal, or pass --force for scripted use (TTY-only safeguard)")
 			}
 			brainPath := args[0]
-			fpArg := args[1]
+			selector := args[1]
 			out := cmd.OutOrStdout()
 
+			// Resolve the selector to a manifest recipient — directly (fp /
+			// last-8) or via a GitHub login (nous#40). If it doesn't resolve to
+			// a recipient, treat it as a login to remove at the GitHub layer
+			// (pending invitation / collaborator) — the "remove someone who
+			// never finished joining" path.
 			m, err := brain.Read(brainPath)
 			if err != nil {
 				return err
 			}
-			match, err := brain.MatchRecipient(m.Recipients, fpArg)
-			if err != nil {
-				return err
-			}
+			match, _ := brain.MatchRecipient(m.Recipients, selector)
 			if match == "" {
-				// Not in the manifest. Either the operator typo'd, or
-				// a previous remove succeeded locally but the push
-				// failed — in which case the local commit is sitting
-				// unpushed and a re-run should retry the push rather
-				// than confusingly error out.
-				unpushed, _ := brainsync.HasUnpushedCommits(brainPath)
-				if unpushed {
-					fmt.Fprintf(out, "Not a recipient locally (already removed?). Retrying push …\n")
-					if err := brainsync.Push(brainPath); err != nil {
-						return fmt.Errorf("push: %w", err)
+				if cand, _ := brain.FingerprintForLogin(cmd.Context(), brainPath, selector); cand != "" {
+					if mm, _ := brain.MatchRecipient(m.Recipients, cand); mm != "" {
+						match = mm
 					}
-					fmt.Fprintln(out, "Pushed.")
+				}
+			}
+
+			if match == "" {
+				// fp-shaped selector with an unpushed prior removal → retry.
+				if looksHexFingerprint(selector) {
+					if rr, _ := brainsync.RemoveRecipient(cmd.Context(), brainPath, selector, force); rr != nil && rr.RetriedPush {
+						fmt.Fprintln(out, "Not a recipient locally (already removed?). Retried the pending push.")
+						return nil
+					}
+				}
+				// Otherwise: remove at the GitHub layer (pending invite +
+				// collaborator) for a login that never became a recipient.
+				fmt.Fprintf(out, "%q is not a recipient of %s.\n", selector, filepath.Base(brainPath))
+				fmt.Fprintln(out, "Removing at the GitHub layer: cancel any pending invitation + revoke collaborator.")
+				if !force {
+					if err := promptYes(os.Stdin, out, "Proceed? [y/N] "); err != nil {
+						return err
+					}
+				}
+				pr, err := brainsync.RemovePerson(cmd.Context(), brainPath, selector, force)
+				if err != nil {
+					return err
+				}
+				if pr.NothingToDo {
+					fmt.Fprintf(out, "Nothing to remove: %q has no pending invitation, is not a collaborator, and has no keys-branch pubkey on %s/%s.\n", selector, pr.Owner, pr.Repo)
 					return nil
 				}
-				return fmt.Errorf("not a recipient of %s: %s", filepath.Base(brainPath), fpArg)
+				if pr.InvitationCancelled {
+					fmt.Fprintf(out, "Cancelled pending invitation for %s.\n", selector)
+				}
+				if pr.CollaboratorRevoked {
+					fmt.Fprintf(out, "Revoked GitHub collaborator %s on %s/%s.\n", selector, pr.Owner, pr.Repo)
+				}
+				if pr.CollaboratorErr != nil {
+					fmt.Fprintf(out, "  warning: collaborator removal failed: %v\n", pr.CollaboratorErr)
+					fmt.Fprintf(out, "    retry: gh api -X DELETE repos/%s/%s/collaborators/%s\n", pr.Owner, pr.Repo, selector)
+				}
+				if pr.KeysBranchStripped {
+					fmt.Fprintf(out, "Removed %s's pubkey from the keys branch (was published but not yet admitted).\n", selector)
+				}
+				if pr.KeysBranchErr != nil {
+					fmt.Fprintf(out, "  warning: keys-branch revoke failed: %v\n", pr.KeysBranchErr)
+				}
+				return nil
 			}
 
-			// Last-recipient guard.
+			// Recipient path. Safeguards.
 			if err := brain.CanRemoveRecipient(m); err != nil {
-				return fmt.Errorf("%w (removing %s from %s)", err, match, brainPath)
+				return fmt.Errorf("%w (removing %s from %s)", err, match, filepath.Base(brainPath))
 			}
-
-			// Self-removal warning: refuse when the removal would leave
-			// no local-secret recipient on the brain (real lockout
-			// floor, not just "you happen to have the secret half").
 			wouldLock, err := brain.WouldLockOut(m.Recipients, match)
 			if err != nil {
 				return fmt.Errorf("check decrypt path: %w", err)
@@ -399,9 +442,8 @@ TTY-only.`,
 				return fmt.Errorf("refusing — removing %s leaves you with no decrypt path on %s. Re-run with --force if intentional", match, filepath.Base(brainPath))
 			}
 
-			// Revocation reality.
-			fmt.Fprintf(out, "Removing %s from %s.\n", match, filepath.Base(brainPath))
-			fmt.Fprintln(out)
+			// Revocation caveat + confirm.
+			fmt.Fprintf(out, "Removing %s from %s.\n\n", match, filepath.Base(brainPath))
 			fmt.Fprintln(out, "REVOCATION CAVEAT:")
 			fmt.Fprintln(out, "  gcrypt re-encrypts on push, so future commits will exclude this recipient.")
 			fmt.Fprintln(out, "  However: any gcrypt blob currently in the remote (or in their local clone)")
@@ -415,40 +457,65 @@ TTY-only.`,
 				}
 			}
 
-			// Apply.
-			m.Recipients = brain.WithoutRecipient(m.Recipients, match)
-			if err := brain.RewriteFrontmatter(brainPath, m); err != nil {
+			// Apply via the unified per-brain removal (manifest + verified.yaml
+			// + keys branch + collaborator + any pending invitation). CLI + TUI
+			// share this (nous#38/#40).
+			pr, err := brainsync.RemovePerson(cmd.Context(), brainPath, match, force)
+			if err != nil {
 				return err
 			}
-			// gcrypt-participants derives from the manifest at push
-			// time (nous#24) — no explicit SetGcryptParticipants here.
-
-			fmt.Fprintf(out, "Removed locally. Pushing so gcrypt re-encrypts …\n")
-			short := match
-			if len(short) >= 8 {
-				short = strings.ToLower(short[len(short)-8:])
+			res := pr.Recipient
+			fmt.Fprintln(out, "Removed + pushed (gcrypt re-encrypted to the remaining recipients).")
+			if res != nil {
+				if len(res.RemovedLogins) > 0 {
+					fmt.Fprintf(out, "Cleared verified.yaml for: %s\n", strings.Join(res.RemovedLogins, ", "))
+				}
+				if res.VerifiedErr != nil {
+					fmt.Fprintf(out, "  warning: clear verified.yaml: %v\n", res.VerifiedErr)
+				}
+				if res.KeysBranchErr != nil {
+					fmt.Fprintf(out, "  warning: revoke %s from keys branch: %v\n", res.ShortFp, res.KeysBranchErr)
+					fmt.Fprintln(out, "  (manifest update succeeded; re-run remove to retry the keys-branch revoke)")
+				}
+				if res.HadRemote {
+					switch {
+					case res.CollaboratorRevoked:
+						fmt.Fprintf(out, "Revoked GitHub collaborator %s on %s/%s.\n", res.Login, res.Owner, res.Repo)
+					case res.LoginUnresolved:
+						fmt.Fprintf(out, "  ⚠ could NOT resolve a GitHub login for %s — collaborator NOT revoked.\n", res.ShortFp)
+						fmt.Fprintln(out, "    They may still have repo access. Remove manually once you know their login:")
+						fmt.Fprintf(out, "    gh api -X DELETE repos/%s/%s/collaborators/<login>\n", res.Owner, res.Repo)
+					case res.CollaboratorErr != nil:
+						fmt.Fprintf(out, "  warning: GitHub collaborator removal failed: %v\n", res.CollaboratorErr)
+						fmt.Fprintf(out, "    retry: gh api -X DELETE repos/%s/%s/collaborators/%s\n", res.Owner, res.Repo, res.Login)
+					}
+				}
 			}
-			if err := brainsync.AddCommitPush(brainPath, fmt.Sprintf("recipient: revoke %s", short)); err != nil {
-				return fmt.Errorf("push: %w (manifest + git config committed locally; re-run to retry push)", err)
-			}
-			fmt.Fprintln(out, "Pushed.")
-
-			// Revoke the pubkey from the keys filestore (nous#23). The
-			// removed peer can still decrypt any blob they had access
-			// to during their admission window — that's the structural
-			// "revocation is heavy" caveat from the threat model. What
-			// the keys-branch revoke does prevent: new peers cloning
-			// after revocation auto-importing the gone peer's pubkey
-			// and thinking they're still part of the set.
-			if err := brain.RevokePubkey(cmd.Context(), brainPath, match); err != nil {
-				fmt.Fprintf(out, "  warning: revoke %s from keys branch: %v\n", short, err)
-				fmt.Fprintln(out, "  (manifest update succeeded; keys-branch entry left in place — re-run revoke to retry)")
+			if pr.InvitationCancelled {
+				fmt.Fprintln(out, "Also cancelled a lingering pending invitation.")
 			}
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "skip self-removal warning + interactive confirmation")
 	return cmd
+}
+
+// looksHexFingerprint reports whether s is plausibly a fingerprint or
+// last-8 (8–40 hex chars) rather than a GitHub login — used to decide
+// whether an unmatched selector should hit the recipient retry path or
+// be treated as a login.
+func looksHexFingerprint(s string) bool {
+	s = strings.TrimSpace(s)
+	if len(s) < 8 || len(s) > 40 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 // promptYes reads a y/n confirmation. Empty / "n" / "no" / "esc" are

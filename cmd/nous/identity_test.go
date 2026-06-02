@@ -53,6 +53,77 @@ func TestPromptVerify_AcceptsOnSecondAttempt(t *testing.T) {
 	}
 }
 
+// initInputsComplete gates whether `identity init` may skip the TTY: both
+// name and email must be present (nous#36 M3).
+func TestInitInputsComplete(t *testing.T) {
+	cases := []struct {
+		name, email string
+		want        bool
+	}{
+		{"Ying Test", "ying@example.com", true},
+		{"Ying Test", "", false},
+		{"", "ying@example.com", false},
+		{"", "", false},
+	}
+	for _, c := range cases {
+		if got := initInputsComplete(c.name, c.email); got != c.want {
+			t.Errorf("initInputsComplete(%q,%q) = %v, want %v", c.name, c.email, got, c.want)
+		}
+	}
+}
+
+// ── verifyLast8 (--verified-last8 non-interactive ceremony, nous#36) ──
+
+// Assumed value matching the expected last-8 returns nil WITHOUT touching
+// the prompt reader. The empty `in` would make the prompt path error, so a
+// nil result proves the prompt was skipped.
+func TestVerifyLast8_AssumedMatch_SkipsPrompt(t *testing.T) {
+	var out bytes.Buffer
+	if err := verifyLast8(strings.NewReader(""), &out, "abcdef01", "abcdef01"); err != nil {
+		t.Fatalf("verifyLast8 assumed-match: %v", err)
+	}
+	if strings.Contains(out.String(), "Type the last-8") {
+		t.Errorf("assumed-match should not prompt; got:\n%s", out.String())
+	}
+}
+
+// Assumed match is case-insensitive and whitespace-trimmed, like the prompt.
+func TestVerifyLast8_AssumedMatch_CaseInsensitiveAndTrimmed(t *testing.T) {
+	var out bytes.Buffer
+	if err := verifyLast8(strings.NewReader(""), &out, "abcdef01", "  ABCDEF01\n"); err != nil {
+		t.Errorf("verifyLast8 case/space-insensitive assumed match: %v", err)
+	}
+}
+
+// A non-empty assumed value that does NOT match the key errors (the scripted
+// equivalent of failing the ceremony) and names the flag.
+func TestVerifyLast8_AssumedMismatch_Errors(t *testing.T) {
+	var out bytes.Buffer
+	err := verifyLast8(strings.NewReader("abcdef01\n"), &out, "abcdef01", "deadbeef")
+	if err == nil {
+		t.Fatal("verifyLast8 should reject a non-matching --verified-last8")
+	}
+	if !strings.Contains(err.Error(), "verified-last8") {
+		t.Errorf("error should mention the flag; got: %v", err)
+	}
+}
+
+// Empty assumed value falls back to the interactive prompt: it reads from
+// `in`, accepts a correct line, and errors when the reader is exhausted.
+func TestVerifyLast8_Empty_FallsBackToPrompt(t *testing.T) {
+	var out bytes.Buffer
+	if err := verifyLast8(strings.NewReader("abcdef01\n"), &out, "abcdef01", ""); err != nil {
+		t.Errorf("verifyLast8 empty-assumed should accept correct prompt input: %v", err)
+	}
+	if !strings.Contains(out.String(), "Type the last-8") {
+		t.Errorf("empty-assumed should fall back to the prompt; got:\n%s", out.String())
+	}
+	var out2 bytes.Buffer
+	if err := verifyLast8(strings.NewReader(""), &out2, "abcdef01", ""); err == nil {
+		t.Error("verifyLast8 empty-assumed with no prompt input should error")
+	}
+}
+
 func TestValidateGithubUser(t *testing.T) {
 	// Cases lifted from GitHub's documented username rules:
 	// 1-39 chars, alphanumeric + single hyphens, no leading/trailing

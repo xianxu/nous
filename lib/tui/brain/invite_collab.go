@@ -170,7 +170,7 @@ func (m inviteCollabModel) updateConfirm(msg tea.Msg) (inviteCollabModel, tea.Cm
 		// Synchronous gh.AddCollaborator. The op is a single
 		// authenticated REST call, so blocking the TUI briefly is
 		// acceptable — much simpler than tea.ExecProcess.
-		err := gh.AddCollaborator(m.owner, m.repo, m.picked, "push")
+		_, err := gh.InviteCollaborator(m.owner, m.repo, m.picked, "push") // clears stale/expired invite first (nous#39)
 		m.sendErr = err
 		m.stage = inviteStageDone
 		return m, nil

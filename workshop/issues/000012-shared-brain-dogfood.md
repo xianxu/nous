@@ -386,3 +386,13 @@ UX bug in `scripts/new-brain.sh:79-94`: when the GH repo already exists, the pro
 Fix shape: when the existing repo has any branches, prompt instead "Delete `$GH_FULL` and recreate it fresh? [y/N]" → on yes, `gh repo delete --yes` + `gh repo create`. Empty placeholder repos pass through unchanged. Matches the actual recovery path; surfaces the destructive intent honestly.
 
 Implemented in this session: `scripts/new-brain.sh` + `scripts/cloneto.sh`, plus docstring touch-ups. No new tests — script is interactive + side-effectful at the GitHub API layer, covered by the M1 walkthrough re-run.
+
+### 2026-06-01 — scope clarification: the gap is a *durable* daily-use brain, not one-shot sync
+
+Reframed after nous#36 landed the *scriptable* headless-VM path. Manual sync between shared brains has already been exercised (one-shot). What's still **missing — and is the real `done_when`** — is a **durable, real, day-to-day** shared brain: one actually used instead of the personal brain for certain tasks, continuously over several days, so conflicts/merges arise from real use rather than synthetic edits. Operator will stand up a fresh durable VM for this (next: 2026-06-02). nous#36 makes setup repeatable; the durable continuous-use gate is the remaining work here.
+
+Onboarding-mechanism findings from today's setup (feed the durable run):
+- **Two pubkey-distribution paths — don't mix them.** GitHub-mediated (`nous brain invite` → invitee `nous brain join` publishes `<login>.asc` to the keys branch → operator's brain-sync `ImportAllPubkeys` + `AutoAdmitFromKeysBranch` auto-import/admit) is the path for a GitHub-backed brain — no manual export/import. Sneakernet (`nous identity export` → `import --verified-last8` → `recipient add`) is the GitHub-free / explicit-verify path (what the file:// e2e uses).
+- **Local key deletion is undone by the remote.** A recipient `fp` lives in manifest + keys branch + `verified.yaml`; `gpg --delete-keys` locally gets re-imported/re-admitted on the next sync/invite. True removal needs system-wide revocation → filed as **nous#37**.
+- **Never reuse a brain repo across keys.** A repo ever encrypted to a now-gone key gives `Failed to decrypt manifest!` (same class as the 2026-05-15 note). Reset = `gh repo delete && recreate` (or a fresh brain name), until nous#37.
+- **Shim ordering** (nous#36): on a fresh VM the GPG-unattended hook runs before `make nous-bootstrap` installs gpg, so it defers; it self-heals on the first boot after gpg exists (or re-run `scripts/brain-vm-setup.sh` once).

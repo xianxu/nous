@@ -42,6 +42,13 @@ Every command in the subcommand tree carries an audience tag:
   when the action is identity-and-access (verify-fingerprint
   ceremony, recipient changes — the agent-as-threat boundary;
   see `brain/atlas/threat-model-shared-brain.md` Revisions).
+  The identity-and-access commands carry explicit scripted
+  escape-hatch flags for test/automation (nous#36) that lift the
+  TTY gate, the operator asserting the OOB check already ran:
+  `--verified-last8` on `identity import` / `brain recipient add`,
+  `--name`/`--email` (or `IDENTITY_*`) on `identity init`, and
+  `--force` on `brain recipient remove`. See
+  `atlas/nous/e2e-integration-testing.md` (headless-VM section).
 - **(b)** — both. Reads like (a) when non-interactive; renders a
   prompt or TUI when invoked on a TTY. Currently:
   `nous identity primary` (no-args TTY runs the heuristic resolver

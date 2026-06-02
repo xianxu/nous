@@ -117,6 +117,36 @@ func WriteVerified(brainRoot string, v Verified) error {
 	return os.Rename(tmp, path)
 }
 
+// RemoveVerifiedFor drops every verified.yaml entry whose fingerprint
+// matches fp (case-insensitive) and returns the login(s) removed — the
+// caller uses them to revoke the matching GitHub collaborator. No-op
+// (returns nil, nil) when nothing matches, so it's safe to call on a
+// brain that never recorded a verification. Without this, `recipient
+// remove` leaves the login→fp mapping "verified", letting auto-admit
+// silently re-admit on the next keys-branch re-publish (nous#38 leak #2).
+func RemoveVerifiedFor(brainRoot, fp string) ([]string, error) {
+	v, err := ReadVerified(brainRoot)
+	if err != nil {
+		return nil, err
+	}
+	fpUp := strings.ToUpper(strings.TrimSpace(fp))
+	var removed []string
+	for login, e := range v {
+		if strings.ToUpper(e.Fingerprint) == fpUp {
+			removed = append(removed, login)
+			delete(v, login)
+		}
+	}
+	if len(removed) == 0 {
+		return nil, nil
+	}
+	sort.Strings(removed)
+	if err := WriteVerified(brainRoot, v); err != nil {
+		return removed, err
+	}
+	return removed, nil
+}
+
 // LoginForFingerprint scans the brain's keys branch for a
 // `<login>.asc` whose pubkey content has fingerprint `fp`, and
 // returns the login (filename stem). Returns ("", nil) when no
@@ -157,6 +187,45 @@ func LoginForFingerprint(ctx context.Context, brainRoot, fp string) (string, err
 		}
 		if strings.EqualFold(key.Fingerprint, fpUp) {
 			return stem, nil
+		}
+	}
+	return "", nil
+}
+
+// FingerprintForLogin resolves a GitHub login to a fingerprint from the
+// brain's state — the reverse of LoginForFingerprint. Sources in order:
+// verified.yaml (login→fp) → keys branch (`<login>.asc` content) → peer
+// sidecar (github_user). Returns ("", nil) when no source knows the login.
+func FingerprintForLogin(ctx context.Context, brainRoot, login string) (string, error) {
+	if v, err := ReadVerified(brainRoot); err == nil {
+		for k, e := range v {
+			if strings.EqualFold(k, login) && e.Fingerprint != "" {
+				return strings.ToUpper(e.Fingerprint), nil
+			}
+		}
+	}
+	if store, err := filestore.Open(brainRoot, keysBranch); err == nil {
+		defer store.Close()
+		if files, lerr := store.List(ctx); lerr == nil {
+			for name, content := range files {
+				if !strings.HasSuffix(name, pubkeyFilenameSuffix) {
+					continue
+				}
+				stem := strings.TrimSuffix(name, pubkeyFilenameSuffix)
+				if !strings.EqualFold(stem, login) {
+					continue
+				}
+				if key, ierr := identity.Inspect(string(content)); ierr == nil {
+					return strings.ToUpper(key.Fingerprint), nil
+				}
+			}
+		}
+	}
+	if metas, err := identity.ListPeerMeta(); err == nil {
+		for _, pm := range metas {
+			if strings.EqualFold(pm.GithubUser, login) && pm.Fingerprint != "" {
+				return strings.ToUpper(pm.Fingerprint), nil
+			}
 		}
 	}
 	return "", nil

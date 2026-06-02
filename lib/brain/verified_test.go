@@ -8,6 +8,64 @@ import (
 	"time"
 )
 
+func TestRemoveVerifiedFor(t *testing.T) {
+	at := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	seed := func(dir string) {
+		if err := WriteVerified(dir, Verified{
+			"yingtest42": {Fingerprint: "43C27DAAFD09B0A91E1B910BA98D15E8DD4F88C4", VerifiedBy: "xianxu", VerifiedAt: at},
+			"alice":      {Fingerprint: "0ECF6AC06E9BB6C5B928F10B5D6885D83872C2F0", VerifiedBy: "xianxu", VerifiedAt: at},
+		}); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	t.Run("removes matching entry (case-insensitive) + returns login", func(t *testing.T) {
+		dir := t.TempDir()
+		seed(dir)
+		// lowercase input must still match the stored uppercase fp.
+		removed, err := RemoveVerifiedFor(dir, "43c27daafd09b0a91e1b910ba98d15e8dd4f88c4")
+		if err != nil {
+			t.Fatalf("RemoveVerifiedFor: %v", err)
+		}
+		if len(removed) != 1 || removed[0] != "yingtest42" {
+			t.Fatalf("removed logins: got %v, want [yingtest42]", removed)
+		}
+		v, _ := ReadVerified(dir)
+		if _, ok := v["yingtest42"]; ok {
+			t.Error("yingtest42 entry should be gone")
+		}
+		if _, ok := v["alice"]; !ok {
+			t.Error("alice entry should remain")
+		}
+	})
+
+	t.Run("no-op when fingerprint absent", func(t *testing.T) {
+		dir := t.TempDir()
+		seed(dir)
+		removed, err := RemoveVerifiedFor(dir, strings.Repeat("F", 40))
+		if err != nil {
+			t.Fatalf("RemoveVerifiedFor: %v", err)
+		}
+		if removed != nil {
+			t.Errorf("expected nil removed, got %v", removed)
+		}
+		v, _ := ReadVerified(dir)
+		if len(v) != 2 {
+			t.Errorf("both entries should remain; got %d", len(v))
+		}
+	})
+
+	t.Run("safe on a brain with no verified.yaml", func(t *testing.T) {
+		removed, err := RemoveVerifiedFor(t.TempDir(), strings.Repeat("A", 40))
+		if err != nil {
+			t.Fatalf("RemoveVerifiedFor on empty: %v", err)
+		}
+		if removed != nil {
+			t.Errorf("expected nil, got %v", removed)
+		}
+	})
+}
+
 func TestVerified_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	at := time.Date(2026, 5, 20, 14, 32, 0, 0, time.UTC)

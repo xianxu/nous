@@ -113,7 +113,9 @@ a second commit + push (gcrypt re-encrypts to all recipients).`,
 			// Collect peers.
 			peers := []identity.Key{}
 			for _, path := range recipientFiles {
-				k, err := importPubkeyFromFile(out, path)
+				// "" → interactive ceremony; brain new is not part of the
+				// --verified-last8 non-interactive surface (nous#36 M2).
+				k, err := importPubkeyFromFile(out, path, "")
 				if err != nil {
 					return err
 				}
@@ -124,7 +126,7 @@ a second commit + push (gcrypt re-encrypts to all recipients).`,
 				if err != nil {
 					return err
 				}
-				if err := confirmKey(out, k); err != nil {
+				if err := confirmKey(out, k, ""); err != nil {
 					return err
 				}
 				peers = append(peers, k)

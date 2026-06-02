@@ -208,7 +208,9 @@ Or save and sneakernet:
 // ─── import (TTY-only + verify-fingerprint ceremony) ──────────────────
 
 func newIdentityImportCmd() *cobra.Command {
-	return &cobra.Command{
+	var verifiedLast8 string
+	var githubUser string
+	cmd := &cobra.Command{
 		Use:   "import [FILE]",
 		Short: "Admit a peer's public key (TTY-only; verify-fingerprint ceremony)",
 		Long: `Read an armored public key, show its fingerprint and UID, prompt
@@ -237,8 +239,8 @@ brain/atlas/threat-model-shared-brain.md).
   nous identity import -            # read from stdin (still requires TTY for the prompt)`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !term.IsTerminal(int(os.Stdin.Fd())) {
-				return fmt.Errorf("nous identity import requires an interactive terminal (TTY-only safeguard)")
+			if verifiedLast8 == "" && !term.IsTerminal(int(os.Stdin.Fd())) {
+				return fmt.Errorf("nous identity import requires an interactive terminal, or pass --verified-last8 <8hex> for scripted use (TTY-only safeguard)")
 			}
 			out := cmd.OutOrStdout()
 			in := cmd.InOrStdin()
@@ -281,18 +283,29 @@ brain/atlas/threat-model-shared-brain.md).
 			fmt.Fprintln(out)
 
 			expected := peer.Last8()
-			if err := promptVerify(in, out, expected); err != nil {
+			if err := verifyLast8(in, out, expected, verifiedLast8); err != nil {
 				return err
 			}
 
-			// GitHub username is required: every brain-recipient also
-			// needs to be added as a collaborator on the brain's GitHub
-			// repo (the gcrypt transit layer uses GitHub's identity
-			// system, not GPG's). Capture it now so 'nous brain share'
-			// has both halves without a second prompt.
-			githubUser, err := promptGithubUser(in, out)
-			if err != nil {
-				return err
+			// GitHub username: every brain-recipient also needs to be
+			// added as a collaborator on the brain's GitHub repo (the
+			// gcrypt transit layer uses GitHub's identity system, not
+			// GPG's). Captured here so 'nous brain share' has both halves
+			// without a second prompt. The --github-user flag supplies it
+			// non-interactively; with neither flag nor TTY we admit the key
+			// with the github user left blank (backfill later via
+			// `nous identity peer set`).
+			ghUser := githubUser
+			if ghUser == "" {
+				if verifiedLast8 != "" && !term.IsTerminal(int(os.Stdin.Fd())) {
+					fmt.Fprintln(out, "No --github-user supplied; peer metadata will omit it (set later with `nous identity peer set`).")
+				} else {
+					u, err := promptGithubUser(in, out)
+					if err != nil {
+						return err
+					}
+					ghUser = u
+				}
 			}
 
 			if _, err := identity.Import(armor); err != nil {
@@ -300,7 +313,7 @@ brain/atlas/threat-model-shared-brain.md).
 			}
 			if err := identity.SavePeerMeta(identity.PeerMeta{
 				Fingerprint: peer.Fingerprint,
-				GithubUser:  githubUser,
+				GithubUser:  ghUser,
 				ImportedAt:  time.Now().UTC(),
 			}); err != nil {
 				// Pubkey landed in keyring but sidecar write failed —
@@ -310,10 +323,13 @@ brain/atlas/threat-model-shared-brain.md).
 				fmt.Fprintf(out, "Imported %s (pubkey in keyring), but failed to save peer metadata: %v\n", peer.Last8(), err)
 				return err
 			}
-			fmt.Fprintf(out, "Imported %s with github user %q.\n", peer.Last8(), githubUser)
+			fmt.Fprintf(out, "Imported %s with github user %q.\n", peer.Last8(), ghUser)
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&verifiedLast8, "verified-last8", "", "last-8 hex of the key's fingerprint, verified out-of-band — satisfies the ceremony non-interactively (scripted/test use; lifts the TTY gate)")
+	cmd.Flags().StringVar(&githubUser, "github-user", "", "peer's GitHub username (non-interactive; skips the prompt)")
+	return cmd
 }
 
 // resolvePubFile picks a pubkey file path interactively when the
@@ -441,37 +457,107 @@ func promptVerify(in io.Reader, out io.Writer, expected string) error {
 	return fmt.Errorf("fingerprint mismatch after 3 attempts; aborting import")
 }
 
+// verifyLast8 satisfies the verify-fingerprint ceremony. With assumed
+// empty it falls back to the interactive promptVerify (TTY, 3 attempts).
+// With assumed non-empty (the --verified-last8 flag) it compares
+// in-process — no prompt, no TTY — and errors on mismatch exactly as a
+// failed prompt would. Match is case-insensitive (humans don't preserve
+// case across phone/sms).
+//
+// This is a deliberate loosening of the TTY-only admission gate for
+// scripted/test contexts: the caller asserts it performed the
+// out-of-band last-8 check BEFORE invoking. It is not a blanket bypass —
+// the correct last-8 is still required. See nous#36 +
+// brain/atlas/threat-model-shared-brain.md.
+func verifyLast8(in io.Reader, out io.Writer, expected, assumed string) error {
+	if assumed == "" {
+		return promptVerify(in, out, expected)
+	}
+	if strings.ToLower(strings.TrimSpace(assumed)) != strings.ToLower(expected) {
+		return fmt.Errorf("--verified-last8 %q does not match the key's last-8 %q; refusing to admit", assumed, expected)
+	}
+	fmt.Fprintf(out, "Verified last-8 %s (non-interactive, --verified-last8).\n", expected)
+	return nil
+}
+
 // ─── init ─────────────────────────────────────────────────────────────
 
+// initInputsComplete reports whether enough identity inputs are supplied
+// to run keygen without prompting (name + email). When true, `identity
+// init` may run non-interactively; when false it needs a TTY.
+func initInputsComplete(name, email string) bool {
+	return name != "" && email != ""
+}
+
 func newIdentityInitCmd() *cobra.Command {
-	return &cobra.Command{
+	var name, email, expiry string
+	cmd := &cobra.Command{
 		Use:   "init",
-		Short: "Generate a new GPG keypair (TTY-only)",
+		Short: "Generate a new GPG keypair (TTY-only unless --name/--email given)",
 		Long: `Generate a new GPG keypair for brain encryption. Idempotent: if a
 key already exists in the keyring, prints the existing fingerprint and
 exits without re-generating.
 
-Currently delegates to scripts/identity.sh under the hood — that script
-encodes 200 lines of macOS gpg-agent + pinentry-mac configuration that
-isn't worth re-porting until the surface stabilizes. The script itself
-is TTY-aware; this command adds the explicit TTY check and bails early
-with a clear error.`,
+Delegates to scripts/identity.sh under the hood — that script encodes
+200 lines of macOS gpg-agent + pinentry configuration. The script reads
+IDENTITY_NAME / IDENTITY_EMAIL / IDENTITY_EXPIRY from the environment; in
+an interactive shell it prompts (suggesting git config) when they're
+unset.
+
+Non-interactive (scripted/test) use: pass --name and --email (and
+optionally --expiry, default 5y) — or set the IDENTITY_* env vars — and
+the TTY requirement is lifted. The passphrase still comes from gpg-agent
+(in a headless test VM, scripts/brain-vm-setup.sh wires a fake pinentry
+so keygen runs unattended).`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !term.IsTerminal(int(os.Stdin.Fd())) {
-				return fmt.Errorf("nous identity init requires an interactive terminal (TTY-only safeguard)")
+			// Flags override; fall back to the IDENTITY_* env that
+			// identity.sh already understands.
+			if name == "" {
+				name = os.Getenv("IDENTITY_NAME")
 			}
+			if email == "" {
+				email = os.Getenv("IDENTITY_EMAIL")
+			}
+			if expiry == "" {
+				expiry = os.Getenv("IDENTITY_EXPIRY")
+			}
+
+			nonInteractive := initInputsComplete(name, email)
+			if !nonInteractive && !term.IsTerminal(int(os.Stdin.Fd())) {
+				return fmt.Errorf("nous identity init requires an interactive terminal, or pass --name and --email (and optionally --expiry) for scripted use (TTY-only safeguard)")
+			}
+			// identity.sh dies on a missing IDENTITY_EXPIRY in a non-TTY
+			// run (its prompt can't fire), so supply the documented default.
+			if nonInteractive && expiry == "" {
+				expiry = "5y"
+			}
+
 			scriptPath, err := findIdentityScript()
 			if err != nil {
 				return err
 			}
 			c := exec.Command("bash", scriptPath)
+			c.Env = os.Environ()
+			if name != "" {
+				c.Env = append(c.Env, "IDENTITY_NAME="+name)
+			}
+			if email != "" {
+				c.Env = append(c.Env, "IDENTITY_EMAIL="+email)
+			}
+			if expiry != "" {
+				c.Env = append(c.Env, "IDENTITY_EXPIRY="+expiry)
+			}
 			c.Stdin = os.Stdin
 			c.Stdout = os.Stdout
 			c.Stderr = os.Stderr
 			return c.Run()
 		},
 	}
+	cmd.Flags().StringVar(&name, "name", "", "real name for the key (non-interactive; or IDENTITY_NAME)")
+	cmd.Flags().StringVar(&email, "email", "", "email for the key (non-interactive; or IDENTITY_EMAIL)")
+	cmd.Flags().StringVar(&expiry, "expiry", "", "key expiry e.g. 5y (non-interactive; or IDENTITY_EXPIRY; default 5y)")
+	return cmd
 }
 
 // findIdentityScript locates scripts/identity.sh relative to the nous
