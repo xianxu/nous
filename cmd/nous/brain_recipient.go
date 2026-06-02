@@ -429,8 +429,10 @@ TTY-only.`,
 				switch {
 				case res.CollaboratorRevoked:
 					fmt.Fprintf(out, "Revoked GitHub collaborator %s on %s/%s.\n", res.Login, res.Owner, res.Repo)
-				case res.Login == "":
-					fmt.Fprintln(out, "  note: no GitHub login resolved for this key — if they're a collaborator, remove them manually.")
+				case res.LoginUnresolved:
+					fmt.Fprintf(out, "  ⚠ could NOT resolve a GitHub login for %s — collaborator NOT revoked.\n", res.ShortFp)
+					fmt.Fprintln(out, "    They may still have repo access. Remove manually once you know their login:")
+					fmt.Fprintf(out, "    gh api -X DELETE repos/%s/%s/collaborators/<login>\n", res.Owner, res.Repo)
 				case res.CollaboratorErr != nil:
 					fmt.Fprintf(out, "  warning: GitHub collaborator removal failed: %v\n", res.CollaboratorErr)
 					fmt.Fprintf(out, "    retry: gh api -X DELETE repos/%s/%s/collaborators/%s\n", res.Owner, res.Repo, res.Login)

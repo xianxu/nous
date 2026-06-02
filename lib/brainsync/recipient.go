@@ -7,6 +7,7 @@ import (
 
 	"github.com/xianxu/nous/lib/brain"
 	"github.com/xianxu/nous/lib/gh"
+	"github.com/xianxu/nous/lib/identity"
 )
 
 // RemoveRecipientResult carries the outcome of RemoveRecipient. The
@@ -30,6 +31,11 @@ type RemoveRecipientResult struct {
 	Owner, Repo, Login  string
 	CollaboratorRevoked bool  // leak #3
 	CollaboratorErr     error // non-fatal collaborator-removal failure
+	// LoginUnresolved is true when the brain has a remote but we could not
+	// map the fingerprint to a GitHub login from any source — so the
+	// collaborator could NOT be revoked and the caller must surface a
+	// manual-removal hint (never a silent skip).
+	LoginUnresolved bool
 }
 
 // RemoveRecipient fully revokes fpArg from a SINGLE brain — the one
@@ -100,6 +106,26 @@ func RemoveRecipient(ctx context.Context, brainPath, fpArg string, force bool) (
 		res.VerifiedErr = verr
 	}
 
+	// Resolve the GitHub login NOW — before RevokePubkey deletes the
+	// keys-branch <login>.asc that LoginForFingerprint reads. Auto-admitted
+	// recipients have no verified.yaml entry, so resolving only after the
+	// delete left login=="" and silently skipped the collaborator revoke
+	// (nous#40 bug A). Sources in order: verified.yaml → keys branch → peer
+	// sidecar.
+	login := ""
+	if len(logins) > 0 {
+		login = logins[0]
+	}
+	if login == "" {
+		login, _ = brain.LoginForFingerprint(ctx, brainPath, match)
+	}
+	if login == "" {
+		if pm, perr := identity.LoadPeerMeta(match); perr == nil {
+			login = pm.GithubUser
+		}
+	}
+	res.Login = login
+
 	// Manifest update + re-key push (load-bearing).
 	m.Recipients = brain.WithoutRecipient(m.Recipients, match)
 	if err := brain.RewriteFrontmatter(brainPath, m); err != nil {
@@ -116,24 +142,22 @@ func RemoveRecipient(ctx context.Context, brainPath, fpArg string, force bool) (
 	}
 
 	// (#3) Remove the GitHub collaborator — only for brains with a remote.
+	// login was resolved above (before RevokePubkey ran).
 	if originURL := brain.ReadOriginURL(brainPath); originURL != "" {
 		if owner, repo, oerr := brain.GitHubOwnerRepo(originURL); oerr == nil {
 			res.HadRemote = true
 			res.Owner, res.Repo = owner, repo
-			login := ""
-			if len(logins) > 0 {
-				login = logins[0]
-			}
-			if login == "" {
-				login, _ = brain.LoginForFingerprint(ctx, brainPath, match)
-			}
-			res.Login = login
 			if login != "" {
 				if cerr := gh.RemoveCollaborator(owner, repo, login); cerr != nil {
 					res.CollaboratorErr = cerr
 				} else {
 					res.CollaboratorRevoked = true
 				}
+			} else {
+				// Couldn't map fp → login from any source: don't silently
+				// leave them with access — flag it so the caller prints a
+				// manual-removal hint.
+				res.LoginUnresolved = true
 			}
 		}
 	}
