@@ -408,7 +408,7 @@ TTY-only (or --force for scripted use).`,
 					return err
 				}
 				if pr.NothingToDo {
-					fmt.Fprintf(out, "Nothing to remove: %q has no pending invitation and is not a collaborator on %s/%s.\n", selector, pr.Owner, pr.Repo)
+					fmt.Fprintf(out, "Nothing to remove: %q has no pending invitation, is not a collaborator, and has no keys-branch pubkey on %s/%s.\n", selector, pr.Owner, pr.Repo)
 					return nil
 				}
 				if pr.InvitationCancelled {
@@ -420,6 +420,12 @@ TTY-only (or --force for scripted use).`,
 				if pr.CollaboratorErr != nil {
 					fmt.Fprintf(out, "  warning: collaborator removal failed: %v\n", pr.CollaboratorErr)
 					fmt.Fprintf(out, "    retry: gh api -X DELETE repos/%s/%s/collaborators/%s\n", pr.Owner, pr.Repo, selector)
+				}
+				if pr.KeysBranchStripped {
+					fmt.Fprintf(out, "Removed %s's pubkey from the keys branch (was published but not yet admitted).\n", selector)
+				}
+				if pr.KeysBranchErr != nil {
+					fmt.Fprintf(out, "  warning: keys-branch revoke failed: %v\n", pr.KeysBranchErr)
 				}
 				return nil
 			}

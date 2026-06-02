@@ -53,8 +53,10 @@ type RemovePersonResult struct {
 	InvitationCancelled bool
 	CollaboratorRevoked bool
 	CollaboratorErr     error
+	KeysBranchStripped  bool  // a keys-branch pubkey for the login was removed
+	KeysBranchErr       error // non-fatal keys-branch revoke failure
 	LoginUnresolved     bool
-	NothingToDo         bool // selector matched no layer (no recipient, invite, or collaborator)
+	NothingToDo         bool // selector matched no layer (no recipient, invite, collaborator, or keys-branch pubkey)
 }
 
 // RemovePerson removes a person from a SINGLE brain at whatever lifecycle
@@ -134,7 +136,21 @@ func RemovePerson(ctx context.Context, brainPath, selector string, force bool) (
 		}
 	}
 
-	if !res.InvitationCancelled && !res.CollaboratorRevoked && res.CollaboratorErr == nil {
+	// Strip any keys-branch pubkey for this login — the "Pubkey published but
+	// not yet admitted" state. Without this, auto-admit re-admits them after
+	// removal (the no-resurrection invariant must hold on the non-recipient
+	// path too, not just the recipient path; nous#40 codex review #1).
+	if fp, _ := brain.FingerprintForLogin(ctx, brainPath, selector); fp != "" {
+		res.Fingerprint = fp
+		if kerr := brain.RevokePubkey(ctx, brainPath, fp); kerr != nil {
+			res.KeysBranchErr = kerr
+		} else {
+			res.KeysBranchStripped = true
+		}
+	}
+
+	if !res.InvitationCancelled && !res.CollaboratorRevoked && !res.KeysBranchStripped &&
+		res.CollaboratorErr == nil && res.KeysBranchErr == nil {
 		res.NothingToDo = true
 	}
 	return res, nil
