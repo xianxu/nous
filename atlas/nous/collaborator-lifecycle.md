@@ -59,7 +59,10 @@ atlas entry is the code map.
   and re-applies the mutation on the merged state, bounded retries. Membership
   changes are idempotent set-ops so this converges (unlike content edits, which go
   through `Resolve`). `stripMember` (remove/leave) and `autoAdmitBrain` (the daemon)
-  both push through it (`nous#41` #6).
+  both push through it (`nous#41` #6). It refuses to start when the brain has
+  uncommitted *tracked* changes (so a `reset --hard` retry can't roll back
+  unrelated edits) — manual ops error "commit or discard first"; the daemon's
+  auto-admit pauses that tick and retries when clean. Untracked drafts are fine.
 - **Login-rename detection** — `brain.DetectLoginDrift` (pure) flags recorded logins
   (`recipient_logins` keys) that are no longer current GitHub collaborators
   (`gh.ListCollaborators`); `nous brain recipient list` surfaces the warning. A

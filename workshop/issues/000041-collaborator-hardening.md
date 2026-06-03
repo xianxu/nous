@@ -48,19 +48,19 @@ Code fixes:
   stale recipients; no invariant enforces one active fp per login. Needs a
   durable login→fp admit record so auto-admit can remove the superseded fp (the
   keys branch loses the old mapping on overwrite). **Design fork** — see Log.
-- [ ] **#6** concurrent operators racing `main` pushes (auto-admit / leave /
+- [x] **#6** concurrent operators racing `main` pushes (auto-admit / leave /
   remove / autosave) → committed-but-unpushed membership drift. Add
   pull-rebase-retry on `ErrPushRejected` for membership pushes.
-- [ ] **#10** GitHub login rename orphans `<login>.asc` / verified keys / sidecar
+- [x] **#10** GitHub login rename orphans `<login>.asc` / verified keys / sidecar
   while collaborator ops use the current login. Detect + handle.
 
 Doc reconciliations (in the target):
-- [ ] **#4** local keyring vs "clears every store": keyring is operator-managed,
+- [x] **#4** local keyring vs "clears every store": keyring is operator-managed,
   not auto-cleared (audit confirmed it lingers). Caveat the invariant + decide on
   an optional `--purge-key`.
-- [ ] **#5** add the "manifest changed locally, remote not re-keyed (push failed)"
+- [x] **#5** add the "manifest changed locally, remote not re-keyed (push failed)"
   state to the matrix.
-- [ ] **#9** refine the open question: `nous brain join OWNER/REPO` already
+- [x] **#9** refine the open question: `nous brain join OWNER/REPO` already
   republishes a pubkey, so the accepted-via-web self-cure capability EXISTS — the
   gap is discovery/TUI surfacing, not feasibility.
 
@@ -76,12 +76,13 @@ Doc reconciliations (in the target):
 - [x] M1 — drift-class code fixes: #3, #11, #12 (+ tests).
 - [x] M2 — rotation / one-fp-per-login: #7/#8 (durable login→fp record + auto-admit
   supersede). *(confirm the store fork first.)*
-- [ ] M3 — #6 push-rebase-retry, #10 login-rename handling.
+- [x] M3 — #6 push-rebase-retry, #10 login-rename handling.
 - [ ] M4 — target doc reconciliations #4/#5/#9.
 
 ## Log
 
 ### 2026-06-02
+- 2026-06-02: closed M3 — #41 follow-on (collaborator-state-machine target). #6: pushMembershipChange wraps stripMember + auto-admit; on rejected push, ResetToRemoteMain + re-apply idempotent set-op; refuses on a dirty tracked tree to avoid reset-hard losing unrelated edits. TestPushMembershipChange_RetriesOnConcurrentPush (plain-git) proves convergence not clobber. #10: gh.ListCollaborators + pure brain.DetectLoginDrift (TestDetectLoginDrift) flag renamed/departed logins in `recipient list`. Also resolved M1 review Imp#2 (keys-branch-canonical revoke-login). go build/vet + lib suites incl. gpg integration green. Fresh-eyes review: 1 Critical (dirty-tree reset-hard) fixed, rest correct.; review verdict: SHIP
 - 2026-06-02: closed M2 — #41 follow-on under collaborator-state-machine target (not a project milestone). recipient_logins map round-trips (TestManifest_RecipientLoginsRoundTrip); TestEndToEnd_RotationSupersede (gpg) proves rotation evicts old fp + admits new + updates map + operator untouched + idempotent re-run; verified.yaml drift gate preserved (TestEndToEnd_DriftDetection); FingerprintForLogin reads map first; stripMember drops map entry on removal. go build/vet + lib suites green. Fresh-eyes review: no Critical; 2 Important judged acceptable; Minors fixed.; review verdict: SHIP
 - 2026-06-02: closed M1 (#3, #11, #12) — #41 is a follow-on under target collaborator-state-machine, not a shared-brain project milestone (project closed) — no project detail block. go build/vet + full suite green (unsandboxed for gpg); TestFingerprintForLogin_IgnoresVerifiedYaml pins #3; InviteCollaborator list/delete now hard-error (#11); LeaveBrain routes through the shared `stripMember` so leave clears every store (#12). The `stripMember` strip itself is e2e-proven via the `recipient remove` assertion in brain-vm-e2e.sh; the *leave wiring* is verified by construction (1-line call) + dogfood, because LeaveBrain is GitHub-coupled (refuses on the file:// e2e origin) so its full flow can't run GitHub-free. review verdict: unknown (no Critical; Important findings dispositioned below).
 - 2026-06-02: M1 milestone-review (sdlc judge) dispositions — (Imp#1 leave has no isolated test) → architectural: LeaveBrain is GitHub-coupled; strip proven via recipient-remove e2e + leave live-verification carried to the dogfood (issue done-when already designates GitHub-layer effects for the dogfood). (Imp#2 fp→login revoke-target prefers verified-hint over canonical keys-branch) → pre-existing nous#40 behavior, best-effort; **flagged for M3 #10** (login-rename is where source precedence gets decided). Minors fixed: leave.go error-prefix + stale mid-flow doc comment. Test-hermeticity nit on the #3 test acknowledged (unlikely-login guard).
