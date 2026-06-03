@@ -2,6 +2,7 @@ package brainsync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,50 @@ import (
 	"github.com/xianxu/nous/lib/gh"
 	"github.com/xianxu/nous/lib/identity"
 )
+
+// membershipPushMaxAttempts bounds the pull-rebase-retry loop in
+// pushMembershipChange. Five is comfortably more than any realistic number
+// of operators racing the same brain's main branch.
+const membershipPushMaxAttempts = 5
+
+// pushMembershipChange applies a membership mutation and pushes it, retrying
+// on a rejected push by resetting to the remote's membership state and
+// re-applying (nous#41 #6). Membership changes are idempotent set-operations
+// on the recipient list / recipient_logins map, so re-applying on top of
+// whatever a concurrent operator just pushed converges — unlike content
+// edits, which need conflict resolution.
+//
+// apply performs the local mutation from freshly-read on-disk state: it reads
+// the current manifest (+ any sibling store it commits in the same commit,
+// e.g. verified.yaml), performs its set-operation, writes it back via
+// RewriteFrontmatter, and returns the commit message. It must NOT push, and
+// must be safe to run repeatedly. Returning ("", nil) means the mutation is
+// already reflected (a concurrent push did the work) — treated as a no-op.
+func pushMembershipChange(brainPath string, apply func() (string, error)) error {
+	var lastErr error
+	for attempt := 0; attempt < membershipPushMaxAttempts; attempt++ {
+		msg, err := apply()
+		if err != nil {
+			return err
+		}
+		if msg == "" {
+			// Nothing new to record; AddCommitPush no-ops on a clean tree.
+			msg = "membership update"
+		}
+		err = AddCommitPush(brainPath, msg)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, ErrPushRejected) {
+			return err
+		}
+		lastErr = err
+		if rerr := ResetToRemoteMain(brainPath); rerr != nil {
+			return fmt.Errorf("reconcile after rejected membership push: %w (push was: %v)", rerr, err)
+		}
+	}
+	return fmt.Errorf("membership push still rejected after %d attempts: %w", membershipPushMaxAttempts, lastErr)
+}
 
 // RemoveRecipientResult carries the outcome of RemoveRecipient. The
 // manifest re-key push is load-bearing; the verified.yaml clear,
@@ -234,7 +279,7 @@ func RemoveRecipient(ctx context.Context, brainPath, fpArg string, force bool) (
 		return res, fmt.Errorf("removing %s leaves no decrypt path on %s — pass force to override", res.ShortFp, filepath.Base(brainPath))
 	}
 
-	sr, serr := stripMember(ctx, brainPath, m, match, fmt.Sprintf("recipient: revoke %s", res.ShortFp), "")
+	sr, serr := stripMember(ctx, brainPath, match, fmt.Sprintf("recipient: revoke %s", res.ShortFp), "")
 	res.RemovedLogins = sr.RemovedLogins
 	res.VerifiedErr = sr.VerifiedErr
 	res.Login = sr.Login
@@ -287,23 +332,16 @@ type stripMemberResult struct {
 // just-cleared verified.yaml entry (a removal hint from RemoveVerifiedFor's
 // return — NOT verified.yaml as a canonical mapping, which #3 dropped), then
 // the keys-branch <login>.asc (LoginForFingerprint), then the peer sidecar.
-func stripMember(ctx context.Context, brainPath string, m brain.Manifest, fp, commitMsg, knownLogin string) (*stripMemberResult, error) {
+func stripMember(ctx context.Context, brainPath, fp, commitMsg, knownLogin string) (*stripMemberResult, error) {
 	res := &stripMemberResult{}
 
-	// (#2) Clear verified.yaml BEFORE the push so manifest + verified land
-	// in one commit. Capture the login(s) for the collaborator removal.
-	logins, verr := brain.RemoveVerifiedFor(brainPath, fp)
-	res.RemovedLogins = logins
-	if verr != nil {
-		res.VerifiedErr = verr
-	}
-
-	// Resolve the GitHub login NOW — before RevokePubkey deletes the
-	// keys-branch <login>.asc that LoginForFingerprint reads (nous#40 bug A).
+	// Resolve the GitHub login NOW — before RevokePubkey (below) deletes the
+	// keys-branch <login>.asc that LoginForFingerprint reads (nous#40 bug A),
+	// and before the retry loop (the login is stable across re-applies). The
+	// keys-branch <login>.asc is the canonical source (#3); verified.yaml is
+	// NOT consulted for the mapping (resolves nous#41 M1 review Important #2 —
+	// the revoke-target login no longer prefers a stale verified.yaml hint).
 	login := knownLogin
-	if login == "" && len(logins) > 0 {
-		login = logins[0]
-	}
 	if login == "" {
 		login, _ = brain.LoginForFingerprint(ctx, brainPath, fp)
 	}
@@ -314,21 +352,34 @@ func stripMember(ctx context.Context, brainPath string, m brain.Manifest, fp, co
 	}
 	res.Login = login
 
-	// Manifest re-key push (load-bearing).
-	m.Recipients = brain.WithoutRecipient(m.Recipients, fp)
-	// Keep the recipient_logins map in sync (nous#41 #7/#8): drop any entry
-	// pointing at the removed fp, else a later re-admit of that login would
-	// look like a rotation and wrongly evict the freshly-admitted key.
-	for login, lfp := range m.RecipientLogins {
-		if strings.EqualFold(lfp, fp) {
-			delete(m.RecipientLogins, login)
+	// Manifest re-key + verified.yaml clear, in one commit, pushed with
+	// concurrent-operator retry (nous#41 #6): on a rejected push, reset to the
+	// remote's membership state and re-apply this idempotent set-op on top.
+	if perr := pushMembershipChange(brainPath, func() (string, error) {
+		cur, err := brain.Read(brainPath)
+		if err != nil {
+			return "", fmt.Errorf("read manifest: %w", err)
 		}
-	}
-	if err := brain.RewriteFrontmatter(brainPath, m); err != nil {
-		return res, fmt.Errorf("rewrite frontmatter: %w", err)
-	}
-	if err := AddCommitPush(brainPath, commitMsg); err != nil {
-		return res, fmt.Errorf("push: %w (manifest committed locally; re-run to retry)", err)
+		// Clear verified.yaml in the same commit as the manifest re-key.
+		if logins, verr := brain.RemoveVerifiedFor(brainPath, fp); verr != nil {
+			res.VerifiedErr = verr
+		} else if len(logins) > 0 && len(res.RemovedLogins) == 0 {
+			res.RemovedLogins = logins
+		}
+		cur.Recipients = brain.WithoutRecipient(cur.Recipients, fp)
+		// Keep recipient_logins in sync (nous#41 #7/#8): drop any entry pointing
+		// at the removed fp, else a later re-admit looks like a rotation.
+		for l, lfp := range cur.RecipientLogins {
+			if strings.EqualFold(lfp, fp) {
+				delete(cur.RecipientLogins, l)
+			}
+		}
+		if err := brain.RewriteFrontmatter(brainPath, cur); err != nil {
+			return "", fmt.Errorf("rewrite frontmatter: %w", err)
+		}
+		return commitMsg, nil
+	}); perr != nil {
+		return res, fmt.Errorf("re-key push: %w (re-run to retry)", perr)
 	}
 	res.Pushed = true
 

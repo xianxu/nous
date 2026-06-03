@@ -51,11 +51,26 @@ atlas entry is the code map.
   EVERY store (not just the manifest) — a lingering keys-branch pubkey would let
   a peer's auto-admit resurrect the leaver (#41 #12).
 
+## Concurrency + drift
+
+- **Membership push races** — `brainsync.pushMembershipChange` (`lib/brainsync/recipient.go`)
+  wraps every membership mutation's commit+push: on a rejected push (a concurrent
+  operator pushed first) it `ResetToRemoteMain` (fetch + `reset --hard origin/main`)
+  and re-applies the mutation on the merged state, bounded retries. Membership
+  changes are idempotent set-ops so this converges (unlike content edits, which go
+  through `Resolve`). `stripMember` (remove/leave) and `autoAdmitBrain` (the daemon)
+  both push through it (`nous#41` #6).
+- **Login-rename detection** — `brain.DetectLoginDrift` (pure) flags recorded logins
+  (`recipient_logins` keys) that are no longer current GitHub collaborators
+  (`gh.ListCollaborators`); `nous brain recipient list` surfaces the warning. A
+  GitHub login rename leaves the old login orphaned in the keys branch /
+  recipient_logins; auto-heal is deferred (`nous#41` #10, detection-only).
+
 ## Invariants (see the target for the full list)
 
 Removal clears every store (no resurrection); resolve login↔fp before
-destructive deletes; one shared lib impl per op for CLI + TUI; revocation is
-forward-only.
+destructive deletes (keys-branch canonical, not verified.yaml); one shared lib
+impl per op for CLI + TUI; revocation is forward-only.
 
 ## Open hardening
 
@@ -63,5 +78,6 @@ forward-only.
 longer a login→fp mapping source, #11 re-invite list/delete are hard errors, #12
 leave clears every store via the shared `stripMember`). **M2 landed** (#7/#8 key
 rotation / one-fp-per-login via the manifest `recipient_logins:` map + auto-admit
-supersede). **Still to land:** concurrent-operator push races + login rename (M3),
-target doc reconciliations (M4). Cross-brain revocation + ban list is `nous#37`.
+supersede). **M3 landed** (#6 membership push-race pull-rebase-retry,
+#10 login-rename detection). **Still to land:** target doc reconciliations (M4).
+Cross-brain revocation + ban list is `nous#37`.

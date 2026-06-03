@@ -133,7 +133,7 @@ func LeaveBrain(ctx context.Context, brainPath string, deleteLocal bool) (LeaveR
 	// revoke runs LAST (after the push), preserving push access through the
 	// re-key + keys-branch strip.
 	commitMsg := fmt.Sprintf("leave: %s (%s) left the brain", myLogin, res.ShortFp)
-	sr, serr := stripMember(ctx, brainPath, m, myFp, commitMsg, myLogin)
+	sr, serr := stripMember(ctx, brainPath, myFp, commitMsg, myLogin)
 	res.ManifestPushed = sr.Pushed
 	res.VerifiedErr = sr.VerifiedErr
 	res.KeysBranchErr = sr.KeysBranchErr

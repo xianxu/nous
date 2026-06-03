@@ -29,3 +29,31 @@ func TestLooksLikeFingerprint(t *testing.T) {
 		}
 	}
 }
+
+func TestDetectLoginDrift(t *testing.T) {
+	cases := []struct {
+		name      string
+		recorded  []string
+		current   []string
+		wantOrphan []string
+	}{
+		{"all current", []string{"ying", "xian"}, []string{"xian", "ying"}, nil},
+		{"one renamed away", []string{"ying", "xian"}, []string{"xian", "ying-new"}, []string{"ying"}},
+		{"case-insensitive match", []string{"Ying"}, []string{"ying"}, nil},
+		{"empty + dupes ignored", []string{"ying", "", "ying"}, []string{"xian"}, []string{"ying"}},
+		{"no collaborators -> all orphaned, sorted", []string{"zeb", "amy"}, nil, []string{"amy", "zeb"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := DetectLoginDrift(c.recorded, c.current)
+			if len(got) != len(c.wantOrphan) {
+				t.Fatalf("orphaned = %v, want %v", got, c.wantOrphan)
+			}
+			for i := range c.wantOrphan {
+				if got[i] != c.wantOrphan[i] {
+					t.Errorf("orphaned[%d] = %q, want %q (full: %v)", i, got[i], c.wantOrphan[i], got)
+				}
+			}
+		})
+	}
+}

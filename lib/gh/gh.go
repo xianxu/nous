@@ -170,6 +170,27 @@ func CollaboratorPermission(owner, repo, login string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// ListCollaborators returns the GitHub logins of every current collaborator
+// on owner/repo (any permission level, accepted only — pending invitations
+// are not collaborators yet). Used to detect membership-record drift: logins
+// in the brain's records (recipient_logins / keys branch) that are no longer
+// collaborators, a possible GitHub login rename (nous#41 #10).
+func ListCollaborators(owner, repo string) ([]string, error) {
+	out, err := run("api", "--paginate",
+		fmt.Sprintf("repos/%s/%s/collaborators", owner, repo),
+		"--jq", ".[].login")
+	if err != nil {
+		return nil, err
+	}
+	var logins []string
+	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			logins = append(logins, l)
+		}
+	}
+	return logins, nil
+}
+
 // AddCollaborator invites `login` to `owner/repo` with the given
 // permission ("push", "pull", "admin", "maintain", "triage"). The
 // invitee must accept (via web UI or `nous brain join`) for the

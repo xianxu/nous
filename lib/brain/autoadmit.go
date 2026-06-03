@@ -3,6 +3,7 @@ package brain
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/xianxu/nous/lib/brain/filestore"
@@ -177,6 +178,39 @@ func AutoAdmitFromKeysBranch(ctx context.Context, brainRoot string) ([]AdmittedR
 		return nil, drift, fmt.Errorf("auto-admit: rewrite manifest: %w", err)
 	}
 	return added, drift, nil
+}
+
+// DetectLoginDrift returns the GitHub logins this brain has membership records
+// for (recipient_logins keys, keys-branch `<login>.asc` stems — whatever the
+// caller collects into recordedLogins) that are NOT in the repo's CURRENT
+// collaborator list. Each such login is a possible GitHub login *rename* (the
+// person still has access under a new login, leaving the old login orphaned in
+// our records) or a stale record after a departure. Case-insensitive; the
+// result is de-duplicated and sorted.
+//
+// Pure — the caller supplies the gh-fetched collaborator list. Detection only;
+// auto-healing a rename (rewriting `<old>.asc` → `<new>.asc`, the verified.yaml
+// key, the recipient_logins key) is deferred until the dogfood shows it biting
+// (nous#41 #10).
+func DetectLoginDrift(recordedLogins, currentCollaborators []string) []string {
+	current := make(map[string]bool, len(currentCollaborators))
+	for _, c := range currentCollaborators {
+		if c = strings.TrimSpace(c); c != "" {
+			current[strings.ToLower(c)] = true
+		}
+	}
+	seen := make(map[string]bool)
+	var orphaned []string
+	for _, l := range recordedLogins {
+		ll := strings.ToLower(strings.TrimSpace(l))
+		if ll == "" || current[ll] || seen[ll] {
+			continue
+		}
+		seen[ll] = true
+		orphaned = append(orphaned, strings.TrimSpace(l))
+	}
+	sort.Strings(orphaned)
+	return orphaned
 }
 
 // looksLikeFingerprint reports whether s is a 40-character hex
