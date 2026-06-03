@@ -186,11 +186,13 @@ the machine down makes the next operation honor all of it by default.
   capability (#41 #9 refinement).** An invitee can accept the GitHub invitation
   *without* publishing a pubkey — especially via the GitHub web UI, outside `nous
   brain` — landing in *Accepted (no pubkey)*. The cure already *exists*: `nous
-  brain join OWNER/REPO` runs `gh.AcceptInvitation` then `PublishOwnPubkeyToRemote`,
-  and `AcceptInvitation` is a no-op when the invite was already accepted on the
-  web — so re-running `join` on an already-accepted brain still publishes the
-  pubkey and moves them to *Pubkey published*. So this is **not** a feasibility
-  gap. The real gap is **discovery/surfacing**: a person who accepted on the web
+  brain join OWNER/REPO` (the republish form, `runBrainJoinRepublish`) **skips
+  invitation handling entirely** and just re-publishes the pubkey via
+  `PublishOwnPubkeyToRemote` — so someone who already accepted on the web runs it
+  to land their `<login>.asc` and move to *Pubkey published*. (The bare `nous
+  brain join`, by contrast, lists + accepts a pending invitation first, then
+  publishes.) So this is **not** a feasibility gap. The real gap is
+  **discovery/surfacing**: a person who accepted on the web
   has no signal that they still need to run `nous brain join`, and `nous brain`'s
   TUI doesn't show "you're a collaborator here but haven't published a key —
   publish now?" for that brain. The open work is the prompt/affordance, not new
