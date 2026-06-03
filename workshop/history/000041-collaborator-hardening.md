@@ -1,12 +1,13 @@
 ---
 id: 000041
-status: working
+status: done
 deps: []
 github_issue:
 created: 2026-06-02
 updated: 2026-06-02
 estimate_hours: 9
 target: collaborator-state-machine
+actual_hours: 8
 ---
 
 # collaborator-lifecycle hardening (codex review findings)
@@ -82,6 +83,7 @@ Doc reconciliations (in the target):
 ## Log
 
 ### 2026-06-02
+- 2026-06-02: closed — All 12 codex-review findings closed: #1 (pre-fixed), #3/#11/#12 (M1), #7/#8 (M2), #6/#10 (M3) in code; #4/#5/#9 (M4) reconciled in the collaborator-state-machine target. Each milestone fresh-eyes reviewed (M1 FIX-THEN-SHIP, M2 SHIP, M3 SHIP, M4 FIX-THEN-SHIP) with findings fixed. New unit tests (FingerprintForLogin_IgnoresVerifiedYaml, Manifest_RecipientLogins, DetectLoginDrift, PushMembershipChange_RetriesOnConcurrentPush) + gpg integration (TestEndToEnd_RotationSupersede); go build/vet + all lib suites (incl. gpg, unsandboxed) green.
 - 2026-06-02: closed M4 — #41 follow-on (collaborator-state-machine target). M4 is doc-only: reconciled findings #4 (local-keyring caveat on invariant 2 + optional --purge-key non-default), #5 (Recipient-local-ahead matrix row + footnote), #9 (Accepted-no-pubkey self-cure capability exists, gap is discovery/TUI), plus recipient_logins in lede/matrix + leave-transition full-strip note + ## Revisions. go build/vet + all lib suites (incl. gpg integration) green across the issue.; review verdict: FIX-THEN-SHIP
 - 2026-06-02: closed M3 — #41 follow-on (collaborator-state-machine target). #6: pushMembershipChange wraps stripMember + auto-admit; on rejected push, ResetToRemoteMain + re-apply idempotent set-op; refuses on a dirty tracked tree to avoid reset-hard losing unrelated edits. TestPushMembershipChange_RetriesOnConcurrentPush (plain-git) proves convergence not clobber. #10: gh.ListCollaborators + pure brain.DetectLoginDrift (TestDetectLoginDrift) flag renamed/departed logins in `recipient list`. Also resolved M1 review Imp#2 (keys-branch-canonical revoke-login). go build/vet + lib suites incl. gpg integration green. Fresh-eyes review: 1 Critical (dirty-tree reset-hard) fixed, rest correct.; review verdict: SHIP
 - 2026-06-02: closed M2 — #41 follow-on under collaborator-state-machine target (not a project milestone). recipient_logins map round-trips (TestManifest_RecipientLoginsRoundTrip); TestEndToEnd_RotationSupersede (gpg) proves rotation evicts old fp + admits new + updates map + operator untouched + idempotent re-run; verified.yaml drift gate preserved (TestEndToEnd_DriftDetection); FingerprintForLogin reads map first; stripMember drops map entry on removal. go build/vet + lib suites green. Fresh-eyes review: no Critical; 2 Important judged acceptable; Minors fixed.; review verdict: SHIP
