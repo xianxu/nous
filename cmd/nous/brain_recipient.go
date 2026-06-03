@@ -111,6 +111,28 @@ func runBrainRecipientList(w io.Writer, brainPath string) error {
 			fmt.Fprintln(w, "  Run `nous brain recipient add/remove` (or hand-edit) to reconcile.")
 		}
 	}
+
+	// Login-drift detection (nous#41 #10): flag recorded logins that are no
+	// longer current GitHub collaborators — a possible login rename (the
+	// person kept access under a new login) or a stale record. Best-effort:
+	// a gh outage or non-GitHub remote just skips the check.
+	if originURL := brain.ReadOriginURL(brainPath); originURL != "" && len(m.RecipientLogins) > 0 {
+		if owner, repo, oerr := brain.GitHubOwnerRepo(originURL); oerr == nil {
+			if collabs, cerr := gh.ListCollaborators(owner, repo); cerr == nil {
+				recorded := make([]string, 0, len(m.RecipientLogins))
+				for login := range m.RecipientLogins {
+					recorded = append(recorded, login)
+				}
+				if orphaned := brain.DetectLoginDrift(recorded, collabs); len(orphaned) > 0 {
+					fmt.Fprintln(w)
+					fmt.Fprintln(w, "WARNING: membership records reference logins that are not current collaborators:")
+					fmt.Fprintf(w, "  %s\n", strings.Join(orphaned, ", "))
+					fmt.Fprintln(w, "  A GitHub login rename leaves the old login in the keys branch / recipient_logins.")
+					fmt.Fprintln(w, "  If renamed: re-invite under the new login. If departed: `nous brain recipient remove`.")
+				}
+			}
+		}
+	}
 	return nil
 }
 

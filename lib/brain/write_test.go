@@ -46,6 +46,56 @@ func TestWriteManifest_RoundTripsThroughRead(t *testing.T) {
 	}
 }
 
+func TestManifest_RecipientLoginsRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	in := Manifest{
+		Name:       "family",
+		Recipients: []string{"FP_ALICE", "FP_BOB"},
+		RecipientLogins: map[string]string{
+			"ying": "1a2bf0", // lowercase input must round-trip uppercased
+			"xian": "9C8DA1",
+		},
+	}
+	if err := WriteManifest(root, in); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	out, err := Read(root)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(out.RecipientLogins) != 2 {
+		t.Fatalf("RecipientLogins len = %d, want 2 (%v)", len(out.RecipientLogins), out.RecipientLogins)
+	}
+	if out.RecipientLogins["ying"] != "1A2BF0" {
+		t.Errorf("RecipientLogins[ying] = %q, want 1A2BF0 (uppercased)", out.RecipientLogins["ying"])
+	}
+	if out.RecipientLogins["xian"] != "9C8DA1" {
+		t.Errorf("RecipientLogins[xian] = %q, want 9C8DA1", out.RecipientLogins["xian"])
+	}
+	// Inline, sorted by login (xian < ying).
+	body, err := readFile(filepath.Join(root, ".brain", "config.md"))
+	if err != nil {
+		t.Fatalf("readFile: %v", err)
+	}
+	if !strings.Contains(body, "recipient_logins: {xian: 9C8DA1, ying: 1A2BF0}") {
+		t.Errorf("manifest missing expected inline recipient_logins map:\n%s", body)
+	}
+}
+
+func TestManifest_EmptyRecipientLoginsOmitted(t *testing.T) {
+	root := t.TempDir()
+	if err := WriteManifest(root, Manifest{Name: "personal", Recipients: []string{"FP1"}}); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	body, err := readFile(filepath.Join(root, ".brain", "config.md"))
+	if err != nil {
+		t.Fatalf("readFile: %v", err)
+	}
+	if strings.Contains(body, "recipient_logins") {
+		t.Errorf("empty RecipientLogins must be omitted from the manifest:\n%s", body)
+	}
+}
+
 func TestWriteManifest_NoModeFieldEmitted(t *testing.T) {
 	root := t.TempDir()
 	if err := WriteManifest(root, Manifest{Name: "personal", Recipients: []string{"FP1"}}); err != nil {

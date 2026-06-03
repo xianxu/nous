@@ -170,6 +170,27 @@ func CollaboratorPermission(owner, repo, login string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// ListCollaborators returns the GitHub logins of every current collaborator
+// on owner/repo (any permission level, accepted only — pending invitations
+// are not collaborators yet). Used to detect membership-record drift: logins
+// in the brain's records (recipient_logins / keys branch) that are no longer
+// collaborators, a possible GitHub login rename (nous#41 #10).
+func ListCollaborators(owner, repo string) ([]string, error) {
+	out, err := run("api", "--paginate",
+		fmt.Sprintf("repos/%s/%s/collaborators", owner, repo),
+		"--jq", ".[].login")
+	if err != nil {
+		return nil, err
+	}
+	var logins []string
+	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			logins = append(logins, l)
+		}
+	}
+	return logins, nil
+}
+
 // AddCollaborator invites `login` to `owner/repo` with the given
 // permission ("push", "pull", "admin", "maintain", "triage"). The
 // invitee must accept (via web UI or `nous brain join`) for the
@@ -214,17 +235,22 @@ type InviteResult struct {
 // nothing. This deletes any existing repo invitation for `login` first,
 // then PUTs, so a re-invite always re-sends.
 //
-// The pending-invitation lookup is best-effort: if listing fails we
-// proceed to the PUT anyway (no worse than the old behavior).
+// The stale-invitation clearing is load-bearing, not best-effort: if we
+// can't confirm there's no existing invitation, the PUT may silently
+// no-op (sending no email), so list/delete failures are hard errors
+// rather than swallowed. nous#41 #11.
 func InviteCollaborator(owner, repo, login, permission string) (InviteResult, error) {
 	var res InviteResult
-	if invs, err := RepoPendingInvitations(owner, repo); err == nil {
-		for _, inv := range invs {
-			if strings.EqualFold(inv.Invitee.Login, login) {
-				if derr := DeleteRepoInvitation(owner, repo, inv.ID); derr == nil {
-					res.ReplacedStale = true
-				}
+	invs, err := RepoPendingInvitations(owner, repo)
+	if err != nil {
+		return res, fmt.Errorf("list pending invitations for %s/%s: %w (can't guarantee a stale invitation won't no-op the re-invite)", owner, repo, err)
+	}
+	for _, inv := range invs {
+		if strings.EqualFold(inv.Invitee.Login, login) {
+			if derr := DeleteRepoInvitation(owner, repo, inv.ID); derr != nil {
+				return res, fmt.Errorf("delete stale invitation %d for %s on %s/%s: %w (PUT would no-op against it)", inv.ID, login, owner, repo, derr)
 			}
+			res.ReplacedStale = true
 		}
 	}
 	if err := AddCollaborator(owner, repo, login, permission); err != nil {

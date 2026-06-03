@@ -194,13 +194,19 @@ func LoginForFingerprint(ctx context.Context, brainRoot, fp string) (string, err
 
 // FingerprintForLogin resolves a GitHub login to a fingerprint from the
 // brain's state — the reverse of LoginForFingerprint. Sources in order:
-// verified.yaml (login→fp) → keys branch (`<login>.asc` content) → peer
-// sidecar (github_user). Returns ("", nil) when no source knows the login.
+// the manifest's recipient_logins map (the authoritative admitted-fp
+// record auto-admit maintains, nous#41 #7/#8) → keys branch (`<login>.asc`
+// content — the canonical published link) → peer sidecar (github_user).
+// Returns ("", nil) when no source knows the login.
+//
+// verified.yaml is deliberately NOT consulted: it is an
+// offline-GPG-signature-verification record, not the identity mapping
+// (target invariant 3 + footnote ²). nous#41 #3.
 func FingerprintForLogin(ctx context.Context, brainRoot, login string) (string, error) {
-	if v, err := ReadVerified(brainRoot); err == nil {
-		for k, e := range v {
-			if strings.EqualFold(k, login) && e.Fingerprint != "" {
-				return strings.ToUpper(e.Fingerprint), nil
+	if m, err := Read(brainRoot); err == nil {
+		for k, fp := range m.RecipientLogins {
+			if strings.EqualFold(k, login) && fp != "" {
+				return strings.ToUpper(fp), nil
 			}
 		}
 	}

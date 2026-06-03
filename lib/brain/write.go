@@ -98,6 +98,18 @@ func renderFrontmatter(m Manifest) string {
 		fmt.Fprintf(&b, "name: %s\n", m.Name)
 	}
 	fmt.Fprintf(&b, "recipients: [%s]\n", strings.Join(recipients, ", "))
+	if len(m.RecipientLogins) > 0 {
+		logins := make([]string, 0, len(m.RecipientLogins))
+		for login := range m.RecipientLogins {
+			logins = append(logins, login)
+		}
+		sort.Strings(logins)
+		pairs := make([]string, 0, len(logins))
+		for _, login := range logins {
+			pairs = append(pairs, fmt.Sprintf("%s: %s", login, strings.ToUpper(m.RecipientLogins[login])))
+		}
+		fmt.Fprintf(&b, "recipient_logins: {%s}\n", strings.Join(pairs, ", "))
+	}
 	if m.SyncSubstrate != "" {
 		fmt.Fprintf(&b, "sync_substrate: %s\n", m.SyncSubstrate)
 	}

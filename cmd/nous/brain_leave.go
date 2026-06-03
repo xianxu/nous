@@ -126,11 +126,19 @@ func runBrainLeave(ctx context.Context, out io.Writer, brainPath string, deleteL
 		fmt.Fprintln(out, "cancelled.")
 		return nil
 	}
-	res, err := brainsync.LeaveBrain(brainPath, deleteLocal)
+	res, err := brainsync.LeaveBrain(ctx, brainPath, deleteLocal)
 	if err != nil {
 		return err
 	}
 	fmt.Fprintln(out, "✓ removed self from manifest and pushed")
+	if res.KeysBranchErr != nil {
+		fmt.Fprintf(out, "! keys-branch pubkey strip failed: %v\n", res.KeysBranchErr)
+		fmt.Fprintln(out, "  Your pubkey may still be on the keys branch — a peer's auto-admit")
+		fmt.Fprintln(out, "  could re-add you. Ask an operator to run `nous brain recipient remove`.")
+	}
+	if res.VerifiedErr != nil {
+		fmt.Fprintf(out, "! verified.yaml strip failed: %v\n", res.VerifiedErr)
+	}
 	if res.CollaboratorRevoked {
 		fmt.Fprintf(out, "✓ revoked GitHub collaborator status on %s/%s\n", res.Owner, res.Repo)
 	} else {
@@ -143,6 +151,5 @@ func runBrainLeave(ctx context.Context, out io.Writer, brainPath string, deleteL
 	} else {
 		fmt.Fprintf(out, "\nLocal clone retained at %s — rm -rf manually when ready.\n", brainPath)
 	}
-	_ = ctx
 	return nil
 }

@@ -286,18 +286,38 @@ func refSnapshot(repo string) (string, bool) {
 // change worth surfacing). Errors logged at Info too — auto-admit
 // is best-effort; a transient failure resolves on the next tick.
 func autoAdmitBrain(ctx context.Context, brainRoot string, verbose bool) {
-	added, drift, err := brain.AutoAdmitFromKeysBranch(ctx, brainRoot)
-	if err != nil {
-		// Soft-log. The most common cause is "keys branch doesn't
-		// exist on a pre-#23 brain"; logging every tick would spam.
-		if verbose {
-			log.Printf("brainsync: auto-admit %s: %v", brainRoot, err)
+	// The admit + push runs through pushMembershipChange so a push rejected by
+	// a concurrent operator doesn't leave a committed-but-unpushed membership
+	// drift (nous#41 #6): it resets to the remote and re-runs auto-admit on the
+	// merged state. AutoAdmitFromKeysBranch is itself the idempotent set-op.
+	var lastDrift []brain.DriftEvent
+	var doneMsg string
+	err := pushMembershipChange(brainRoot, func() (string, error) {
+		added, drift, err := brain.AutoAdmitFromKeysBranch(ctx, brainRoot)
+		if err != nil {
+			return "", err
 		}
-		return
-	}
-	// Drift goes out loudly regardless of verbose — substituted-key
-	// MITM is the one thing we don't want to be silent about.
-	for _, d := range drift {
+		lastDrift = drift
+		if len(added) == 0 {
+			return "", nil
+		}
+		parts := make([]string, 0, len(added))
+		for _, r := range added {
+			if r.SupersededFingerprint != "" {
+				// Key rotation: note the evicted old fp so the git log + daemon
+				// log show the one-active-fp-per-login transition (nous#41 #7/#8).
+				parts = append(parts, fmt.Sprintf("%s (%s, rotated from %s)",
+					r.Login, shortFpLast8(r.Fingerprint), shortFpLast8(r.SupersededFingerprint)))
+			} else {
+				parts = append(parts, fmt.Sprintf("%s (%s)", r.Login, shortFpLast8(r.Fingerprint)))
+			}
+		}
+		doneMsg = "auto-admit " + strings.Join(parts, ", ")
+		return doneMsg, nil
+	})
+	// Drift goes out loudly regardless of verbose — substituted-key MITM is
+	// the one thing we don't want to be silent about.
+	for _, d := range lastDrift {
 		log.Printf("brainsync: DRIFT on %s: login %q changed from %s to %s (originally verified by %s). "+
 			"Auto-admit paused for this login. Re-verify with `nous brain recipient verify` "+
 			"to accept the new key, or remove the entry from .brain/verified.yaml to clear.",
@@ -305,19 +325,18 @@ func autoAdmitBrain(ctx context.Context, brainRoot string, verbose bool) {
 			d.OldFingerprint[len(d.OldFingerprint)-8:], d.NewFingerprint[len(d.NewFingerprint)-8:],
 			d.VerifiedBy)
 	}
-	if len(added) == 0 {
+	if err != nil {
+		// Soft-log per verbose. The most common cause is "keys branch doesn't
+		// exist on a pre-#23 brain"; logging every tick would spam. (A
+		// retry-exhausted rejection is rarer but also resolves next tick.)
+		if verbose {
+			log.Printf("brainsync: auto-admit %s: %v", brainRoot, err)
+		}
 		return
 	}
-	parts := make([]string, 0, len(added))
-	for _, r := range added {
-		parts = append(parts, fmt.Sprintf("%s (%s)", r.Login, r.Fingerprint[len(r.Fingerprint)-8:]))
+	if doneMsg != "" {
+		log.Printf("brainsync: %s on %s", doneMsg, brainRoot)
 	}
-	msg := "auto-admit " + strings.Join(parts, ", ")
-	if err := AddCommitPush(brainRoot, msg); err != nil {
-		log.Printf("brainsync: auto-admit commit/push %s: %v", brainRoot, err)
-		return
-	}
-	log.Printf("brainsync: %s on %s", msg, brainRoot)
 }
 
 // syncBrainPubkeys runs peerkeys.ImportAllPubkeys for one brain and

@@ -1,6 +1,7 @@
 package brainsync
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -37,6 +38,15 @@ type LeaveResult struct {
 	CollaboratorRevoked   bool
 	CollaboratorRevokeErr error
 
+	// VerifiedErr / KeysBranchErr record best-effort failures of the
+	// store-strip that runs alongside the manifest re-key: clearing the
+	// leaver's own verified.yaml entry and keys-branch <login>.asc. A
+	// non-nil KeysBranchErr means the leaver's pubkey may still linger on
+	// the keys branch — a peer's auto-admit could resurrect them, so the
+	// caller should surface a manual-cleanup hint (nous#41 #12).
+	VerifiedErr   error
+	KeysBranchErr error
+
 	// LocalDeleted is true iff the optional --delete-local step ran
 	// and succeeded.
 	LocalDeleted bool
@@ -61,15 +71,18 @@ type LeaveResult struct {
 // of unique decrypted-by-me work; let the operator delete by hand.
 //
 // Mid-flow failure semantics:
-//   - manifest commit/push fails → returns error; LeaveResult zero-
-//     value. Nothing on the GitHub side has changed.
+//   - manifest rewrite or re-key push fails → returns error. Nothing on
+//     the GitHub side has changed; the keys-branch strip + collaborator
+//     revoke (which run only after a successful push) didn't fire. The
+//     returned LeaveResult carries the fields populated before the push
+//     (Owner/Repo/MyLogin/ShortFp) but ManifestPushed=false.
 //   - collaborator revoke fails → returns nil error, LeaveResult with
 //     ManifestPushed=true and CollaboratorRevoked=false +
 //     CollaboratorRevokeErr populated. The leave is semantically
 //     done; the GitHub-side cleanup is the operator's retry.
 //   - delete-local fails → returns the error (manifest already
 //     pushed, collaborator already revoked).
-func LeaveBrain(brainPath string, deleteLocal bool) (LeaveResult, error) {
+func LeaveBrain(ctx context.Context, brainPath string, deleteLocal bool) (LeaveResult, error) {
 	var res LeaveResult
 
 	m, err := brain.Read(brainPath)
@@ -111,22 +124,25 @@ func LeaveBrain(brainPath string, deleteLocal bool) (LeaveResult, error) {
 		return res, fmt.Errorf("refusing to leave: %w", err)
 	}
 
-	// Manifest update.
-	m.Recipients = brain.WithoutRecipient(m.Recipients, myFp)
-	if err := brain.RewriteFrontmatter(brainPath, m); err != nil {
-		return res, fmt.Errorf("rewrite frontmatter: %w", err)
-	}
+	// Full "clear every store" strip: manifest re-key (load-bearing) + the
+	// leaver's own verified.yaml entry + keys-branch <login>.asc + GitHub
+	// collaborator. Shared with RemoveRecipient via stripMember so leave
+	// can't drift back to manifest-only — a lingering keys-branch pubkey
+	// lets a peer's auto-admit resurrect the leaver (nous#41 #12). knownLogin
+	// = myLogin (authoritative; GitHub allows self-removal). The collaborator
+	// revoke runs LAST (after the push), preserving push access through the
+	// re-key + keys-branch strip.
 	commitMsg := fmt.Sprintf("leave: %s (%s) left the brain", myLogin, res.ShortFp)
-	if err := AddCommitPush(brainPath, commitMsg); err != nil {
-		return res, fmt.Errorf("commit + push manifest update: %w", err)
-	}
-	res.ManifestPushed = true
-
-	// Soft-fail revoke: continue + record the error.
-	if err := gh.RemoveCollaborator(owner, repo, myLogin); err != nil {
-		res.CollaboratorRevokeErr = err
-	} else {
-		res.CollaboratorRevoked = true
+	sr, serr := stripMember(ctx, brainPath, myFp, commitMsg, myLogin)
+	res.ManifestPushed = sr.Pushed
+	res.VerifiedErr = sr.VerifiedErr
+	res.KeysBranchErr = sr.KeysBranchErr
+	res.CollaboratorRevoked = sr.CollaboratorRevoked
+	res.CollaboratorRevokeErr = sr.CollaboratorErr
+	if serr != nil {
+		// serr is already prefixed by stripMember ("rewrite frontmatter: …"
+		// or "push: …"); wrap with the gesture, not a push-specific phrase.
+		return res, fmt.Errorf("leave: %w", serr)
 	}
 
 	if deleteLocal {

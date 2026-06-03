@@ -644,6 +644,135 @@ func TestEndToEnd_GitHubMediatedOnboarding(t *testing.T) {
 	// idempotence check, but worth pinning explicitly via a comment.)
 }
 
+// TestEndToEnd_RotationSupersede pins nous#41 #7/#8: when a recipient
+// rotates their GPG key (publishes a new pubkey under the SAME <login>.asc,
+// overwriting the old), auto-admit admits the new fingerprint AND evicts the
+// superseded old one from the manifest — the one-active-fp-per-login
+// invariant. It uses the durable recipient_logins map to know which old fp
+// belonged to that login; without it the stale fp would linger (after the
+// overwrite the old fp has no keys-branch file, but "no keys-branch file"
+// can't safely evict it — a sneakernet recipient has none either).
+func TestEndToEnd_RotationSupersede(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (-short)")
+	}
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skipf("integration test requires POSIX gpg; runtime is %s", runtime.GOOS)
+	}
+	mustHave(t, "gpg")
+	mustHave(t, "git")
+	mustHave(t, "git-remote-gcrypt")
+
+	remoteURL := initBareRepo(t)
+	operator := setupPeer(t, "operator", "operator@test.local")
+	ying := setupPeer(t, "ying", "ying@test.local")
+	yingRotated := setupPeer(t, "ying-rotated", "ying@test.local") // new keypair, same person/login
+
+	const yingLogin = "ying"
+
+	withPeer(t, operator, func() {
+		operator.brainPath = provisionBrain(t, operator, remoteURL, []string{operator.fp})
+	})
+
+	// ying publishes her FIRST key under <ying>.asc, operator auto-admits it.
+	withPeer(t, ying, func() {
+		if err := brain.PublishOwnPubkeyToRemote(context.Background(), remoteURL, yingLogin, ying.armorPub); err != nil {
+			t.Fatalf("ying publish v1: %v", err)
+		}
+	})
+	withPeer(t, operator, func() {
+		ctx := context.Background()
+		if _, _, err := brain.ImportAllPubkeys(ctx, operator.brainPath); err != nil {
+			t.Fatalf("import v1: %v", err)
+		}
+		added, drift, err := brain.AutoAdmitFromKeysBranch(ctx, operator.brainPath)
+		if err != nil {
+			t.Fatalf("auto-admit v1: %v", err)
+		}
+		if len(drift) != 0 {
+			t.Fatalf("unexpected drift v1: %+v", drift)
+		}
+		if len(added) != 1 || !strings.EqualFold(added[0].Fingerprint, ying.fp) || added[0].SupersededFingerprint != "" {
+			t.Fatalf("auto-admit v1: got %+v, want one admit of %s with no supersede", added, ying.fp)
+		}
+		m, err := brain.Read(operator.brainPath)
+		if err != nil {
+			t.Fatalf("read manifest v1: %v", err)
+		}
+		if !strings.EqualFold(m.RecipientLogins[yingLogin], ying.fp) {
+			t.Fatalf("recipient_logins[ying] = %q, want %s after first admit", m.RecipientLogins[yingLogin], ying.fp)
+		}
+		if err := brainsync.AddCommitPush(operator.brainPath, "auto-admit ying"); err != nil {
+			t.Fatalf("commit v1: %v", err)
+		}
+	})
+
+	// ROTATION: republish a NEW key under the SAME <ying>.asc (overwrite).
+	withPeer(t, yingRotated, func() {
+		if err := brain.PublishOwnPubkeyToRemote(context.Background(), remoteURL, yingLogin, yingRotated.armorPub); err != nil {
+			t.Fatalf("ying publish v2 (rotation): %v", err)
+		}
+	})
+
+	// Operator auto-admits the rotation: fp2 in, fp1 evicted, map updated.
+	withPeer(t, operator, func() {
+		ctx := context.Background()
+		if _, _, err := brain.ImportAllPubkeys(ctx, operator.brainPath); err != nil {
+			t.Fatalf("import v2: %v", err)
+		}
+		added, drift, err := brain.AutoAdmitFromKeysBranch(ctx, operator.brainPath)
+		if err != nil {
+			t.Fatalf("auto-admit v2: %v", err)
+		}
+		if len(drift) != 0 {
+			t.Fatalf("unexpected drift on rotation (no verified.yaml pin): %+v", drift)
+		}
+		if len(added) != 1 {
+			t.Fatalf("auto-admit v2: got %d admits, want 1: %+v", len(added), added)
+		}
+		if !strings.EqualFold(added[0].Fingerprint, yingRotated.fp) {
+			t.Errorf("rotation admitted fp = %q, want %s", added[0].Fingerprint, yingRotated.fp)
+		}
+		if !strings.EqualFold(added[0].SupersededFingerprint, ying.fp) {
+			t.Errorf("SupersededFingerprint = %q, want %s (the old fp)", added[0].SupersededFingerprint, ying.fp)
+		}
+		m, err := brain.Read(operator.brainPath)
+		if err != nil {
+			t.Fatalf("read manifest v2: %v", err)
+		}
+		recips := strings.ToUpper(strings.Join(m.Recipients, " "))
+		if !strings.Contains(recips, strings.ToUpper(yingRotated.fp)) {
+			t.Errorf("manifest missing rotated fp %s: %v", yingRotated.fp, m.Recipients)
+		}
+		if strings.Contains(recips, strings.ToUpper(ying.fp)) {
+			t.Errorf("manifest still has superseded fp %s (should be evicted): %v", ying.fp, m.Recipients)
+		}
+		if !strings.EqualFold(m.RecipientLogins[yingLogin], yingRotated.fp) {
+			t.Errorf("recipient_logins[ying] = %q, want %s after rotation", m.RecipientLogins[yingLogin], yingRotated.fp)
+		}
+		// Operator's own recipient is untouched by ying's rotation.
+		if !strings.Contains(recips, strings.ToUpper(operator.fp)) {
+			t.Errorf("operator fp %s wrongly removed by ying's rotation: %v", operator.fp, m.Recipients)
+		}
+	})
+
+	// Idempotence: re-running auto-admit after the rotation does NOT
+	// re-rotate (recipient_logins[ying] now equals the keys-branch fp, so
+	// the existing-and-not-rotated guard short-circuits).
+	withPeer(t, operator, func() {
+		added, drift, err := brain.AutoAdmitFromKeysBranch(context.Background(), operator.brainPath)
+		if err != nil {
+			t.Fatalf("auto-admit v3 (idempotence): %v", err)
+		}
+		if len(drift) != 0 {
+			t.Errorf("unexpected drift on idempotence re-run: %+v", drift)
+		}
+		if len(added) != 0 {
+			t.Errorf("idempotence: expected 0 admissions after rotation settled, got %d: %+v", len(added), added)
+		}
+	})
+}
+
 // TestEndToEnd_OperatorPubkeyMissingThenRepublish pins the recovery
 // path from today's manual repro (2026-05-19): a brain was created
 // without the operator's pubkey landing on the keys branch (either

@@ -116,6 +116,31 @@ func PullFF(repo string) error {
 	return err
 }
 
+// ResetToRemoteMain fetches origin and hard-resets the working tree to
+// origin/main — discarding any local commits + tracked-file changes. Used by
+// the membership push-retry (nous#41 #6) to drop a rejected commit and
+// re-apply the membership change on top of the concurrent operator's state.
+//
+// Untracked files survive (reset --hard leaves them in place). The membership
+// ops that use this assume the brain has no unrelated uncommitted *tracked*
+// work — AddCommitPush's `git add -A` would otherwise have bundled it into the
+// rejected commit, and the reset would roll it back to origin/main. That holds
+// for the deliberate recipient-add/remove/leave gestures and the daemon's
+// auto-admit (which runs against an otherwise-synced brain).
+// Assumes an established brain with an existing origin/main — membership ops
+// (remove/leave/auto-admit) only run after provisioning's initial push. On a
+// never-pushed brain `reset --hard origin/main` fails with "unknown revision";
+// that surfaces as an error and aborts the retry cleanly rather than looping.
+func ResetToRemoteMain(repo string) error {
+	if err := Fetch(repo); err != nil {
+		return fmt.Errorf("fetch: %w", err)
+	}
+	if _, err := RunGit(repo, "reset", "--hard", "origin/main"); err != nil {
+		return fmt.Errorf("reset --hard origin/main: %w", err)
+	}
+	return nil
+}
+
 // HasUnpushedCommits returns true if HEAD is ahead of origin/main.
 func HasUnpushedCommits(repo string) (bool, error) {
 	out, err := RunGit(repo, "rev-list", "--count", "origin/main..HEAD")

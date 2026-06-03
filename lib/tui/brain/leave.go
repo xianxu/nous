@@ -1,6 +1,7 @@
 package brain
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -78,7 +79,7 @@ func (m leaveModel) Update(msg tea.Msg) (leaveModel, tea.Cmd) {
 					// deleteLocal=false in the TUI v1 — keep that knob CLI-only
 					// until we've used the default behavior once and confirmed
 					// it's right.
-					res, err := brainsync.LeaveBrain(path, false)
+					res, err := brainsync.LeaveBrain(context.Background(), path, false)
 					return leaveWorkMsg{err: err, result: res}
 				}
 			case "esc", "n", "N", "ctrl+c":

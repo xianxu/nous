@@ -3,6 +3,7 @@ package brain
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/xianxu/nous/lib/brain/filestore"
@@ -16,6 +17,13 @@ type AdmittedRecipient struct {
 	Login       string // github login (filename stem, e.g., "yingtest42")
 	Fingerprint string // 40-hex uppercase, derived from the pubkey
 	UID         string // first GPG UID on the imported pubkey
+
+	// SupersededFingerprint is set (40-hex uppercase) when this admission
+	// is a key rotation: the login was previously admitted as this old
+	// fingerprint (recorded in the manifest's recipient_logins map), which
+	// auto-admit just evicted from Recipients in favor of Fingerprint
+	// (nous#41 #7/#8). Empty for a first-time admission.
+	SupersededFingerprint string
 }
 
 // DriftEvent describes a recipient whose keys-branch fingerprint has
@@ -81,6 +89,9 @@ func AutoAdmitFromKeysBranch(ctx context.Context, brainRoot string) ([]AdmittedR
 	}
 
 	existing := setOfUpper(m.Recipients)
+	if m.RecipientLogins == nil {
+		m.RecipientLogins = map[string]string{}
+	}
 	var added []AdmittedRecipient
 	var drift []DriftEvent
 
@@ -122,15 +133,41 @@ func AutoAdmitFromKeysBranch(ctx context.Context, brainRoot string) ([]AdmittedR
 			continue
 		}
 
-		if existing[fpUp] {
+		// Rotation supersede: this login was admitted before as a different
+		// fingerprint (recorded in recipient_logins). Evict the old fp from
+		// Recipients so the rotated-away key can't decrypt future pushes —
+		// the one-active-fp-per-login invariant (nous#41 #7/#8). The
+		// verified-drift gate above already refused the rotation if the
+		// operator had pinned the old fp in verified.yaml, so reaching here
+		// means the supersede is consent-consistent.
+		prevFp, hasPrev := m.RecipientLogins[stem]
+		rotated := hasPrev && !strings.EqualFold(prevFp, fpUp)
+
+		if existing[fpUp] && !rotated {
+			// Already a recipient and not a rotation — nothing to do. (A
+			// pre-map recipient with no recipient_logins entry is left as-is;
+			// backfilling here would be a manifest write the caller won't
+			// commit. It gains an entry the next time this login is admitted
+			// or rotated.)
 			continue
 		}
-		m.Recipients = append(m.Recipients, fpUp)
-		existing[fpUp] = true
+
+		var superseded string
+		if rotated {
+			m.Recipients = WithoutRecipient(m.Recipients, prevFp)
+			delete(existing, strings.ToUpper(prevFp))
+			superseded = strings.ToUpper(prevFp)
+		}
+		if !existing[fpUp] {
+			m.Recipients = append(m.Recipients, fpUp)
+			existing[fpUp] = true
+		}
+		m.RecipientLogins[stem] = fpUp
 		added = append(added, AdmittedRecipient{
-			Login:       stem,
-			Fingerprint: fpUp,
-			UID:         key.UID,
+			Login:                 stem,
+			Fingerprint:           fpUp,
+			UID:                   key.UID,
+			SupersededFingerprint: superseded,
 		})
 	}
 
@@ -141,6 +178,39 @@ func AutoAdmitFromKeysBranch(ctx context.Context, brainRoot string) ([]AdmittedR
 		return nil, drift, fmt.Errorf("auto-admit: rewrite manifest: %w", err)
 	}
 	return added, drift, nil
+}
+
+// DetectLoginDrift returns the GitHub logins this brain has membership records
+// for (recipient_logins keys, keys-branch `<login>.asc` stems — whatever the
+// caller collects into recordedLogins) that are NOT in the repo's CURRENT
+// collaborator list. Each such login is a possible GitHub login *rename* (the
+// person still has access under a new login, leaving the old login orphaned in
+// our records) or a stale record after a departure. Case-insensitive; the
+// result is de-duplicated and sorted.
+//
+// Pure — the caller supplies the gh-fetched collaborator list. Detection only;
+// auto-healing a rename (rewriting `<old>.asc` → `<new>.asc`, the verified.yaml
+// key, the recipient_logins key) is deferred until the dogfood shows it biting
+// (nous#41 #10).
+func DetectLoginDrift(recordedLogins, currentCollaborators []string) []string {
+	current := make(map[string]bool, len(currentCollaborators))
+	for _, c := range currentCollaborators {
+		if c = strings.TrimSpace(c); c != "" {
+			current[strings.ToLower(c)] = true
+		}
+	}
+	seen := make(map[string]bool)
+	var orphaned []string
+	for _, l := range recordedLogins {
+		ll := strings.ToLower(strings.TrimSpace(l))
+		if ll == "" || current[ll] || seen[ll] {
+			continue
+		}
+		seen[ll] = true
+		orphaned = append(orphaned, strings.TrimSpace(l))
+	}
+	sort.Strings(orphaned)
+	return orphaned
 }
 
 // looksLikeFingerprint reports whether s is a 40-character hex
