@@ -31,17 +31,19 @@ also becomes the primary login→fp resolution source (#3). Full plan:
 
 Code fixes:
 - [x] **#1** non-recipient removal didn't strip keys-branch pubkey — FIXED `f2cb9de`.
-- [ ] **#3** login↔fp resolution order: keys-branch first (canonical), then peer
-  sidecar; stop treating `verified.yaml` as a mapping source (it's
-  offline-sig-verification only). `FingerprintForLogin` + `RemoveRecipient`.
-- [ ] **#11** re-invite isn't bulletproof: `gh.InviteCollaborator` only deletes
+- [x] **#3** login↔fp resolution order: stop treating `verified.yaml` as a mapping
+  source (it's offline-sig-verification only). `FingerprintForLogin` +
+  `RemoveRecipient`. **M1** shipped keys-branch → peer sidecar; **M2**
+  re-prioritized to `recipient_logins` map (authoritative admitted-fp record) →
+  keys-branch → peer sidecar.
+- [x] **#11** re-invite isn't bulletproof: `gh.InviteCollaborator` only deletes
   the stale invite if listing succeeds and ignores delete failures, then PUTs →
   can still no-op (no email). Make list/delete failures hard errors.
-- [ ] **#12** `leave` ≠ full removal: `LeaveBrain` clears manifest + collaborator
+- [x] **#12** `leave` ≠ full removal: `LeaveBrain` clears manifest + collaborator
   but not verified.yaml or the keys-branch pubkey → the leaver's `<login>.asc`
   lingers and another operator's auto-admit can re-add them. Route through the
   same strip path.
-- [ ] **#7 + #8** GPG key rotation + one-login→one-fp: an overwritten
+- [x] **#7 + #8** GPG key rotation + one-login→one-fp: an overwritten
   `<login>.asc` (new fp) admits the new fp while the OLD fp stays a recipient →
   stale recipients; no invariant enforces one active fp per login. Needs a
   durable login→fp admit record so auto-admit can remove the superseded fp (the
@@ -72,7 +74,7 @@ Doc reconciliations (in the target):
 ## Plan
 
 - [x] M1 — drift-class code fixes: #3, #11, #12 (+ tests).
-- [ ] M2 — rotation / one-fp-per-login: #7/#8 (durable login→fp record + auto-admit
+- [x] M2 — rotation / one-fp-per-login: #7/#8 (durable login→fp record + auto-admit
   supersede). *(confirm the store fork first.)*
 - [ ] M3 — #6 push-rebase-retry, #10 login-rename handling.
 - [ ] M4 — target doc reconciliations #4/#5/#9.
@@ -80,6 +82,7 @@ Doc reconciliations (in the target):
 ## Log
 
 ### 2026-06-02
+- 2026-06-02: closed M2 — #41 follow-on under collaborator-state-machine target (not a project milestone). recipient_logins map round-trips (TestManifest_RecipientLoginsRoundTrip); TestEndToEnd_RotationSupersede (gpg) proves rotation evicts old fp + admits new + updates map + operator untouched + idempotent re-run; verified.yaml drift gate preserved (TestEndToEnd_DriftDetection); FingerprintForLogin reads map first; stripMember drops map entry on removal. go build/vet + lib suites green. Fresh-eyes review: no Critical; 2 Important judged acceptable; Minors fixed.; review verdict: SHIP
 - 2026-06-02: closed M1 (#3, #11, #12) — #41 is a follow-on under target collaborator-state-machine, not a shared-brain project milestone (project closed) — no project detail block. go build/vet + full suite green (unsandboxed for gpg); TestFingerprintForLogin_IgnoresVerifiedYaml pins #3; InviteCollaborator list/delete now hard-error (#11); LeaveBrain routes through the shared `stripMember` so leave clears every store (#12). The `stripMember` strip itself is e2e-proven via the `recipient remove` assertion in brain-vm-e2e.sh; the *leave wiring* is verified by construction (1-line call) + dogfood, because LeaveBrain is GitHub-coupled (refuses on the file:// e2e origin) so its full flow can't run GitHub-free. review verdict: unknown (no Critical; Important findings dispositioned below).
 - 2026-06-02: M1 milestone-review (sdlc judge) dispositions — (Imp#1 leave has no isolated test) → architectural: LeaveBrain is GitHub-coupled; strip proven via recipient-remove e2e + leave live-verification carried to the dogfood (issue done-when already designates GitHub-layer effects for the dogfood). (Imp#2 fp→login revoke-target prefers verified-hint over canonical keys-branch) → pre-existing nous#40 behavior, best-effort; **flagged for M3 #10** (login-rename is where source precedence gets decided). Minors fixed: leave.go error-prefix + stale mid-flow doc comment. Test-hermeticity nit on the #3 test acknowledged (unlikely-login guard).
 
