@@ -127,6 +127,10 @@ func PullFF(repo string) error {
 // rejected commit, and the reset would roll it back to origin/main. That holds
 // for the deliberate recipient-add/remove/leave gestures and the daemon's
 // auto-admit (which runs against an otherwise-synced brain).
+// Assumes an established brain with an existing origin/main — membership ops
+// (remove/leave/auto-admit) only run after provisioning's initial push. On a
+// never-pushed brain `reset --hard origin/main` fails with "unknown revision";
+// that surfaces as an error and aborts the retry cleanly rather than looping.
 func ResetToRemoteMain(repo string) error {
 	if err := Fetch(repo); err != nil {
 		return fmt.Errorf("fetch: %w", err)

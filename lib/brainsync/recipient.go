@@ -31,6 +31,20 @@ const membershipPushMaxAttempts = 5
 // must be safe to run repeatedly. Returning ("", nil) means the mutation is
 // already reflected (a concurrent push did the work) — treated as a no-op.
 func pushMembershipChange(brainPath string, apply func() (string, error)) error {
+	// Refuse if the brain has pre-existing uncommitted *tracked* changes. The
+	// retry's `reset --hard origin/main` (ResetToRemoteMain) discards local
+	// commits + tracked-file changes, and AddCommitPush's `git add -A` would
+	// have bundled those unrelated edits into the rejected commit — so a retry
+	// would silently roll them back. Starting from a clean tracked tree means
+	// only the membership change is ever staged, so a reset loses nothing the
+	// caller didn't author here (nous#41 #6). Untracked files are tolerated
+	// (reset --hard leaves them); brains legitimately carry untracked drafts.
+	if safe, err := SafeToFastForward(brainPath); err != nil {
+		return fmt.Errorf("check working tree before membership push: %w", err)
+	} else if !safe {
+		return fmt.Errorf("brain has uncommitted tracked changes — commit or discard them before a membership change (its re-key push can't safely bundle unrelated edits)")
+	}
+
 	var lastErr error
 	for attempt := 0; attempt < membershipPushMaxAttempts; attempt++ {
 		msg, err := apply()
