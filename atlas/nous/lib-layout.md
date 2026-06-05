@@ -28,6 +28,17 @@ lib/
                  who, stats). Both cmd/charon (legacy entry) and
                  cmd/nous (unified entry) import these — single source
                  of truth for the provider-facing CLI behavior.
+  gh/          — GitHub control-plane port (shim, ariadne#71/nous#42).
+                 `Client` interface (client.go) is the provider-neutral
+                 seam every consumer depends on; `real.go` is the only
+                 thing that execs `gh` (constructed `gh.New(Conf)`), and
+                 a stateful in-memory `fake.go` (`gh.NewFake(Conf)`) is
+                 the hermetic test stand-in. Constructor/struct DI: the
+                 Client is injected into all consumers (cmd/nous, lib/tui,
+                 lib/brain, lib/brainsync), not a package global. See
+                 `atlas/nous/e2e-integration-testing.md` for the grounding
+                 contract test. Pure helpers (`cloneURL`) + thin IO seam
+                 (`runImpl`) per ARCH-PURE.
   gmail/       — Gmail tool primitives (cmd/gmail consumer).
   identity/    — GPG keypair operations (M4a): List (own secret keys),
                  ListPublic (peers), Export (armor), Inspect (dry-run
