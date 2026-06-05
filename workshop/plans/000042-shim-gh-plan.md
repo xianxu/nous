@@ -115,6 +115,11 @@ type Conf struct {
 	// CloneURLBase is prepended to "<full_name>.git" when a repo view
 	// omits ssh_url (MinimalRepository). Default "git@github.com:".
 	CloneURLBase string
+	// Token, when non-empty, is passed to the gh exec as GH_TOKEN (via
+	// cmd.Env) so two realClients in one process can act as two users —
+	// needed only by the build-tagged conformance backend (M3). Empty =
+	// inherit ambient gh auth (production). The fake ignores it.
+	Token string
 }
 
 func (c Conf) cloneBase() string {
@@ -178,7 +183,7 @@ func (c *realClient) CloneURL(fullName, sshURL string) string {
 }
 ```
 
-- [ ] **Step 2: Convert each free function in `gh.go` into a `*realClient` method, body unchanged** (the `run(...)` exec helper stays package-private in `real.go`). E.g. `func AuthLogin()` → `func (c *realClient) AuthLogin()`. This is a mechanical move; **do not change any `gh api` argument** — that fidelity is what the M3 contract test certifies.
+- [ ] **Step 2: Convert each free function in `gh.go` into a `*realClient` method**, the only change being `run(...)` → `c.run(...)` (see Task 1.4 Step 1). E.g. `func AuthLogin()` → `func (c *realClient) AuthLogin()`. This is a mechanical move; **do not change any `gh api` argument** — that fidelity is what the M3 contract test certifies.
 - [ ] **Step 3:** `go build ./lib/gh/` — expect PASS (the package compiles; consumers still broken).
 - [ ] **Step 4: Commit** `#42 M1: gh: real adapter behind the port (logic unchanged)`.
 
@@ -189,15 +194,34 @@ func (c *realClient) CloneURL(fullName, sshURL string) string {
 
 > Bug 1 (the 404 on `/users/<login>` validation lookup, distinct from `/user`) lives *below* the seam — a library-level fake cannot see it (spec, Division of labor). Its permanent regression home is here: assert the exact endpoint strings the real adapter passes to `gh`, with `run` stubbed (no network).
 
-- [ ] **Step 1:** Make `run` injectable for tests only: in `real.go`, route exec through a package var `var runner = execRun` where `execRun` is today's `os/exec` body. Tests swap `runner` (with `t.Cleanup` to restore).
+- [ ] **Step 1:** Make exec injectable *and* token-aware. Today's free `run(args...)` becomes:
+
+```go
+// runImpl is the swappable exec seam (tests replace it). It takes conf
+// so per-client GH_TOKEN works (two conformance clients, two tokens, one
+// process). Production path: conf.Token == "" → inherit ambient gh auth.
+var runImpl = func(conf Conf, args ...string) ([]byte, error) {
+	cmd := exec.Command("gh", args...)
+	if conf.Token != "" {
+		cmd.Env = append(os.Environ(), "GH_TOKEN="+conf.Token)
+	}
+	out, err := cmd.Output()
+	// ...existing ExitError → stderr-wrapped error handling, unchanged...
+	return out, err
+}
+
+func (c *realClient) run(args ...string) ([]byte, error) { return runImpl(c.conf, args...) }
+```
+
+In Task 1.3 the moved method bodies call `c.run(...)` (the only delta from the original free-function bodies, which called `run(...)`). Tests swap `runImpl` with `t.Cleanup` to restore.
 - [ ] **Step 2: Write the failing test** capturing args:
 
 ```go
 func TestRealClient_UserExists_HitsUsersEndpoint(t *testing.T) {
 	var gotArgs []string
-	old := runner
-	runner = func(args ...string) ([]byte, error) { gotArgs = args; return nil, nil }
-	t.Cleanup(func() { runner = old })
+	old := runImpl
+	runImpl = func(_ Conf, args ...string) ([]byte, error) { gotArgs = args; return nil, nil }
+	t.Cleanup(func() { runImpl = old })
 
 	_ = New(Conf{}).UserExists("octocat")
 	// bug 1: must probe /users/<login> (public lookup), NOT /user.
@@ -209,9 +233,9 @@ func TestRealClient_UserExists_HitsUsersEndpoint(t *testing.T) {
 
 func TestRealClient_AuthLogin_HitsUserEndpoint(t *testing.T) {
 	var gotArgs []string
-	old := runner
-	runner = func(args ...string) ([]byte, error) { gotArgs = args; return []byte("x\n"), nil }
-	t.Cleanup(func() { runner = old })
+	old := runImpl
+	runImpl = func(_ Conf, args ...string) ([]byte, error) { gotArgs = args; return []byte("x\n"), nil }
+	t.Cleanup(func() { runImpl = old })
 	_, _ = New(Conf{}).AuthLogin()
 	want := []string{"api", "user", "--jq", ".login"} // /user, the bearer-token lookup
 	if !slices.Equal(gotArgs, want) {
@@ -480,7 +504,7 @@ Bugs 4 & 5 are brain-logic/data-plane bugs that already have regression homes us
 
 **Files (new control-plane tests):**
 - Create: `lib/gh/regression_test.go` for bug 2's clone-URL behavior and bug #41 #11's re-invite behavior (pure control-plane, fake-only — fastest home).
-- Modify: `lib/brain/integration_test.go` — extend/clone `TestEndToEnd_GitHubMediatedOnboarding` (line 485) to drive the invite→accept control plane through `gh.NewFake(...)` (it today exercises only the `file://` data plane), giving bugs 2 & 3 an end-to-end home. The fake's `CloneURL` (tmpdir base) is the seam that lets the existing `file://` setup and the fake's invitations meet.
+- Modify: `lib/brain/integration_test.go` — extend/clone `TestEndToEnd_GitHubMediatedOnboarding` (~line 516) to drive the invite→accept control plane through `gh.NewFake(...)` (it today exercises only the `file://` data plane), giving bugs 2 & 3 an end-to-end home. The fake's `CloneURL` (tmpdir base) is the seam that lets the existing `file://` setup and the fake's invitations meet.
 
 - [ ] **Bug 2 — MinimalRepository empty ssh_url (fake-level + e2e):** in `regression_test.go`, seed an invitation, assert `c.CloneURL(inv.Repository.FullName, inv.Repository.SSHURL)` (with `SSHURL==""`) yields the tmpdir `file://…/owner/repo.git` and a real `git clone` of it succeeds — the pre-fix path fabricated/passed an empty string and failed. In `integration_test.go`, assert the join flow clones via `c.CloneURL(...)` not a hardcoded URL.
 - [ ] **Bug 3 — accepted-but-unpublished recovery (e2e):** in the extended `integration_test.go` flow, accept the invite through the fake, force the gcrypt push to fail (data plane), assert the documented recovery path runs (not a stuck collaborator-but-unpublished state).
