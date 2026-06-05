@@ -160,10 +160,15 @@ control-plane fake meets the tmpdir data plane.
   and, build-tagged, against real `gh` (run once to certify, documented as the periodic step).
 - Regression coverage is pinned to the layer that can actually see each bug (each test fails if
   its fix is reverted):
-  - **Bugs 2–5 + nous#41 #11** — the nous#26/#41 flows run as **hermetic** tests through the
-    fake + tmpdir data plane (bug 2: MinimalRepository empty-`ssh_url` fallback; bug 3:
-    accepted-but-unpublished recovery; bugs 4–5: the discovery-filter / keys-branch-publish bugs
-    the fake makes reachable end-to-end).
+  - **Bugs 2, 3 + nous#41 #11 (control-plane)** — pinned by **new** hermetic tests through the
+    fake + tmpdir data plane (bug 2: MinimalRepository empty-`ssh_url` → `CloneURL` fallback;
+    bug 3: accepted-but-unpublished recovery; #41 #11: re-invite re-sends + hard-errors on a
+    list/delete failure).
+  - **Bugs 4, 5 (data-plane / brain-logic)** — already pinned by existing `file://` tests that
+    don't route through `gh` (`lib/brainsync/discovery_test.go` + `lib/brain/manifest_test.go`
+    for bug 4; `lib/brain/integration_test.go` `TestPublishOwnPubkeyToRemote_*` for bug 5). M4
+    **verifies these stay green**; it does not re-pin them through the fake (the fake doesn't
+    see them — they bypass `gh`). Claiming otherwise was the over-reach the spec review flagged.
   - **Bug 1 (wrong endpoint, below the seam)** — pinned by a `real`-adapter unit test asserting
     the exact endpoint string for the user-existence probe (`/users/<login>` vs `/user`),
     runnable without network, **plus** the dual-backend contract test's real-`gh` run. A
@@ -216,3 +221,13 @@ could claim all-5 because its fake was an HTTP bridge, which we rejected). Recon
 nous#41 #11 pinned by the fake+tmpdir flow; bug 1 pinned by a real-adapter endpoint test + the
 contract test. Also specified the clone-URL→tmpdir mechanism (injectable `Conf.CloneURLBase`,
 preserving the MinimalRepository peculiarity) and the bug-1 regression home.
+
+Planning: claimed (#42 working, est 14h), `sdlc start-plan` delivered ARCH-PURE/ARCH-DRY.
+Injection mechanism decided with operator: **constructor/struct DI** (a `gh.Client` threaded
+through all consumers), chosen as the pattern exemplar over a package-default bridge. Durable plan
+at `workshop/plans/000042-shim-gh-plan.md` (4 milestones M1–M4). Plan review (fresh-eyes) caught a
+second scope over-reach: bugs 4 & 5 are data-plane/brain-logic bugs already pinned by existing
+`file://` tests that bypass `gh` (`lib/brainsync/discovery_test.go` `TestFindSharedBrains_SingleRecipientWithGcryptRemote`;
+`lib/brain/integration_test.go` `TestEndToEnd_OperatorPubkeyMissingThenRepublish` /
+`TestPublishOwnPubkeyToRemote_OrphanCreate`) — so M4's *new* contribution is bugs 2/3/#41 #11
+through the fake; 4/5 are only verified-green, not re-pinned. Spec "Done when" corrected to match.
