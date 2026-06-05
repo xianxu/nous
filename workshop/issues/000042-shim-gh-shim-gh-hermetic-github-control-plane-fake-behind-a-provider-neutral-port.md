@@ -265,3 +265,25 @@ nous#26 bug 2) and `AddCollaborator` no-ops against an existing invitation
 (nous#41 #11). The fake's fidelity is now *verified*, not asserted. Re-run
 ~monthly or on suspected drift. (The previously-"pending operator tokens" step is
 now done.)
+
+### 2026-06-05 — widened conformance contract 4→10 invariants; re-certified; 2 findings
+
+Operator: 4 invariants is too thin vs the port surface. Widened `runContract` to
+cover the full used surface — added `AuthLogin`, `UserExists`, `CollaboratorPermission`,
+`UserRepos`, `DeclineInvitation`, `RemoveCollaborator` invariants (10 total; the
+6 previously ungrounded-against-real methods now grounded). Re-ran against real
+GitHub — and the grounding immediately paid off, catching two mismatches:
+
+1. **Real fidelity bug (fixed the fake):** `CollaboratorPermission` for a
+   non-collaborator on a visible repo — real GitHub returns 200 `{"permission":"none"}`,
+   NOT a 404. The fake returned `""` and had drifted. Fixed `fake.go` to return
+   `"none"` (consumers already treat it as no-access: operator.go not-admin/maintain,
+   recipient.go `\!= "none"`). This is the grounding step working exactly as designed.
+2. **Bad test assumption (fixed the test):** the `UserExists` "visible" check used
+   the *invitee* — but the real run showed `yingtest42` 404s on `/users/<login>`
+   despite being invitable: the live nous#25 visibility-lag the fake models a
+   shadow-flag for. Changed the invariant to assert visibility on the *owner*
+   (necessarily public).
+
+All 10 invariants now PASS on both the fake (CI) and real `gh`
+(xianxu/yingtest42/shim-conformance, 33.7s). Full gh/brain/brainsync suites green.

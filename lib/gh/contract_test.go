@@ -1,6 +1,7 @@
 package gh
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -121,7 +122,118 @@ func runContract(t *testing.T, newWorld func(t *testing.T) contractWorld) {
 			t.Fatalf("expected ReplacedStale=true when a pending invite existed")
 		}
 	})
+
+	t.Run("auth_login_resolves_each_identity", func(t *testing.T) {
+		w := newWorld(t)
+		// operator's token (the /user bearer lookup) resolves to the owner login.
+		if got, err := w.operator.AuthLogin(); err != nil || !strings.EqualFold(got, w.owner) {
+			t.Fatalf("operator AuthLogin = (%q, %v), want %q", got, err, w.owner)
+		}
+		if got, err := w.invitee.AuthLogin(); err != nil || !strings.EqualFold(got, w.inviteeLogin) {
+			t.Fatalf("invitee AuthLogin = (%q, %v), want %q", got, err, w.inviteeLogin)
+		}
+	})
+
+	t.Run("user_exists_distinguishes_visible_and_missing", func(t *testing.T) {
+		w := newWorld(t)
+		// Use the OWNER as the known-visible login (a repo owner is necessarily
+		// public). Do NOT use the invitee: a secondary/new account can be
+		// invitable yet NOT visible via /users/<login> (the nous#25 lag) — the
+		// 2026-06-05 grounding confirmed yingtest42 is exactly that case, which
+		// is the very asymmetry the fake's shadow-flag models.
+		if err := w.operator.UserExists(w.owner); err != nil {
+			t.Fatalf("UserExists(%q) = %v, want nil (owner is visible)", w.owner, err)
+		}
+		// a clearly-nonexistent login 404s → ErrUserNotVisible
+		if err := w.operator.UserExists(missingLogin); !errors.Is(err, ErrUserNotVisible) {
+			t.Fatalf("UserExists(%q) = %v, want ErrUserNotVisible", missingLogin, err)
+		}
+	})
+
+	t.Run("collaborator_permission_owner_admin_noncollaborator_none", func(t *testing.T) {
+		w := newWorld(t)
+		// the owner's own permission is implicitly "admin" (GitHub returns it)
+		if perm, err := w.operator.CollaboratorPermission(w.owner, w.repo, w.owner); err != nil || perm != "admin" {
+			t.Fatalf("owner CollaboratorPermission = (%q, %v), want (admin, nil)", perm, err)
+		}
+		// a non-collaborator on a visible repo → "none" (real GitHub returns 200
+		// {"permission":"none"}, grounded #42 — NOT "" / 404)
+		if perm, err := w.operator.CollaboratorPermission(w.owner, w.repo, w.inviteeLogin); err != nil || perm != "none" {
+			t.Fatalf("non-collaborator CollaboratorPermission = (%q, %v), want (none, nil)", perm, err)
+		}
+	})
+
+	t.Run("user_repos_lists_the_repo", func(t *testing.T) {
+		w := newWorld(t)
+		repos, err := w.operator.UserRepos()
+		if err != nil {
+			t.Fatalf("UserRepos: %v", err)
+		}
+		want := w.owner + "/" + w.repo
+		found := false
+		for _, r := range repos {
+			if strings.EqualFold(r.FullName, want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("UserRepos did not include %q (got %d repos)", want, len(repos))
+		}
+	})
+
+	t.Run("decline_removes_pending_invitation", func(t *testing.T) {
+		w := newWorld(t)
+		if err := w.operator.AddCollaborator(w.owner, w.repo, w.inviteeLogin, "push"); err != nil {
+			t.Fatalf("AddCollaborator: %v", err)
+		}
+		invs, err := w.invitee.PendingInvitations()
+		if err != nil {
+			t.Fatalf("PendingInvitations: %v", err)
+		}
+		inv, ok := findInvite(invs, w.owner, w.repo)
+		if !ok {
+			t.Fatalf("no pending invitation to decline")
+		}
+		if err := w.invitee.DeclineInvitation(inv.ID); err != nil {
+			t.Fatalf("DeclineInvitation: %v", err)
+		}
+		after, _ := w.invitee.PendingInvitations()
+		if _, still := findInvite(after, w.owner, w.repo); still {
+			t.Fatalf("invitation still pending after decline")
+		}
+	})
+
+	t.Run("remove_collaborator_revokes_access", func(t *testing.T) {
+		w := newWorld(t)
+		if err := w.operator.AddCollaborator(w.owner, w.repo, w.inviteeLogin, "push"); err != nil {
+			t.Fatalf("AddCollaborator: %v", err)
+		}
+		invs, _ := w.invitee.PendingInvitations()
+		inv, ok := findInvite(invs, w.owner, w.repo)
+		if !ok {
+			t.Fatalf("no pending invitation to accept")
+		}
+		if err := w.invitee.AcceptInvitation(inv.ID); err != nil {
+			t.Fatalf("AcceptInvitation: %v", err)
+		}
+		cols, _ := w.operator.ListCollaborators(w.owner, w.repo)
+		if !containsFold(cols, w.inviteeLogin) {
+			t.Fatalf("precondition: invitee should be a collaborator after accept")
+		}
+		if err := w.operator.RemoveCollaborator(w.owner, w.repo, w.inviteeLogin); err != nil {
+			t.Fatalf("RemoveCollaborator: %v", err)
+		}
+		cols, _ = w.operator.ListCollaborators(w.owner, w.repo)
+		if containsFold(cols, w.inviteeLogin) {
+			t.Fatalf("invitee still a collaborator after RemoveCollaborator; got %v", cols)
+		}
+	})
 }
+
+// missingLogin is a deliberately-nonexistent GitHub login for the UserExists
+// 404 path. Static (not random) so the real backend's lookup is reproducible.
+const missingLogin = "nous42-conformance-no-such-user-zzq"
 
 func findInvite(invs []Invitation, owner, repo string) (Invitation, bool) {
 	want := owner + "/" + repo

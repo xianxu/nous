@@ -153,9 +153,10 @@ func TestFake_CollaboratorPermission(t *testing.T) {
 	if perm, _ := c.CollaboratorPermission("op", "brain", "op"); perm != "admin" {
 		t.Fatalf("owner perm = %q, want admin", perm)
 	}
-	// non-collaborator → ""
-	if perm, _ := c.CollaboratorPermission("op", "brain", "ying"); perm != "" {
-		t.Fatalf("non-collaborator perm = %q, want empty", perm)
+	// non-collaborator on a visible repo → "none" (real GitHub returns 200
+	// {"permission":"none"}, grounded #42 — NOT "" / 404)
+	if perm, _ := c.CollaboratorPermission("op", "brain", "ying"); perm != "none" {
+		t.Fatalf("non-collaborator perm = %q, want none", perm)
 	}
 	// unknown repo → "" (no error, matches real 404 handling)
 	if perm, err := c.CollaboratorPermission("op", "ghost", "op"); perm != "" || err != nil {

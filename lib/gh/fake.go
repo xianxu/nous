@@ -209,9 +209,17 @@ func (c *Fake) CollaboratorPermission(owner, repo, login string) (string, error)
 	defer c.st.mu.Unlock()
 	r := c.st.repos[owner+"/"+repo]
 	if r == nil {
-		return "", nil // 404 → not a collaborator → "" (matches real)
+		return "", nil // repo not visible / 404 → "" (matches real adapter's 404 path)
 	}
-	return r.collaborators[login], nil // "" if not a collaborator
+	if perm, ok := r.collaborators[login]; ok {
+		return perm, nil
+	}
+	// Repo visible but login is NOT a collaborator: real GitHub's
+	// /collaborators/<login>/permission returns 200 {"permission":"none"},
+	// not a 404. Grounded against real gh 2026-06-05 (nous#42 conformance) —
+	// the fake previously returned "" here and drifted. Consumers treat "none"
+	// as no-access (operator.go: not admin/maintain; recipient.go: != "none").
+	return "none", nil
 }
 
 func (c *Fake) ListCollaborators(owner, repo string) ([]string, error) {
