@@ -254,3 +254,14 @@ second scope over-reach: bugs 4 & 5 are data-plane/brain-logic bugs already pinn
 `lib/brain/integration_test.go` `TestEndToEnd_OperatorPubkeyMissingThenRepublish` /
 `TestPublishOwnPubkeyToRemote_OrphanCreate`) — so M4's *new* contribution is bugs 2/3/#41 #11
 through the fake; 4/5 are only verified-green, not re-pinned. Spec "Done when" corrected to match.
+
+### 2026-06-05 — fake CERTIFIED against real GitHub
+
+Ran the dual-backend contract's real backend (`go test -tags conformance ./lib/gh/
+-run Contract_Real`) against real GitHub: operator `xianxu`, invitee `yingtest42`,
+repo `xianxu/shim-conformance`. **All 4 invariants PASS** (13.9s) — incl. the two
+peculiarities the fake encodes: invitations omit `ssh_url` (MinimalRepository,
+nous#26 bug 2) and `AddCollaborator` no-ops against an existing invitation
+(nous#41 #11). The fake's fidelity is now *verified*, not asserted. Re-run
+~monthly or on suspected drift. (The previously-"pending operator tokens" step is
+now done.)
