@@ -9,7 +9,7 @@ import (
 	"sync"
 )
 
-// fakeClient is the stateful in-memory Client adapter (shim'(gh)) — a
+// Fake is the stateful in-memory Client adapter (shim'(gh)) — a
 // model of GitHub's control plane to the fidelity nous actually
 // exercises. It is the hermetic test substrate: real-flow code paths run
 // through it unchanged. Per AGENTS.md §5 (spirit), it is a *stateful*
@@ -26,7 +26,7 @@ import (
 //     (AddCollaborator below) — the nous#41 #11 surface.
 //   - /users/<login> 404s for shadow-flagged users while the bearer
 //     token still works (UserExists / AuthLogin below).
-type fakeClient struct {
+type Fake struct {
 	st           *fakeState
 	currentToken string
 	base         string
@@ -99,20 +99,20 @@ func (s *fakeState) tokenFor(login string) string {
 // against CloneURL won't resolve.
 func NewFake(conf Conf) Client {
 	base := conf.cloneBase()
-	return &fakeClient{st: newFakeState(base), currentToken: "", base: base}
+	return &Fake{st: newFakeState(base), currentToken: "", base: base}
 }
 
 // CloneURL applies the fake's (file://-rooted) base to the
 // MinimalRepository fallback, so clones resolve to local bare repos.
-func (c *fakeClient) CloneURL(fullName, sshURL string) string {
+func (c *Fake) CloneURL(fullName, sshURL string) string {
 	return cloneURL(c.base, fullName, sshURL)
 }
 
 // ---- test seeding API (concrete type, off-interface) ----
-// Tests reach these via NewFake(...).(*fakeClient).
+// Tests reach these via NewFake(...).(*Fake).
 
 // AddUser registers a user and returns its bearer token.
-func (c *fakeClient) AddUser(login string) string {
+func (c *Fake) AddUser(login string) string {
 	c.st.mu.Lock()
 	defer c.st.mu.Unlock()
 	tok := "tok-" + login
@@ -122,11 +122,11 @@ func (c *fakeClient) AddUser(login string) string {
 }
 
 // SwitchUser points this client at login's bearer token.
-func (c *fakeClient) SwitchUser(login string) { c.currentToken = c.st.tokenFor(login) }
+func (c *Fake) SwitchUser(login string) { c.currentToken = c.st.tokenFor(login) }
 
 // ShadowUser toggles the shadow flag: /users/<login> 404s while the
 // token still authenticates (the brand-new-account asymmetry).
-func (c *fakeClient) ShadowUser(login string, shadowed bool) {
+func (c *Fake) ShadowUser(login string, shadowed bool) {
 	c.st.mu.Lock()
 	defer c.st.mu.Unlock()
 	if u := c.st.users[login]; u != nil {
@@ -137,7 +137,7 @@ func (c *fakeClient) ShadowUser(login string, shadowed bool) {
 // CreateRepo registers a repo (owner seeded as "admin" collaborator) and,
 // when the base is file://-rooted, git-inits a bare repo so the data
 // plane round-trips.
-func (c *fakeClient) CreateRepo(owner, name string, private bool) {
+func (c *Fake) CreateRepo(owner, name string, private bool) {
 	c.st.mu.Lock()
 	defer c.st.mu.Unlock()
 	r := &fakeRepo{
@@ -151,7 +151,7 @@ func (c *fakeClient) CreateRepo(owner, name string, private bool) {
 		_ = os.MkdirAll(filepath.Dir(r.barePath), 0o755)
 		// best-effort; a clone against a missing bare repo will fail
 		// visibly in the test that needs the data plane.
-		_ = exec.Command("git", "init", "--bare", r.barePath).Run()
+		_ = exec.Command("git", "init", "--bare", "-b", "main", r.barePath).Run()
 	}
 	c.st.repos[owner+"/"+name] = r
 }
@@ -159,23 +159,23 @@ func (c *fakeClient) CreateRepo(owner, name string, private bool) {
 // FailListInvitations injects a fault: RepoPendingInvitations errors.
 // Used to exercise the nous#41 #11 hard-error path (a list failure must
 // NOT be swallowed, or a re-invite silently no-ops).
-func (c *fakeClient) FailListInvitations(fail bool) {
+func (c *Fake) FailListInvitations(fail bool) {
 	c.st.mu.Lock()
 	defer c.st.mu.Unlock()
 	c.st.failListInvitations = fail
 }
 
-// AsUser returns a SECOND *fakeClient sharing the SAME fakeState but
+// AsUser returns a SECOND *Fake sharing the SAME fakeState but
 // bound to login's token. This is how a test (or the contract suite)
 // gets an operator client and an invitee client over one shared world —
 // the real backend's two-GH_TOKEN shape, in memory.
-func (c *fakeClient) AsUser(login string) *fakeClient {
-	return &fakeClient{st: c.st, currentToken: c.st.tokenFor(login), base: c.base}
+func (c *Fake) AsUser(login string) *Fake {
+	return &Fake{st: c.st, currentToken: c.st.tokenFor(login), base: c.base}
 }
 
 // ---- Client implementation ----
 
-func (c *fakeClient) currentLogin() (string, error) {
+func (c *Fake) currentLogin() (string, error) {
 	if c.currentToken == "" {
 		return "", fmt.Errorf("gh fake: no current token (call SwitchUser)")
 	}
@@ -186,7 +186,7 @@ func (c *fakeClient) currentLogin() (string, error) {
 	return login, nil
 }
 
-func (c *fakeClient) AuthLogin() (string, error) {
+func (c *Fake) AuthLogin() (string, error) {
 	c.st.mu.Lock()
 	defer c.st.mu.Unlock()
 	// Reads through the bearer token directly — works even for a
@@ -194,7 +194,7 @@ func (c *fakeClient) AuthLogin() (string, error) {
 	return c.currentLogin()
 }
 
-func (c *fakeClient) UserExists(login string) error {
+func (c *Fake) UserExists(login string) error {
 	c.st.mu.Lock()
 	defer c.st.mu.Unlock()
 	u := c.st.users[login]
@@ -204,7 +204,7 @@ func (c *fakeClient) UserExists(login string) error {
 	return nil
 }
 
-func (c *fakeClient) CollaboratorPermission(owner, repo, login string) (string, error) {
+func (c *Fake) CollaboratorPermission(owner, repo, login string) (string, error) {
 	c.st.mu.Lock()
 	defer c.st.mu.Unlock()
 	r := c.st.repos[owner+"/"+repo]
@@ -214,7 +214,7 @@ func (c *fakeClient) CollaboratorPermission(owner, repo, login string) (string, 
 	return r.collaborators[login], nil // "" if not a collaborator
 }
 
-func (c *fakeClient) ListCollaborators(owner, repo string) ([]string, error) {
+func (c *Fake) ListCollaborators(owner, repo string) ([]string, error) {
 	c.st.mu.Lock()
 	defer c.st.mu.Unlock()
 	r := c.st.repos[owner+"/"+repo]
@@ -232,7 +232,7 @@ func (c *fakeClient) ListCollaborators(owner, repo string) ([]string, error) {
 // → 204 no-op. An invitation already pending for login → no-op (no new
 // invite, no email) — the peculiarity nous#41 #11 works around. Else a
 // fresh pending invitation is created (the invitee must AcceptInvitation).
-func (c *fakeClient) AddCollaborator(owner, repo, login, permission string) error {
+func (c *Fake) AddCollaborator(owner, repo, login, permission string) error {
 	c.st.mu.Lock()
 	defer c.st.mu.Unlock()
 	r := c.st.repos[owner+"/"+repo]
@@ -264,11 +264,11 @@ func (c *fakeClient) AddCollaborator(owner, repo, login, permission string) erro
 // stale (pending) invitation for login first, then AddCollaborator, so a
 // re-invite actually re-sends instead of no-opping. A list/delete failure
 // is a hard error (nous#41 #11) — not swallowed.
-func (c *fakeClient) InviteCollaborator(owner, repo, login, permission string) (InviteResult, error) {
+func (c *Fake) InviteCollaborator(owner, repo, login, permission string) (InviteResult, error) {
 	return inviteCollaborator(c, owner, repo, login, permission)
 }
 
-func (c *fakeClient) RemoveCollaborator(owner, repo, login string) error {
+func (c *Fake) RemoveCollaborator(owner, repo, login string) error {
 	c.st.mu.Lock()
 	defer c.st.mu.Unlock()
 	if r := c.st.repos[owner+"/"+repo]; r != nil {
@@ -277,7 +277,7 @@ func (c *fakeClient) RemoveCollaborator(owner, repo, login string) error {
 	return nil
 }
 
-func (c *fakeClient) RepoPendingInvitations(owner, repo string) ([]RepoInvitation, error) {
+func (c *Fake) RepoPendingInvitations(owner, repo string) ([]RepoInvitation, error) {
 	c.st.mu.Lock()
 	defer c.st.mu.Unlock()
 	if c.st.failListInvitations {
@@ -295,7 +295,7 @@ func (c *fakeClient) RepoPendingInvitations(owner, repo string) ([]RepoInvitatio
 	return out, nil
 }
 
-func (c *fakeClient) DeleteRepoInvitation(owner, repo string, id int) error {
+func (c *Fake) DeleteRepoInvitation(owner, repo string, id int) error {
 	c.st.mu.Lock()
 	defer c.st.mu.Unlock()
 	for i, inv := range c.st.invitations {
@@ -310,7 +310,7 @@ func (c *fakeClient) DeleteRepoInvitation(owner, repo string, id int) error {
 // PendingInvitations returns the user-side invitations for the current
 // token, in the MinimalRepository shape: ssh_url is EMPTY (the nous#26
 // bug-2 surface — consumers must fall back to CloneURL).
-func (c *fakeClient) PendingInvitations() ([]Invitation, error) {
+func (c *Fake) PendingInvitations() ([]Invitation, error) {
 	c.st.mu.Lock()
 	defer c.st.mu.Unlock()
 	login, err := c.currentLogin()
@@ -341,7 +341,7 @@ func (c *fakeClient) PendingInvitations() ([]Invitation, error) {
 
 // AcceptInvitation transitions the invitation to accepted and makes the
 // invitee a collaborator at the invited permission.
-func (c *fakeClient) AcceptInvitation(id int) error {
+func (c *Fake) AcceptInvitation(id int) error {
 	c.st.mu.Lock()
 	defer c.st.mu.Unlock()
 	login, err := c.currentLogin()
@@ -364,7 +364,7 @@ func (c *fakeClient) AcceptInvitation(id int) error {
 	return fmt.Errorf("gh fake: no pending invitation %d for %s", id, login)
 }
 
-func (c *fakeClient) DeclineInvitation(id int) error {
+func (c *Fake) DeclineInvitation(id int) error {
 	c.st.mu.Lock()
 	defer c.st.mu.Unlock()
 	login, _ := c.currentLogin()
@@ -379,7 +379,7 @@ func (c *fakeClient) DeclineInvitation(id int) error {
 
 // UserRepos lists repos the current user owns or collaborates on, in the
 // MinimalRepository shape (empty ssh_url).
-func (c *fakeClient) UserRepos() ([]UserRepo, error) {
+func (c *Fake) UserRepos() ([]UserRepo, error) {
 	c.st.mu.Lock()
 	defer c.st.mu.Unlock()
 	login, err := c.currentLogin()

@@ -22,7 +22,7 @@ import (
 // failed. The fix is CloneURL fabricating from full_name. This drives the
 // real invitation shape (not a hand-built struct) and clones the result.
 func TestRegression_Nous26Bug2_MinimalRepositoryClone(t *testing.T) {
-	c := NewFake(Conf{CloneURLBase: "file://" + t.TempDir() + "/"}).(*fakeClient)
+	c := NewFake(Conf{CloneURLBase: "file://" + t.TempDir() + "/"}).(*Fake)
 	c.AddUser("op")
 	c.AddUser("ying")
 	c.SwitchUser("op")
@@ -58,7 +58,7 @@ func TestRegression_Nous26Bug2_MinimalRepositoryClone(t *testing.T) {
 // re-sends — AND a failure to list/clear stale invites must be a HARD error
 // (not swallowed), or the PUT silently no-ops.
 func TestRegression_Nous41_11_ReinviteResends(t *testing.T) {
-	c := NewFake(Conf{}).(*fakeClient)
+	c := NewFake(Conf{}).(*Fake)
 	c.AddUser("op")
 	c.AddUser("ying")
 	c.SwitchUser("op")

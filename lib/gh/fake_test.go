@@ -10,9 +10,9 @@ import (
 // newSeededFake returns an operator-bound fake with a file:// base under
 // t.TempDir() (so the data plane works and Go cleans it up), plus two
 // users and one repo owned by "op".
-func newSeededFake(t *testing.T) *fakeClient {
+func newSeededFake(t *testing.T) *Fake {
 	t.Helper()
-	c := NewFake(Conf{CloneURLBase: "file://" + t.TempDir() + "/"}).(*fakeClient)
+	c := NewFake(Conf{CloneURLBase: "file://" + t.TempDir() + "/"}).(*Fake)
 	c.AddUser("op")
 	c.AddUser("ying")
 	c.SwitchUser("op")
@@ -220,7 +220,7 @@ func TestFake_UserRepos(t *testing.T) {
 	}
 }
 
-func mustFirstInviteID(t *testing.T, c *fakeClient) int {
+func mustFirstInviteID(t *testing.T, c *Fake) int {
 	t.Helper()
 	invs, err := c.PendingInvitations()
 	if err != nil || len(invs) == 0 {

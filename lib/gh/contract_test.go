@@ -142,7 +142,7 @@ func containsFold(s []string, v string) bool {
 // in-memory analog of the real backend's two GH_TOKENs.
 func TestContract_Fake(t *testing.T) {
 	runContract(t, func(t *testing.T) contractWorld {
-		op := NewFake(Conf{CloneURLBase: "file://" + t.TempDir() + "/"}).(*fakeClient)
+		op := NewFake(Conf{CloneURLBase: "file://" + t.TempDir() + "/"}).(*Fake)
 		op.AddUser("op")
 		op.AddUser("ying")
 		op.SwitchUser("op")
