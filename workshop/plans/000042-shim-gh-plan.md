@@ -531,3 +531,10 @@ Bugs 4 & 5 are brain-logic/data-plane bugs that already have regression homes us
 - **ARCH-DRY:** `cloneURL` is the single clone-resolver (don't reintroduce per-type `CloneSSHURL`); the contract suite is one body run against two backends (don't fork fake/real assertions).
 - **Don't touch the `gh api` argument strings** in the real adapter during M1 — that fidelity is the contract test's to certify, and changing it silently breaks the bug-1 guard.
 - **Frequent commits**, one per TDD cycle. Each `Mx` row is its own `sdlc milestone-close` boundary.
+
+## Revisions
+
+### 2026-06-05 — M1 boundary review (FIX-THEN-SHIP, resolved)
+
+- **Plan bug fixed:** Task 1.5 Step 2b said to retrofit the broken TUI tests to `NewRoot(gh.NewFake(...))`, but `NewFake` is an M2 deliverable — chicken-and-egg. M1 correctly used `gh.New(gh.Conf{})` (real client, never invoked by the nav tests). **Action moved to M2:** once `fake.go` lands, retrofit `lib/tui/brain/root_test.go` + `detail_test.go` to inject the fake for true isolation, at the same `gh.New(gh.Conf{})` sites (the scattered composition root the review flagged).
+- **Important finding addressed in-window:** the bug-1 below-seam guard now covers **all 13** endpoints (`TestRealClient_Endpoints` table + `TestRealClient_InviteCollaborator_ClearsStaleThenAdds`), not just the original 2 — a future endpoint-string regression fails fast instead of waiting for the monthly M3 conformance run.

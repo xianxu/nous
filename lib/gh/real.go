@@ -99,6 +99,8 @@ func (c *realClient) CollaboratorPermission(owner, repo, login string) (string, 
 		fmt.Sprintf("repos/%s/%s/collaborators/%s/permission", owner, repo, login),
 		"--jq", ".permission")
 	if err != nil {
+		// 404 = not a collaborator. Most callers want to treat this as
+		// "no permission" rather than "error" — surface as empty string.
 		if strings.Contains(err.Error(), "HTTP 404") || strings.Contains(err.Error(), "Not Found") {
 			return "", nil
 		}
