@@ -153,6 +153,25 @@ When a new scenario reveals a real bug (as the first run did with
 3. The test then serves double duty: regression net + working
    spec of the expected behavior.
 
+## Control-plane simulation via the gh fake (nous#42)
+
+`TestSimulation_OnboardingLifecycle` (`lib/brain/onboarding_simulation_test.go`)
+is the worked example of the **shim(X)/shim'(X)** pattern: it drives the *whole*
+multi-actor onboarding lifecycle hermetically — invite → accept (GitHub **control
+plane**, via `gh.NewFake(gh.Conf{…}).(*gh.Fake)`) plus provision → publish →
+auto-admit → clone → decrypt+verify → leave (**data plane**, the `file://` gcrypt
+bare repo above). The two planes meet at **`gh.Fake.CloneURL`**: the fake's
+`CreateRepo` git-inits the bare repo (`-b main`) and its `CloneURL` for that repo
+*is* the gcrypt remote `provisionBrain` uses — the test asserts that equality.
+
+This is the value beyond regression-pinning: any future GitHub-touching feature
+can be developed and self-verified against a realistic, scriptable simulation —
+operator + joiner over one in-memory GitHub, no network, no VM — before a human
+touches the VM dogfood. `gh.Fake` is exported precisely so other packages drive
+their own simulations against it (cf. `httptest.Server`). The fake is grounded
+against real GitHub by `lib/gh/contract_real_test.go` (`-tags conformance`, run
+~monthly); below-the-seam endpoint correctness is pinned by `lib/gh/real_test.go`.
+
 ## Mechanisms covered today
 
 | Mechanism | Function | Test |
@@ -169,6 +188,9 @@ When a new scenario reveals a real bug (as the first run did with
 | gcrypt-participants sync after pull | `brain.SyncGcryptParticipantsFromManifest` | Triggered via `brainsync.PullBrain` |
 | File sync push | `brainsync.AddCommitPush` | Steps 7, 10 |
 | File sync pull | `brainsync.PullBrain` | Steps 8-9, 11 |
+| GitHub invite → accept (control plane) | `gh.Fake.InviteCollaborator` / `PendingInvitations` / `AcceptInvitation` | `TestSimulation_OnboardingLifecycle` |
+| GitHub collaborator leave (control plane) | `gh.Fake.RemoveCollaborator` | `TestSimulation_OnboardingLifecycle` |
+| Control↔data plane seam | `gh.Fake.CloneURL` == gcrypt remote | `TestSimulation_OnboardingLifecycle` |
 
 ## Mechanisms not yet covered
 
