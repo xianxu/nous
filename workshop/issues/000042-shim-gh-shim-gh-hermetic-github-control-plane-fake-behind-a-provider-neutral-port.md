@@ -1,11 +1,11 @@
 ---
 id: 000042
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-06-05
 updated: 2026-06-05
-estimate_hours:
+estimate_hours: 14
 ---
 
 # shim(gh)+shim'(gh): hermetic GitHub control-plane fake behind a provider-neutral port
