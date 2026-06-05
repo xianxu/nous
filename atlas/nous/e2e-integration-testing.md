@@ -83,14 +83,27 @@ works over `file://` URLs the same way it works over `ssh://` —
 the remote helper doesn't care about the transport, just that it
 can push/pull packs.
 
+The `file://` bare repo models GitHub's **data plane** (gcrypt
+push/pull, branches). The **control plane** (invitations,
+collaborators, the MinimalRepository shape, multi-user tokens) is
+modeled separately by the `lib/gh` fake (`gh.NewFake(Conf)`, shim'(gh),
+ariadne#71/nous#42): a stateful in-memory `gh.Client` the join/invite
+flows run through unchanged. Its `CloneURL` returns a `file://<tmpdir>/`
+URL pointing at exactly these bare repos — that's the seam where the
+control-plane fake meets this data plane. Grounded against real GitHub
+by a build-tagged contract test (see `lib/gh/contract_real_test.go`,
+run ~monthly).
+
 What this skips:
 - `gh repo create` flow (and the credential-scope question that
   bit the #12 dogfood)
 - SSH key distribution to GitHub
 - Network-level fault injection (rate limits, transient 5xx)
+- Below-the-seam gh endpoint correctness — covered by the fake's
+  contract test against real `gh`, not here.
 
-Those belong in the manual VM dogfood, not in the unit-test
-suite.
+Those belong in the manual VM dogfood (or the gh contract test),
+not in the data-plane unit-test suite.
 
 ### Cleanup
 
