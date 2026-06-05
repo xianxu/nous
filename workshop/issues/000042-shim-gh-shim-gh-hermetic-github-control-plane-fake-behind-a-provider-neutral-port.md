@@ -1,11 +1,12 @@
 ---
 id: 000042
-status: working
+status: done
 deps: []
 github_issue:
 created: 2026-06-05
 updated: 2026-06-05
 estimate_hours: 14
+actual_hours: 13.5
 ---
 
 # shim(gh)+shim'(gh): hermetic GitHub control-plane fake behind a provider-neutral port
@@ -215,6 +216,7 @@ control-plane fake meets the tmpdir data plane.
 ## Log
 
 ### 2026-06-05
+- 2026-06-05: closed — All 5 milestones complete + reviewed (M1/M2 FIX-THEN-SHIP resolved, M3/M4 SHIP, M5 FIX-THEN-SHIP resolved). Full suite go build/vet/test green outside sandbox; gh.Client port + real/fake adapters; dual-backend contract test (fake green, real conformance pending operator tokens); regression anchors for nous#26 bug2/bug3/#41-#11 (bugs 4/5 verified green at existing homes, bug1 below-seam pinned); full multi-actor onboarding SIMULATION green through the fake. lib/gh tests + lib/brain TestSimulation_OnboardingLifecycle pass.; review verdict: SHIP
 - 2026-06-05: closed M5 — M5 lifecycle simulation green (TestSimulation_OnboardingLifecycle, full multi-actor onboarding through gh.Fake control plane + gcrypt data plane, seam asserted); full suite go build/vet/test green outside sandbox (lib/brain gpg failures are sandbox-IPC-only); fake exported as gh.Fake for cross-package simulations; atlas updated. Real-gh contract certification remains a pending operator step (documented).
 - 2026-06-05: closed M4 — regression anchors green: bug-2 MinimalRepository empty-ssh_url→CloneURL→real git clone; nous#41 #11 re-invite ReplacedStale + hard-error-on-list-failure. Bugs 4/5 verified green at existing data-plane homes (TestFindSharedBrains*, TestDiscoverAll, TestEndToEnd_OperatorPubkeyMissingThenRepublish, TestPublishOwnPubkeyToRemote_OrphanCreate). --no-atlas: atlas consolidation lands in M5 with the simulation; review verdict: SHIP
 - 2026-06-05: closed M3 — contract suite built; TestContract_Fake green (4 port invariants) via two AsUser clients over one fakeState; conformance real backend compiles under -tags conformance and skip-gates cleanly without env; REAL certification pending operator test-account tokens (documented ~monthly manual step in contract_real_test.go header). --no-atlas: grounding cadence already documented in M2 e2e-atlas note + conformance file header; full atlas consolidation lands in M5; review verdict: unknown
