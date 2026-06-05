@@ -33,7 +33,7 @@
 - **`cloneURL(base, fullName, sshURL string) string`** — pure clone-URL resolver. Returns `sshURL` when present, else `base + fullName + ".git"`, else `""`. Replaces the two duplicated `CloneSSHURL()` method bodies (gh.go:85–93, 306–314).
   - **DRY rationale:** collapses the duplicated MinimalRepository fallback into one function; **this is the seam that resolves the data-plane-coupling hazard** (spec) — the real adapter passes `git@github.com:`, the fake passes the tmpdir base, so clones in tests resolve to local bare repos while preserving the "MinimalRepository omits ssh_url" peculiarity.
 - **`fakeState`** — pure in-memory model of GitHub's control plane: users (login→token, shadowed flag), repos (owner/name→{private, topics, collaborators login→perm, bareRepoPath}), user-side invitations (id→{invitee, repo-minimal, inviter, accepted}). All mutations are plain method calls on this struct; no IO except the one-time `git init --bare` when a repo is seeded.
-  - **Relationships:** 1 `fakeState` : N users : N repos : N invitations. `fakeClient` holds a `*fakeState` + a `currentToken`.
+  - **Relationships:** 1 `fakeState` : N users : N repos : N invitations. `Fake` holds a `*fakeState` + a `currentToken`.
   - **Future extensions:** add fields per peculiarity (rate-limit counters, eventual-consistency lag toggles) without touching the `Client` surface.
 
 ### Integration points (where pure meets the world)
@@ -42,14 +42,14 @@
 |------|----------|--------|-------|
 | `Client` (interface) | `lib/gh/client.go` | new | the port |
 | `realClient` | `lib/gh/real.go` | new (from `gh.go`) | `gh` CLI via `os/exec` |
-| `fakeClient` | `lib/gh/fake.go` | new | in-memory `fakeState` + tmpdir git |
+| `Fake` | `lib/gh/fake.go` | new | in-memory `fakeState` + tmpdir git |
 | consumer DI wiring | 13 files (see M1) | modified | — |
 
 - **`Client`** — the provider-neutral port. Exactly the surface the 13 consumers use (see method list in M1). Both adapters implement it; consumers depend only on it.
   - **Injected into:** every consumer that today calls `gh.*` free functions — threaded via constructors (`NewRoot(c)`, `newXModel(c, …)`) and function params (brain/brainsync layers). Keeps consumer logic unit-testable with the fake.
 - **`realClient`** — today's exec-`gh` logic, verbatim, behind the interface; the only thing that execs `gh`. Holds `Conf` (for `CloneURL`).
   - **Future extensions:** a `gitlabClient` adapter satisfying the same `Client`.
-- **`fakeClient`** — stateful in-memory adapter. Multi-user via `SwitchUser(login)`; seeding via `AddUser`/`CreateRepo`; encodes peculiarities (MinimalRepository empty `ssh_url`, `AddCollaborator` no-op against an existing invitation, `UserExists` shadow-flag 404). Clone URLs resolve to tmpdir bare repos.
+- **`Fake`** — stateful in-memory adapter. Multi-user via `SwitchUser(login)`; seeding via `AddUser`/`CreateRepo`; encodes peculiarities (MinimalRepository empty `ssh_url`, `AddCollaborator` no-op against an existing invitation, `UserExists` shadow-flag 404). Clone URLs resolve to tmpdir bare repos.
   - **Test surface:** this fake IS the deliverable's test substrate (per AGENTS.md §5 spirit — a stateful fake, not per-call stubs). Grounded by the M3 contract test against real `gh`.
 
 ---
@@ -58,9 +58,9 @@
 
 - [x] **M1 — Port + real adapter + DI migration** (the seam; bug-1 endpoint test)
 - [x] **M2 — Fake adapter** (state model, peculiarities, tmpdir data-plane coupling)
-- [ ] **M3 — Dual-backend contract test** (grounding; certify against real `gh`)
-- [ ] **M4 — Hermetic regression tests** (control-plane bugs 2/3/#41 #11; verify 4/5 green)
-- [ ] **M5 — Full-lifecycle simulation** (forward-looking payoff: multi-actor onboarding through
+- [x] **M3 — Dual-backend contract test** (grounding; certify against real `gh`)
+- [x] **M4 — Hermetic regression tests** (control-plane bugs 2/3/#41 #11; verify 4/5 green)
+- [x] **M5 — Full-lifecycle simulation** (forward-looking payoff: multi-actor onboarding through
       the fake) + atlas + `sdlc close`
 
 ---
@@ -273,13 +273,13 @@ func TestRealClient_AuthLogin_HitsUserEndpoint(t *testing.T) {
 
 **Outcome:** `gh.NewFake(Conf) Client` returns a stateful in-memory adapter with seeding + multi-user + the three peculiarities + tmpdir bare-repo coupling, covered by colocated unit tests. No consumer changes.
 
-### Task 2.1: `fakeState` + `fakeClient` skeleton
+### Task 2.1: `fakeState` + `Fake` skeleton
 
 **Files:**
 - Create: `lib/gh/fake.go`
 - Test: `lib/gh/fake_test.go`
 
-- [ ] **Step 1: Write `fakeState`, `fakeClient`, `NewFake`, and seeding helpers:**
+- [ ] **Step 1: Write `fakeState`, `Fake`, `NewFake`, and seeding helpers:**
 
 ```go
 type fakeUser struct {
@@ -313,7 +313,7 @@ type fakeState struct {
 	nextInvID   int
 }
 
-type fakeClient struct {
+type Fake struct {
 	st           *fakeState
 	currentToken string
 	base         string
@@ -326,27 +326,27 @@ type fakeClient struct {
 // caller's t.TempDir()). The dir under that base holds the bare repos.
 func NewFake(conf Conf) Client {
 	base := conf.cloneBase() // "file://<dir>/"; reuse the same base for git init --bare paths
-	return &fakeClient{st: newFakeState(base), currentToken: "", base: base}
+	return &Fake{st: newFakeState(base), currentToken: "", base: base}
 }
 
-func (c *fakeClient) CloneURL(fullName, sshURL string) string {
+func (c *Fake) CloneURL(fullName, sshURL string) string {
 	return cloneURL(c.base, fullName, sshURL) // peculiarity preserved: sshURL is "" for invitations
 }
 
 // --- test seeding API (concrete type, off-interface) ---
-// Tests construct via NewFake(...).(*fakeClient) to reach these.
-func (c *fakeClient) AddUser(login string) (token string)   // registers user; returns its bearer token
-func (c *fakeClient) SwitchUser(login string)               // sets currentToken to login's token
-func (c *fakeClient) ShadowUser(login string, shadowed bool)
-func (c *fakeClient) CreateRepo(owner, name string, private bool) // git init --bare at <base dir>/owner/name.git
-func (c *fakeClient) FailListInvitations(fail bool)              // fault injection: RepoPendingInvitations errors (nous#41 #11 hard-error path)
+// Tests construct via NewFake(...).(*Fake) to reach these.
+func (c *Fake) AddUser(login string) (token string)   // registers user; returns its bearer token
+func (c *Fake) SwitchUser(login string)               // sets currentToken to login's token
+func (c *Fake) ShadowUser(login string, shadowed bool)
+func (c *Fake) CreateRepo(owner, name string, private bool) // git init --bare at <base dir>/owner/name.git
+func (c *Fake) FailListInvitations(fail bool)              // fault injection: RepoPendingInvitations errors (nous#41 #11 hard-error path)
 
-// AsUser returns a SECOND *fakeClient sharing the SAME *fakeState but
+// AsUser returns a SECOND *Fake sharing the SAME *fakeState but
 // bound to login's token. This is how the contract test gets an
 // operator client and an invitee client over one shared world (the
 // real backend gets two clients with two GH_TOKENs — same shape).
-func (c *fakeClient) AsUser(login string) *fakeClient {
-	return &fakeClient{st: c.st, currentToken: c.st.tokenFor(login), base: c.base}
+func (c *Fake) AsUser(login string) *Fake {
+	return &Fake{st: c.st, currentToken: c.st.tokenFor(login), base: c.base}
 }
 ```
 
@@ -360,7 +360,7 @@ For each behavior: write the failing test, run it (FAIL), implement, run (PASS),
 
 ```go
 func TestFake_InviteAcceptFlow(t *testing.T) {
-	c := NewFake(Conf{}).(*fakeClient)
+	c := NewFake(Conf{}).(*Fake)
 	op := c.AddUser("op"); c.AddUser("ying")
 	c.SwitchUser("op")
 	c.CreateRepo("op", "brain", true)
@@ -462,7 +462,7 @@ func runContract(t *testing.T, newWorld func(t *testing.T) contractWorld) {
 ```go
 func TestContract_Fake(t *testing.T) {
 	runContract(t, func(t *testing.T) contractWorld {
-		op := NewFake(Conf{CloneURLBase: "file://" + t.TempDir() + "/"}).(*fakeClient)
+		op := NewFake(Conf{CloneURLBase: "file://" + t.TempDir() + "/"}).(*Fake)
 		op.AddUser("op"); op.AddUser("ying")
 		op.SwitchUser("op")
 		op.CreateRepo("op", "brain", true)
@@ -508,7 +508,7 @@ Bugs 4 & 5 are brain-logic/data-plane bugs that already have regression homes us
 - Create: `lib/gh/regression_test.go` for bug 2's clone-URL behavior and bug #41 #11's re-invite behavior (pure control-plane, fake-only — fastest home). (Bug 3's end-to-end recovery lands in the M5 simulation, which drives the real join including the push.)
 
 - [ ] **Bug 2 — MinimalRepository empty ssh_url (fake-level):** in `regression_test.go`, seed an invitation, assert `c.CloneURL(inv.Repository.FullName, inv.Repository.SSHURL)` (with `SSHURL==""`) yields the tmpdir `file://…/owner/repo.git` and a real `git clone` of it succeeds — the pre-fix path fabricated/passed an empty string and failed. (Note: `TestFake_CloneURL_ResolvesToTmpdirBareRepo` from M2 already covers the clone-resolves direction; this adds the *invitation-shaped* assertion — empty `ssh_url` from `PendingInvitations` → non-empty `CloneURL`.)
-- [ ] **nous#41 #11 — re-invite re-sends (fake-level):** in `regression_test.go`, with a pending invite present, `InviteCollaborator` deletes-then-readds (`ReplacedStale==true`); and assert that when the underlying list fails, `InviteCollaborator` returns a hard error (not swallowed) via `fakeClient.FailListInvitations(true)`. (Note: M2's `TestFake_InviteCollaborator_*` already cover both; in M4 re-frame/cross-reference them as the explicit nous#41 #11 regression rather than duplicating.)
+- [ ] **nous#41 #11 — re-invite re-sends (fake-level):** in `regression_test.go`, with a pending invite present, `InviteCollaborator` deletes-then-readds (`ReplacedStale==true`); and assert that when the underlying list fails, `InviteCollaborator` returns a hard error (not swallowed) via `Fake.FailListInvitations(true)`. (Note: M2's `TestFake_InviteCollaborator_*` already cover both; in M4 re-frame/cross-reference them as the explicit nous#41 #11 regression rather than duplicating.)
 - [ ] **Verify bugs 4 & 5 still green** (`-run` is global, so invoke per-package with exact names):
   - bug 4: `go test ./lib/brainsync/ -run 'TestFindSharedBrains' -v` (pinpoint: `TestFindSharedBrains_SingleRecipientWithGcryptRemote`) **and** `go test ./lib/brain/ -run 'TestDiscoverAll' -v`
   - bug 5: `go test ./lib/brain/ -run 'TestEndToEnd_OperatorPubkeyMissingThenRepublish|TestPublishOwnPubkeyToRemote_OrphanCreate' -v`
@@ -563,6 +563,18 @@ Bugs 4 & 5 are brain-logic/data-plane bugs that already have regression homes us
 
 - **Plan bug fixed:** Task 1.5 Step 2b said to retrofit the broken TUI tests to `NewRoot(gh.NewFake(...))`, but `NewFake` is an M2 deliverable — chicken-and-egg. M1 correctly used `gh.New(gh.Conf{})` (real client, never invoked by the nav tests). **Action moved to M2:** once `fake.go` lands, retrofit `lib/tui/brain/root_test.go` + `detail_test.go` to inject the fake for true isolation, at the same `gh.New(gh.Conf{})` sites (the scattered composition root the review flagged).
 - **Important finding addressed in-window:** the bug-1 below-seam guard now covers **all 13** endpoints (`TestRealClient_Endpoints` table + `TestRealClient_InviteCollaborator_ClearsStaleThenAdds`), not just the original 2 — a future endpoint-string regression fails fast instead of waiting for the monthly M3 conformance run.
+
+### 2026-06-05 — M5: `fakeClient` exported as `Fake`
+
+The in-memory adapter type `fakeClient` was renamed and exported as `Fake` so other
+packages (`lib/brain`) can drive simulations against its off-interface seeding API
+(`AddUser`/`CreateRepo`/`AsUser`/`ShadowUser`/`FailListInvitations`), cf.
+`httptest.Server`. Reason: `TestSimulation_OnboardingLifecycle` lives in
+`lib/brain_test`, a separate package, and an unexported type's methods are
+unreachable there. All Core-concepts rows + M2 code samples above now read `Fake`.
+Note: exporting makes those seeding signatures a cross-package API surface (future
+changes are breaking, not internal test churn). `CreateRepo` also gained `-b main`
+for gcrypt parity with `initBareRepo`.
 
 ### 2026-06-05 — M2 boundary review (FIX-THEN-SHIP, resolved)
 
