@@ -118,7 +118,7 @@ func runBrainRecipientList(w io.Writer, brainPath string) error {
 	// a gh outage or non-GitHub remote just skips the check.
 	if originURL := brain.ReadOriginURL(brainPath); originURL != "" && len(m.RecipientLogins) > 0 {
 		if owner, repo, oerr := brain.GitHubOwnerRepo(originURL); oerr == nil {
-			if collabs, cerr := gh.ListCollaborators(owner, repo); cerr == nil {
+			if collabs, cerr := gh.New(gh.Conf{}).ListCollaborators(owner, repo); cerr == nil {
 				recorded := make([]string, 0, len(m.RecipientLogins))
 				for login := range m.RecipientLogins {
 					recorded = append(recorded, login)
@@ -389,6 +389,7 @@ TTY-only (or --force for scripted use).`,
 			brainPath := args[0]
 			selector := args[1]
 			out := cmd.OutOrStdout()
+			c := gh.New(gh.Conf{})
 
 			// Resolve the selector to a manifest recipient — directly (fp /
 			// last-8) or via a GitHub login (nous#40). If it doesn't resolve to
@@ -411,7 +412,7 @@ TTY-only (or --force for scripted use).`,
 			if match == "" {
 				// fp-shaped selector with an unpushed prior removal → retry.
 				if looksHexFingerprint(selector) {
-					if rr, _ := brainsync.RemoveRecipient(cmd.Context(), brainPath, selector, force); rr != nil && rr.RetriedPush {
+					if rr, _ := brainsync.RemoveRecipient(cmd.Context(), c, brainPath, selector, force); rr != nil && rr.RetriedPush {
 						fmt.Fprintln(out, "Not a recipient locally (already removed?). Retried the pending push.")
 						return nil
 					}
@@ -425,7 +426,7 @@ TTY-only (or --force for scripted use).`,
 						return err
 					}
 				}
-				pr, err := brainsync.RemovePerson(cmd.Context(), brainPath, selector, force)
+				pr, err := brainsync.RemovePerson(cmd.Context(), c, brainPath, selector, force)
 				if err != nil {
 					return err
 				}
@@ -482,7 +483,7 @@ TTY-only (or --force for scripted use).`,
 			// Apply via the unified per-brain removal (manifest + verified.yaml
 			// + keys branch + collaborator + any pending invitation). CLI + TUI
 			// share this (nous#38/#40).
-			pr, err := brainsync.RemovePerson(cmd.Context(), brainPath, match, force)
+			pr, err := brainsync.RemovePerson(cmd.Context(), c, brainPath, match, force)
 			if err != nil {
 				return err
 			}
@@ -643,7 +644,7 @@ Args:
 			// <login>.asc on the keys branch (nous#26 path). Legacy
 			// <FP>.asc admissions get a soft notice and the verify
 			// ceremony's match is one-shot for them.
-			if err := persistVerify(cmd.Context(), brainPath, key.Fingerprint, out); err != nil {
+			if err := persistVerify(cmd.Context(), gh.New(gh.Conf{}), brainPath, key.Fingerprint, out); err != nil {
 				return fmt.Errorf("persist verify: %w", err)
 			}
 			return nil
@@ -656,7 +657,7 @@ Args:
 // brainsync push wrapper. Best-effort on the github-login lookup:
 // when no <login>.asc on keys branch matches the fingerprint, the
 // match is one-shot (legacy admission path).
-func persistVerify(ctx context.Context, brainPath, fp string, out io.Writer) error {
+func persistVerify(ctx context.Context, c gh.Client, brainPath, fp string, out io.Writer) error {
 	login, err := brain.LoginForFingerprint(ctx, brainPath, fp)
 	if err != nil {
 		// Filestore failures are infrastructure issues; surface them
@@ -669,7 +670,7 @@ func persistVerify(ctx context.Context, brainPath, fp string, out io.Writer) err
 		fmt.Fprintln(out, "   path; persistent verify requires the nous#26 <login>.asc convention.)")
 		return nil
 	}
-	verifier, err := gh.AuthLogin()
+	verifier, err := c.AuthLogin()
 	if err != nil {
 		// gh-auth outage shouldn't block the ceremony output, but the
 		// operator should know we couldn't record their identity.

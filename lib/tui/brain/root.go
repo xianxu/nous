@@ -49,6 +49,8 @@ const (
 type cancelNewBrainMsg struct{}
 
 type rootModel struct {
+	gh gh.Client
+
 	current      screen
 	list         listModel
 	detail       detailModel
@@ -81,11 +83,15 @@ type rootModel struct {
 	justAccepted []gh.UserRepo
 }
 
-// NewRoot returns the top-level bubbletea model for `nous brain`.
-func NewRoot() tea.Model {
+// NewRoot returns the top-level bubbletea model for `nous brain`. The
+// injected gh.Client is threaded into every sub-model that touches the
+// GitHub control plane (list operator-markers, detail status, the
+// invite/accept/remove/leave flows).
+func NewRoot(c gh.Client) tea.Model {
 	return rootModel{
+		gh:      c,
 		current: screenList,
-		list:    newListModel(nil, nil),
+		list:    newListModel(c, nil, nil),
 	}
 }
 
@@ -100,7 +106,7 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case drillInMsg:
 		m.current = screenDetail
-		m.detail = newDetailModel(msg.path)
+		m.detail = newDetailModel(m.gh, msg.path)
 		return m, m.detail.Init()
 	case openConflictPreviewMsg:
 		m.current = screenConflict
@@ -112,11 +118,11 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.recipAdd.Init()
 	case launchRecipientRemoveMsg:
 		m.current = screenRecipientRemove
-		m.recipRemove = newRecipientRemoveModel(msg.brainPath, msg.recipients)
+		m.recipRemove = newRecipientRemoveModel(m.gh, msg.brainPath, msg.recipients)
 		return m, m.recipRemove.Init()
 	case launchInviteCollabMsg:
 		m.current = screenInviteCollab
-		m.inviteCollab = newInviteCollabModel(msg.brainPath)
+		m.inviteCollab = newInviteCollabModel(m.gh, msg.brainPath)
 		return m, m.inviteCollab.Init()
 	case inviteCollabDoneMsg, cancelInviteCollabMsg:
 		// Return to the detail view, refreshing Status so the new
@@ -124,7 +130,7 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// shows up. The detail view's own banner shows the result.
 		path := m.detail.path
 		m.current = screenDetail
-		m.detail = newDetailModel(path)
+		m.detail = newDetailModel(m.gh, path)
 		if rm, ok := msg.(inviteCollabDoneMsg); ok {
 			if rm.err == nil {
 				m.detail.banner = "✓ invited " + rm.login + " — auto-admit on their join"
@@ -135,7 +141,7 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.detail.Init()
 	case launchAcceptInviteMsg:
 		m.current = screenAcceptInvite
-		m.acceptInvite = newAcceptInviteModel(msg.invitation)
+		m.acceptInvite = newAcceptInviteModel(m.gh, msg.invitation)
 		return m, m.acceptInvite.Init()
 	case launchPublishMsg:
 		// Publish runs as a foreground subprocess (suspends the TUI):
@@ -159,7 +165,7 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// new rung (private) and the `a invite` action.
 		m.listCache = nil
 		m.current = screenDetail
-		m.detail = newDetailModel(msg.path)
+		m.detail = newDetailModel(m.gh, msg.path)
 		if msg.err == nil {
 			m.detail.banner = "✓ published — now private (GitHub-backed)"
 		} else {
@@ -168,7 +174,7 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.detail.Init()
 	case launchLeaveMsg:
 		m.current = screenLeave
-		m.leave = newLeaveModel(msg.brainPath)
+		m.leave = newLeaveModel(m.gh, msg.brainPath)
 		return m, m.leave.Init()
 	case leaveDoneMsg:
 		// Manifest changed (we're no longer a collaborator) + GitHub
@@ -179,7 +185,7 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// cancel/error, the list re-renders unchanged.
 		m.listCache = nil
 		m.current = screenList
-		m.list = newListModel(nil, m.justAccepted)
+		m.list = newListModel(m.gh, nil, m.justAccepted)
 		return m, m.list.Init()
 	case acceptInviteDoneMsg:
 		// Whether success or failure/cancel, return to the list and
@@ -203,7 +209,7 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.listCache = nil
 		m.current = screenList
-		m.list = newListModel(nil, m.justAccepted)
+		m.list = newListModel(m.gh, nil, m.justAccepted)
 		return m, m.list.Init()
 	case cloneSubprocessDoneMsg:
 		// Same shape as joinSubprocessDoneMsg. On success the
@@ -221,7 +227,7 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// has a local manifest.
 		m.listCache = nil
 		m.current = screenList
-		m.list = newListModel(nil, m.justAccepted)
+		m.list = newListModel(m.gh, nil, m.justAccepted)
 		return m, m.list.Init()
 	case launchNewBrainMsg:
 		m.current = screenNewBrain
@@ -241,14 +247,14 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// new brain's origin URL).
 		m.listCache = nil
 		m.current = screenList
-		m.list = newListModel(nil, m.justAccepted)
+		m.list = newListModel(m.gh, nil, m.justAccepted)
 		return m, m.list.Init()
 	case recipientAddedMsg, recipientRemovedMsg, cancelRecipientFlowMsg:
 		// Recipient flow ended (success/failure/cancel). Return to the
 		// detail view; refresh Status so post-action state shows.
 		path := m.detail.path
 		m.current = screenDetail
-		m.detail = newDetailModel(path)
+		m.detail = newDetailModel(m.gh, path)
 		if rm, ok := msg.(recipientAddedMsg); ok && rm.err == nil {
 			m.detail.banner = "✓ admitted " + rm.last8
 		}
@@ -268,7 +274,7 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// always re-discovered, so a newly-created brain still
 		// shows. This is the win that makes ESC instant.
 		m.current = screenList
-		m.list = newListModel(m.listCache, m.justAccepted)
+		m.list = newListModel(m.gh, m.listCache, m.justAccepted)
 		return m, m.list.Init()
 	case listLoadedMsg:
 		// Splice justAccepted into the freshly-loaded repos before

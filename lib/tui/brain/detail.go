@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	libbrain "github.com/xianxu/nous/lib/brain"
+	"github.com/xianxu/nous/lib/gh"
 )
 
 // statusLoadedMsg carries an async LoadStatus result back to the detail
@@ -48,6 +49,8 @@ type launchRecipientRemoveMsg struct {
 // detailModel renders the drill-in for one brain. It owns the loading
 // state machine (loading → ready / failed) and the action keystrokes.
 type detailModel struct {
+	gh gh.Client
+
 	path    string
 	loading bool
 	status  libbrain.Status
@@ -59,13 +62,15 @@ type detailModel struct {
 	banner string
 }
 
-func newDetailModel(path string) detailModel {
-	return detailModel{path: path, loading: true}
+func newDetailModel(c gh.Client, path string) detailModel {
+	return detailModel{gh: c, path: path, loading: true}
 }
 
 func (m detailModel) Init() tea.Cmd {
+	c := m.gh
+	path := m.path
 	return func() tea.Msg {
-		s, err := libbrain.LoadStatus(m.path)
+		s, err := libbrain.LoadStatus(c, path)
 		return statusLoadedMsg{status: s, err: err}
 	}
 }

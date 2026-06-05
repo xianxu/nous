@@ -12,6 +12,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/xianxu/nous/lib/brain"
+	"github.com/xianxu/nous/lib/gh"
 	"github.com/xianxu/nous/lib/identity"
 	"github.com/xianxu/nous/lib/workspace"
 )
@@ -236,7 +237,7 @@ a second commit + push (gcrypt re-encrypts to all recipients).`,
 			// auto-import before gcrypt signature verification needs
 			// them. Shared with `nous brain publish` — see
 			// publishKeysBranch (brain_publish.go) for the why.
-			publishKeysBranch(out, cmd.Context(), abs, recipients, ownFp)
+			publishKeysBranch(gh.New(gh.Conf{}), out, cmd.Context(), abs, recipients, ownFp)
 
 			fmt.Fprintln(out)
 			fmt.Fprintln(out, "Brain provisioned.")

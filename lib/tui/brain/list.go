@@ -67,6 +67,8 @@ func (it listItem) labelInner() string {
 }
 
 type listModel struct {
+	gh gh.Client
+
 	items   []listItem
 	cursor  int
 	err     error  // shown in View when non-nil; drill-in disabled
@@ -114,10 +116,10 @@ type listLoadedMsg struct {
 // Splitting the model this way keeps the constructor filesystem-
 // only (DiscoverAll is fast) and pushes the slow `gh` subprocess
 // calls off the bubbletea event loop.
-func newListModel(cache *listLoadedData, extraRepos []gh.UserRepo) listModel {
+func newListModel(c gh.Client, cache *listLoadedData, extraRepos []gh.UserRepo) listModel {
 	manifests, err := libbrain.DiscoverAll()
 	if err != nil {
-		return listModel{err: err}
+		return listModel{gh: c, err: err}
 	}
 	if cache == nil {
 		// Render immediately with local brains and any
@@ -125,13 +127,13 @@ func newListModel(cache *listLoadedData, extraRepos []gh.UserRepo) listModel {
 		// The async load completes via Init() and folds in
 		// invitations + the rest of the uncloned set.
 		data := listLoadedData{repos: extraRepos}
-		items := buildAllItems(manifests, data)
-		return listModel{items: items, loadingRemote: true}
+		items := buildAllItems(c, manifests, data)
+		return listModel{gh: c, items: items, loadingRemote: true}
 	}
 	merged := *cache
 	merged.repos = mergeUserReposDedup(cache.repos, extraRepos)
-	items := buildAllItems(manifests, merged)
-	return listModel{items: items, myLogin: cache.myLogin}
+	items := buildAllItems(c, manifests, merged)
+	return listModel{gh: c, items: items, myLogin: cache.myLogin}
 }
 
 // mergeUserReposDedup returns the union of a and b, deduped by
@@ -165,7 +167,7 @@ func mergeUserReposDedup(a, b []gh.UserRepo) []gh.UserRepo {
 
 // buildLocalItems builds list items for the local brains only,
 // applying the operator marker if myLogin is non-empty.
-func buildLocalItems(manifests []libbrain.Manifest, myLogin string) []listItem {
+func buildLocalItems(c gh.Client, manifests []libbrain.Manifest, myLogin string) []listItem {
 	items := make([]listItem, 0, len(manifests))
 	for _, m := range manifests {
 		hasRemote := libbrain.ReadOriginURL(m.Path) != ""
@@ -174,7 +176,7 @@ func buildLocalItems(manifests []libbrain.Manifest, myLogin string) []listItem {
 		// to GitHub ownership/permission via IsOperator.
 		isOp := !hasRemote
 		if hasRemote && myLogin != "" {
-			isOp = libbrain.IsOperator(m.Path, myLogin)
+			isOp = libbrain.IsOperator(c, m.Path, myLogin)
 		}
 		items = append(items, listItem{manifest: m, isOperator: isOp, hasRemote: hasRemote})
 	}
@@ -189,8 +191,8 @@ func buildLocalItems(manifests []libbrain.Manifest, myLogin string) []listItem {
 // but-not-cloned repos. Pure function over local manifests + the
 // cached remote payload — called from newListModel (cache hit
 // path) and from listLoadedMsg handling (post-async-load path).
-func buildAllItems(manifests []libbrain.Manifest, data listLoadedData) []listItem {
-	items := buildLocalItems(manifests, data.myLogin)
+func buildAllItems(c gh.Client, manifests []libbrain.Manifest, data listLoadedData) []listItem {
+	items := buildLocalItems(c, manifests, data.myLogin)
 
 	// Build a set of github full_names for local brains so we can
 	// exclude them from the uncloned probe below. Local-brain remotes
@@ -255,11 +257,11 @@ func buildAllItems(manifests []libbrain.Manifest, data listLoadedData) []listIte
 // for an explicit 'r' refresh. Errors are absorbed into empty
 // payloads — a gh outage shouldn't break the list view, it should
 // just mean invitations / uncloned rows don't render.
-func loadRemoteCmd() tea.Cmd {
+func loadRemoteCmd(c gh.Client) tea.Cmd {
 	return func() tea.Msg {
-		myLogin, _ := gh.AuthLogin()
-		invites, _ := gh.PendingInvitations()
-		repos, _ := gh.UserRepos()
+		myLogin, _ := c.AuthLogin()
+		invites, _ := c.PendingInvitations()
+		repos, _ := c.UserRepos()
 		return listLoadedMsg{data: listLoadedData{
 			myLogin:     myLogin,
 			invitations: invites,
@@ -313,7 +315,7 @@ func isBrainInvitation(inv gh.Invitation) bool {
 
 func (m listModel) Init() tea.Cmd {
 	if m.loadingRemote {
-		return loadRemoteCmd()
+		return loadRemoteCmd(m.gh)
 	}
 	return nil
 }
@@ -335,7 +337,7 @@ func (m listModel) Update(msg tea.Msg) (listModel, tea.Cmd) {
 			m.loadingRemote = false
 			return m, nil
 		}
-		m.items = buildAllItems(manifests, lm.data)
+		m.items = buildAllItems(m.gh, manifests, lm.data)
 		m.myLogin = lm.data.myLogin
 		m.loadingRemote = false
 		// Clamp cursor if items shrank (unlikely on load, but cheap).
@@ -358,7 +360,7 @@ func (m listModel) Update(msg tea.Msg) (listModel, tea.Cmd) {
 		// a non-blank screen while the gh calls run.
 		if !m.loadingRemote {
 			m.loadingRemote = true
-			return m, loadRemoteCmd()
+			return m, loadRemoteCmd(m.gh)
 		}
 		return m, nil
 	case "up", "k":
@@ -401,7 +403,7 @@ func (m listModel) Update(msg tea.Msg) (listModel, tea.Cmd) {
 			if root, rerr := workspace.Root(); rerr == nil {
 				target = filepath.Join(root, it.uncloned.Name)
 			}
-			gcryptURL := "gcrypt::" + it.uncloned.CloneSSHURL()
+			gcryptURL := "gcrypt::" + m.gh.CloneURL(it.uncloned.FullName, it.uncloned.SSHURL)
 			args := []string{"brain", "clone", gcryptURL}
 			if target != "" {
 				args = append(args, target)

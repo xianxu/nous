@@ -88,9 +88,11 @@ func runBrainInvite(w io.Writer, in io.Reader, ghLogin, brainPathFlag string, fo
 		return errors.New("github login is empty")
 	}
 
+	c := gh.New(gh.Conf{})
+
 	// 1. Validate GitHub user exists (unless --force).
 	if !force {
-		if err := gh.UserExists(ghLogin); err != nil {
+		if err := c.UserExists(ghLogin); err != nil {
 			if errors.Is(err, gh.ErrUserNotVisible) {
 				return fmt.Errorf("%w\n  (this can happen for brand-new accounts; pass --force to skip the check)", err)
 			}
@@ -132,7 +134,7 @@ func runBrainInvite(w io.Writer, in io.Reader, ghLogin, brainPathFlag string, fo
 	// 5. Send. InviteCollaborator clears any stale/expired invitation
 	// first so a re-invite actually re-sends (a bare PUT is a no-op when
 	// an invitation — even expired — already exists; nous#39).
-	res, err := gh.InviteCollaborator(owner, repo, ghLogin, "push")
+	res, err := c.InviteCollaborator(owner, repo, ghLogin, "push")
 	if err != nil {
 		return fmt.Errorf("invite collaborator: %w", err)
 	}

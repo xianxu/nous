@@ -26,7 +26,7 @@ import (
 // One gh API call per brain when the short-circuit doesn't fire.
 // Cache via the caller if you have many brains to probe in a tight
 // loop; this function makes no caching commitment of its own.
-func IsOperator(brainRoot, myLogin string) bool {
+func IsOperator(c gh.Client, brainRoot, myLogin string) bool {
 	if myLogin == "" {
 		return false
 	}
@@ -41,7 +41,7 @@ func IsOperator(brainRoot, myLogin string) bool {
 	if strings.EqualFold(owner, myLogin) {
 		return true
 	}
-	perm, err := gh.CollaboratorPermission(owner, repo, myLogin)
+	perm, err := c.CollaboratorPermission(owner, repo, myLogin)
 	if err != nil {
 		return false
 	}

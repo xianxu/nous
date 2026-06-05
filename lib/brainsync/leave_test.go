@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/xianxu/nous/lib/gh"
 )
 
 // makeBrainNoOrigin creates a minimal brain dir with manifest +
@@ -53,7 +55,7 @@ func makeBrainNonGithubOrigin(t *testing.T) string {
 
 func TestLeaveBrain_RefusesNoOrigin(t *testing.T) {
 	root := makeBrainNoOrigin(t)
-	_, err := LeaveBrain(context.Background(), root, false)
+	_, err := LeaveBrain(context.Background(), gh.New(gh.Conf{}), root, false)
 	if err == nil {
 		t.Fatal("expected error on brain with no origin, got nil")
 	}
@@ -64,7 +66,7 @@ func TestLeaveBrain_RefusesNoOrigin(t *testing.T) {
 
 func TestLeaveBrain_RefusesNonGithubOrigin(t *testing.T) {
 	root := makeBrainNonGithubOrigin(t)
-	_, err := LeaveBrain(context.Background(), root, false)
+	_, err := LeaveBrain(context.Background(), gh.New(gh.Conf{}), root, false)
 	if err == nil {
 		t.Fatal("expected error on non-github origin, got nil")
 	}
@@ -76,7 +78,7 @@ func TestLeaveBrain_RefusesNonGithubOrigin(t *testing.T) {
 }
 
 func TestLeaveBrain_RefusesMissingBrain(t *testing.T) {
-	_, err := LeaveBrain(context.Background(), "/nonexistent/brain/path", false)
+	_, err := LeaveBrain(context.Background(), gh.New(gh.Conf{}), "/nonexistent/brain/path", false)
 	if err == nil {
 		t.Fatal("expected error on nonexistent brain path, got nil")
 	}

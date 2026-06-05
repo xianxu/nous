@@ -58,6 +58,8 @@ type inviteCollabDoneMsg struct {
 type cancelInviteCollabMsg struct{}
 
 type inviteCollabModel struct {
+	gh gh.Client
+
 	brainPath string
 	stage     inviteStage
 
@@ -72,7 +74,7 @@ type inviteCollabModel struct {
 	sendErr     error // populated in inviteStageDone on failure
 }
 
-func newInviteCollabModel(brainPath string) inviteCollabModel {
+func newInviteCollabModel(c gh.Client, brainPath string) inviteCollabModel {
 	t := textinput.New()
 	t.Placeholder = "yingtest42"
 	t.Prompt = "  github login> "
@@ -81,6 +83,7 @@ func newInviteCollabModel(brainPath string) inviteCollabModel {
 	t.Focus()
 
 	m := inviteCollabModel{
+		gh:         c,
 		brainPath:  brainPath,
 		stage:      inviteStageLogin,
 		loginInput: t,
@@ -148,7 +151,7 @@ func (m inviteCollabModel) updateLogin(msg tea.Msg) (inviteCollabModel, tea.Cmd)
 			// if UserExists returns ErrUserNotVisible (brand-new
 			// account; documented case from nous#25), advance to the
 			// confirm stage. The operator can still proceed.
-			m.validateErr = gh.UserExists(login)
+			m.validateErr = m.gh.UserExists(login)
 			m.stage = inviteStageConfirm
 			return m, nil
 		}
@@ -170,7 +173,7 @@ func (m inviteCollabModel) updateConfirm(msg tea.Msg) (inviteCollabModel, tea.Cm
 		// Synchronous gh.AddCollaborator. The op is a single
 		// authenticated REST call, so blocking the TUI briefly is
 		// acceptable — much simpler than tea.ExecProcess.
-		_, err := gh.InviteCollaborator(m.owner, m.repo, m.picked, "push") // clears stale/expired invite first (nous#39)
+		_, err := m.gh.InviteCollaborator(m.owner, m.repo, m.picked, "push") // clears stale/expired invite first (nous#39)
 		m.sendErr = err
 		m.stage = inviteStageDone
 		return m, nil

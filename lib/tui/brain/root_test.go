@@ -19,7 +19,7 @@ import (
 // Both halves are exercised here so a future refactor of either side
 // fails loudly instead of silently making ESC a no-op.
 func TestRoot_DetailEscPopsToList(t *testing.T) {
-	root := NewRoot().(rootModel)
+	root := NewRoot(gh.New(gh.Conf{})).(rootModel)
 	if root.current != screenList {
 		t.Fatalf("NewRoot should start on screenList, got %d", root.current)
 	}
@@ -69,7 +69,7 @@ func TestRoot_DetailEscPopsToList(t *testing.T) {
 func TestList_NewListModel_DoesNotBlockOnGh(t *testing.T) {
 	t.Setenv("WORKSPACE_ROOT", t.TempDir()) // empty workspace
 	start := time.Now()
-	m := newListModel(nil, nil)
+	m := newListModel(gh.New(gh.Conf{}), nil, nil)
 	elapsed := time.Since(start)
 	if elapsed > 200*time.Millisecond {
 		t.Errorf("newListModel(nil, nil) took %v — likely doing synchronous gh calls; should be filesystem-only", elapsed)
@@ -85,7 +85,7 @@ func TestList_NewListModel_DoesNotBlockOnGh(t *testing.T) {
 // must populate myLogin + flip loadingRemote off.
 func TestList_LoadedMsg_FoldsRemoteDataIn(t *testing.T) {
 	t.Setenv("WORKSPACE_ROOT", t.TempDir())
-	m := newListModel(nil, nil)
+	m := newListModel(gh.New(gh.Conf{}), nil, nil)
 	if !m.loadingRemote {
 		t.Fatal("precondition: loadingRemote should be true")
 	}
@@ -111,7 +111,7 @@ func TestList_LoadedMsg_FoldsRemoteDataIn(t *testing.T) {
 // list model has loadingRemote=false (cache served it).
 func TestRoot_PopToListReusesCache(t *testing.T) {
 	t.Setenv("WORKSPACE_ROOT", t.TempDir())
-	root := NewRoot().(rootModel)
+	root := NewRoot(gh.New(gh.Conf{})).(rootModel)
 
 	// Simulate an initial async load completing.
 	r2, _ := root.Update(listLoadedMsg{data: listLoadedData{
@@ -144,7 +144,7 @@ func TestRoot_PopToListReusesCache(t *testing.T) {
 // render re-fetches the (now-changed) pending-invitations set.
 func TestRoot_AcceptInviteDoneInvalidatesCache(t *testing.T) {
 	t.Setenv("WORKSPACE_ROOT", t.TempDir())
-	root := NewRoot().(rootModel)
+	root := NewRoot(gh.New(gh.Conf{})).(rootModel)
 	r2, _ := root.Update(listLoadedMsg{data: listLoadedData{myLogin: "operator"}})
 	root = r2.(rootModel)
 	if root.listCache == nil {
@@ -176,7 +176,7 @@ func TestRoot_AcceptInviteDoneInvalidatesCache(t *testing.T) {
 // this gets us the same effect without spawning gh.
 func TestRoot_AcceptInviteSplicesJustAccepted(t *testing.T) {
 	t.Setenv("WORKSPACE_ROOT", t.TempDir())
-	root := NewRoot().(rootModel)
+	root := NewRoot(gh.New(gh.Conf{})).(rootModel)
 
 	// Construct an invitation that meets the brain-marker filter
 	// (description prefix `nous-brain:`).

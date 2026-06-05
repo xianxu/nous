@@ -88,7 +88,8 @@ func runBrainJoinRepublish(ctx context.Context, w io.Writer, in io.Reader, fullN
 	if err != nil {
 		return err
 	}
-	myLogin, err := gh.AuthLogin()
+	c := gh.New(gh.Conf{})
+	myLogin, err := c.AuthLogin()
 	if err != nil {
 		return fmt.Errorf("resolve own login: %w", err)
 	}
@@ -105,8 +106,10 @@ func runBrainJoinRepublish(ctx context.Context, w io.Writer, in io.Reader, fullN
 }
 
 func runBrainJoin(ctx context.Context, w io.Writer, in io.Reader) error {
+	c := gh.New(gh.Conf{})
+
 	// 1. Find pending invitations.
-	invites, err := gh.PendingInvitations()
+	invites, err := c.PendingInvitations()
 	if err != nil {
 		return fmt.Errorf("list invitations: %w", err)
 	}
@@ -150,7 +153,7 @@ func runBrainJoin(ctx context.Context, w io.Writer, in io.Reader) error {
 	}
 
 	// 4. Resolve own github login (filename stem).
-	myLogin, err := gh.AuthLogin()
+	myLogin, err := c.AuthLogin()
 	if err != nil {
 		return fmt.Errorf("resolve own login: %w", err)
 	}
@@ -159,12 +162,12 @@ func runBrainJoin(ctx context.Context, w io.Writer, in io.Reader) error {
 	for _, idx := range picked {
 		inv := brainInvites[idx]
 		fmt.Fprintf(w, "\n→ %s\n", inv.Repository.FullName)
-		if err := gh.AcceptInvitation(inv.ID); err != nil {
+		if err := c.AcceptInvitation(inv.ID); err != nil {
 			fmt.Fprintf(w, "  accept: %v\n", err)
 			continue
 		}
 		fmt.Fprintf(w, "  accepted invitation.\n")
-		if err := brain.PublishOwnPubkeyToRemote(ctx, inv.CloneSSHURL(), myLogin, armor); err != nil {
+		if err := brain.PublishOwnPubkeyToRemote(ctx, c.CloneURL(inv.Repository.FullName, inv.Repository.SSHURL), myLogin, armor); err != nil {
 			fmt.Fprintf(w, "  publish pubkey: %v\n", err)
 			fmt.Fprintf(w, "  (you're a collaborator now but the operator can't auto-admit until you re-publish)\n")
 			continue

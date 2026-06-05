@@ -82,7 +82,7 @@ type LeaveResult struct {
 //     done; the GitHub-side cleanup is the operator's retry.
 //   - delete-local fails → returns the error (manifest already
 //     pushed, collaborator already revoked).
-func LeaveBrain(ctx context.Context, brainPath string, deleteLocal bool) (LeaveResult, error) {
+func LeaveBrain(ctx context.Context, c gh.Client, brainPath string, deleteLocal bool) (LeaveResult, error) {
 	var res LeaveResult
 
 	m, err := brain.Read(brainPath)
@@ -100,7 +100,7 @@ func LeaveBrain(ctx context.Context, brainPath string, deleteLocal bool) (LeaveR
 	res.Owner = owner
 	res.Repo = repo
 
-	myLogin, err := gh.AuthLogin()
+	myLogin, err := c.AuthLogin()
 	if err != nil || myLogin == "" {
 		return res, fmt.Errorf("resolve current github login (gh auth?): %w", err)
 	}
@@ -133,7 +133,7 @@ func LeaveBrain(ctx context.Context, brainPath string, deleteLocal bool) (LeaveR
 	// revoke runs LAST (after the push), preserving push access through the
 	// re-key + keys-branch strip.
 	commitMsg := fmt.Sprintf("leave: %s (%s) left the brain", myLogin, res.ShortFp)
-	sr, serr := stripMember(ctx, brainPath, myFp, commitMsg, myLogin)
+	sr, serr := stripMember(ctx, c, brainPath, myFp, commitMsg, myLogin)
 	res.ManifestPushed = sr.Pushed
 	res.VerifiedErr = sr.VerifiedErr
 	res.KeysBranchErr = sr.KeysBranchErr

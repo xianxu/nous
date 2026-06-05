@@ -40,10 +40,11 @@ func runBrainList(w io.Writer) error {
 		fmt.Fprintln(w, "No brains under workspace root.")
 		return nil
 	}
+	c := gh.New(gh.Conf{})
 	// Resolve auth'd login once for all the operator-marker probes.
 	// Empty on outage — operator markers just don't render, which is
 	// the safe degradation (worst case is "I don't know I'm operator").
-	myLogin, _ := gh.AuthLogin()
+	myLogin, _ := c.AuthLogin()
 	if myLogin != "" {
 		fmt.Fprintf(w, "Brains (%s)\n\n", myLogin)
 	} else {
@@ -58,7 +59,7 @@ func runBrainList(w io.Writer) error {
 		// without gh auth.
 		hasRemote := brain.ReadOriginURL(b.Path) != ""
 		marker := " "
-		if !hasRemote || brain.IsOperator(b.Path, myLogin) {
+		if !hasRemote || brain.IsOperator(c, b.Path, myLogin) {
 			marker = "*"
 		}
 		// Display directory basename — that's the unambiguous on-disk
