@@ -195,22 +195,22 @@ control-plane fake meets the tmpdir data plane.
 
 ## Plan
 
-- [ ] Define the provider-neutral port interface + `Conf` (incl. injectable `CloneURLBase`);
+- [x] Define the provider-neutral port interface + `Conf` (incl. injectable `CloneURLBase`);
       settle domain naming and the documented peculiarity extension points.
-- [ ] `real` adapter: move today's exec-`gh` logic behind the port unchanged; nothing else
+- [x] `real` adapter: move today's exec-`gh` logic behind the port unchanged; nothing else
       execs `gh`. Add a `real`-adapter unit test asserting exact endpoint strings (the
       below-the-seam regression home for bug 1 — `/users/<login>` vs `/user`).
-- [ ] Migrate the 13 consumers onto the port (decide injection mechanism: constructor DI vs.
+- [x] Migrate the 13 consumers onto the port (decide injection mechanism: constructor DI vs.
       swappable default).
-- [ ] `shim'(gh)` fake adapter: state model (users/repos/collaborators/invitations), multi-user
+- [x] `shim'(gh)` fake adapter: state model (users/repos/collaborators/invitations), multi-user
       token context, peculiarity behaviors, tmpdir-bare-repo data-plane coupling, per-test
       teardown.
-- [ ] Dual-backend contract test (fake always; real `gh` build-tagged); run the real backend
+- [x] Dual-backend contract test (fake always; real `gh` build-tagged); run the real backend
       once to certify; document the periodic grounding step.
-- [ ] Hermetic regression tests for nous#26 bugs 2–5 + nous#41 #11 through the fake + tmpdir
+- [x] Hermetic regression tests for nous#26 bugs 2–5 + nous#41 #11 through the fake + tmpdir
       data plane (bug 1 is covered by the real-adapter endpoint test + contract test above, not
       here).
-- [ ] Update atlas for the new port/fake surface; record the grounding cadence.
+- [x] Update atlas for the new port/fake surface; record the grounding cadence.
 
 ## Log
 
