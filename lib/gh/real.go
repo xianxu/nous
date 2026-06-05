@@ -1,102 +1,41 @@
-// Package gh wraps the `gh` CLI for the few GitHub operations nous
-// performs as part of the recipient-onboarding flow (#26):
-//
-//   - AuthLogin           — who is gh authenticated as
-//   - UserExists          — does this github user exist (public lookup)
-//   - AddCollaborator     — invite <login> to <owner>/<repo>
-//   - PendingInvitations  — list repo invites for the auth'd user
-//   - AcceptInvitation    — accept one by id
-//
-// All operations shell out to `gh api` and parse JSON. We deliberately
-// don't import the upstream go-gh library — the surface area we need is
-// small, the subprocess pattern matches the rest of the codebase
-// (gpg/git wrappers in lib/brain, lib/identity), and a hard dep on
-// go-gh would pull a transitive tree we don't otherwise need.
-//
-// The /users/<login> endpoint can lag for brand-new accounts (~minutes
-// to hours; see nous#25 for the original repro). UserExists treats that
-// 404 as "not visible right now" and lets the caller decide what to do.
 package gh
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 )
 
-// Invitation captures the minimal subset of GitHub's
-// /user/repository_invitations response that nous brain join needs to
-// filter, display, and accept.
+// realClient is the production Client: every method shells out to the
+// `gh` CLI. It is the only thing in nous that execs `gh`.
 //
-// The embedded repository representation in this endpoint is a
-// "MinimalRepository" — it omits clone_url, ssh_url, git_url, and
-// topics. We populate them as best-effort (json tags still set so
-// they pick up the values when present, e.g., on endpoints that do
-// return the full repository object), and fall back to constructing
-// from full_name via CloneSSHURL. Empirically confirmed 2026-05-19
-// against a real invitation: ssh_url was empty, topics was null.
-type Invitation struct {
-	ID         int
-	Repository struct {
-		FullName    string                 `json:"full_name"`
-		Name        string                 `json:"name"`
-		Owner       struct{ Login string } `json:"owner"`
-		Private     bool                   `json:"private"`
-		Description string                 `json:"description"`
-		Topics      []string               `json:"topics"`
-		CloneURL    string                 `json:"clone_url"`
-		SSHURL      string                 `json:"ssh_url"`
-		HTMLURL     string                 `json:"html_url"`
-	} `json:"repository"`
-	Inviter struct{ Login string } `json:"inviter"`
-}
-
-// AsUserRepo converts an Invitation's embedded repository view into
-// a UserRepo. Used by the TUI to splice a just-accepted repo into
-// the visible list right after the operator presses `enter` on a
-// pending row — GitHub's /user/repos endpoint lags
-// invitation-acceptance by tens of seconds, so without this splice
-// the brain disappears from the list during that gap.
+// We deliberately don't import the upstream go-gh library — the surface
+// area we need is small, the subprocess pattern matches the rest of the
+// codebase (gpg/git wrappers in lib/brain, lib/identity), and a hard dep
+// on go-gh would pull a transitive tree we don't otherwise need.
 //
-// SSHURL is fabricated from FullName when the Repository view omits
-// it (the MinimalRepository case that /user/repository_invitations
-// actually returns), matching CloneSSHURL's fallback.
-func (i Invitation) AsUserRepo() UserRepo {
-	r := UserRepo{
-		FullName:    i.Repository.FullName,
-		Name:        i.Repository.Name,
-		Private:     i.Repository.Private,
-		Description: i.Repository.Description,
-		Topics:      i.Repository.Topics,
-		SSHURL:      i.Repository.SSHURL,
-		CloneURL:    i.Repository.CloneURL,
-	}
-	r.Owner.Login = i.Repository.Owner.Login
-	return r
-}
+// The /users/<login> endpoint can lag for brand-new accounts (~minutes
+// to hours; see nous#25 for the original repro). UserExists treats that
+// 404 as "not visible right now" and lets the caller decide what to do.
+type realClient struct{ conf Conf }
 
-// CloneSSHURL returns the SSH clone URL for the invitation's repo.
-// Uses the embedded ssh_url if present (full Repository object);
-// otherwise constructs it from full_name (MinimalRepository case,
-// which is what /user/repository_invitations actually returns).
-func (i Invitation) CloneSSHURL() string {
-	if i.Repository.SSHURL != "" {
-		return i.Repository.SSHURL
-	}
-	if i.Repository.FullName == "" {
-		return ""
-	}
-	return "git@github.com:" + i.Repository.FullName + ".git"
-}
+// New returns the production Client that execs `gh`.
+func New(conf Conf) Client { return &realClient{conf: conf} }
 
-// run invokes gh with the given args and returns stdout + an error
-// that includes stderr on failure (gh's stderr is the operator-readable
-// message; stdout is JSON for `gh api`).
-func run(args ...string) ([]byte, error) {
+// runImpl is the swappable exec seam (tests replace it). It takes conf
+// so per-client GH_TOKEN works (two conformance clients, two tokens, one
+// process). Production path: conf.Token == "" → inherit ambient gh auth.
+// On failure the error includes stderr (gh's stderr is the
+// operator-readable message; stdout is JSON for `gh api`).
+var runImpl = func(conf Conf, args ...string) ([]byte, error) {
 	cmd := exec.Command("gh", args...)
+	if conf.Token != "" {
+		cmd.Env = append(os.Environ(), "GH_TOKEN="+conf.Token)
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -108,30 +47,31 @@ func run(args ...string) ([]byte, error) {
 	return out, nil
 }
 
+func (c *realClient) run(args ...string) ([]byte, error) { return runImpl(c.conf, args...) }
+
+// CloneURL applies the adapter's CloneURLBase to the MinimalRepository
+// fallback. For real GitHub the base is "git@github.com:".
+func (c *realClient) CloneURL(fullName, sshURL string) string {
+	return cloneURL(c.conf.cloneBase(), fullName, sshURL)
+}
+
 // AuthLogin returns the github login of the currently-authenticated
 // gh token. The `/user` (singular) endpoint reads through the bearer
 // token directly — works even when `/users/<login>` is lagging for
 // brand-new accounts.
-func AuthLogin() (string, error) {
-	out, err := run("api", "user", "--jq", ".login")
+func (c *realClient) AuthLogin() (string, error) {
+	out, err := c.run("api", "user", "--jq", ".login")
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
 }
 
-// ErrUserNotVisible is returned by UserExists when GitHub's public
-// /users/<login> endpoint returns 404. For brand-new accounts that's
-// often propagation lag rather than a real "no such user" — the caller
-// decides whether to gate on it (nous brain invite) or proceed
-// (nous#25's SKIP_REPO_CREATE-style escape hatch).
-var ErrUserNotVisible = errors.New("github user not visible via public API")
-
 // UserExists probes `/users/<login>`. Returns nil when 200, returns
 // ErrUserNotVisible (wrapped) on 404, returns the raw gh error on
 // anything else.
-func UserExists(login string) error {
-	_, err := run("api", "users/"+login, "--silent")
+func (c *realClient) UserExists(login string) error {
+	_, err := c.run("api", "users/"+login, "--silent")
 	if err != nil {
 		if strings.Contains(err.Error(), "HTTP 404") || strings.Contains(err.Error(), "Not Found") {
 			return fmt.Errorf("%w: %s", ErrUserNotVisible, login)
@@ -154,14 +94,11 @@ func UserExists(login string) error {
 // reason a brain shows up in someone's workspace without permission
 // info is "I'm a recipient via gcrypt but not a github collaborator,"
 // which is a valid state.
-func CollaboratorPermission(owner, repo, login string) (string, error) {
-	out, err := run("api",
+func (c *realClient) CollaboratorPermission(owner, repo, login string) (string, error) {
+	out, err := c.run("api",
 		fmt.Sprintf("repos/%s/%s/collaborators/%s/permission", owner, repo, login),
 		"--jq", ".permission")
 	if err != nil {
-		// 404 = not a collaborator. Most callers want to treat
-		// this as "no permission" rather than "error" — surface
-		// as empty string.
 		if strings.Contains(err.Error(), "HTTP 404") || strings.Contains(err.Error(), "Not Found") {
 			return "", nil
 		}
@@ -175,8 +112,8 @@ func CollaboratorPermission(owner, repo, login string) (string, error) {
 // are not collaborators yet). Used to detect membership-record drift: logins
 // in the brain's records (recipient_logins / keys branch) that are no longer
 // collaborators, a possible GitHub login rename (nous#41 #10).
-func ListCollaborators(owner, repo string) ([]string, error) {
-	out, err := run("api", "--paginate",
+func (c *realClient) ListCollaborators(owner, repo string) ([]string, error) {
+	out, err := c.run("api", "--paginate",
 		fmt.Sprintf("repos/%s/%s/collaborators", owner, repo),
 		"--jq", ".[].login")
 	if err != nil {
@@ -200,8 +137,8 @@ func ListCollaborators(owner, repo string) ([]string, error) {
 // collaborator; 201 (created) if a new invitation was created. We
 // don't surface the difference — both are "the invitation is in
 // place" from the operator's perspective.
-func AddCollaborator(owner, repo, login, permission string) error {
-	_, err := run("api", "-X", "PUT",
+func (c *realClient) AddCollaborator(owner, repo, login, permission string) error {
+	_, err := c.run("api", "-X", "PUT",
 		fmt.Sprintf("repos/%s/%s/collaborators/%s", owner, repo, login),
 		"-f", "permission="+permission,
 		"--silent")
@@ -214,18 +151,11 @@ func AddCollaborator(owner, repo, login, permission string) error {
 // Needed because a lingering invitation (pending OR expired) makes
 // AddCollaborator's PUT a silent no-op, so it must be cleared before a
 // re-invite can actually re-send.
-func DeleteRepoInvitation(owner, repo string, id int) error {
-	_, err := run("api", "-X", "DELETE",
+func (c *realClient) DeleteRepoInvitation(owner, repo string, id int) error {
+	_, err := c.run("api", "-X", "DELETE",
 		fmt.Sprintf("repos/%s/%s/invitations/%d", owner, repo, id),
 		"--silent")
 	return err
-}
-
-// InviteResult reports what InviteCollaborator did.
-type InviteResult struct {
-	// ReplacedStale is true when an existing (pending or expired)
-	// invitation for the login was deleted before re-inviting.
-	ReplacedStale bool
 }
 
 // InviteCollaborator sends a FRESH collaborator invitation, working
@@ -239,21 +169,21 @@ type InviteResult struct {
 // can't confirm there's no existing invitation, the PUT may silently
 // no-op (sending no email), so list/delete failures are hard errors
 // rather than swallowed. nous#41 #11.
-func InviteCollaborator(owner, repo, login, permission string) (InviteResult, error) {
+func (c *realClient) InviteCollaborator(owner, repo, login, permission string) (InviteResult, error) {
 	var res InviteResult
-	invs, err := RepoPendingInvitations(owner, repo)
+	invs, err := c.RepoPendingInvitations(owner, repo)
 	if err != nil {
 		return res, fmt.Errorf("list pending invitations for %s/%s: %w (can't guarantee a stale invitation won't no-op the re-invite)", owner, repo, err)
 	}
 	for _, inv := range invs {
 		if strings.EqualFold(inv.Invitee.Login, login) {
-			if derr := DeleteRepoInvitation(owner, repo, inv.ID); derr != nil {
+			if derr := c.DeleteRepoInvitation(owner, repo, inv.ID); derr != nil {
 				return res, fmt.Errorf("delete stale invitation %d for %s on %s/%s: %w (PUT would no-op against it)", inv.ID, login, owner, repo, derr)
 			}
 			res.ReplacedStale = true
 		}
 	}
-	if err := AddCollaborator(owner, repo, login, permission); err != nil {
+	if err := c.AddCollaborator(owner, repo, login, permission); err != nil {
 		return res, err
 	}
 	return res, nil
@@ -262,8 +192,8 @@ func InviteCollaborator(owner, repo, login, permission string) (InviteResult, er
 // PendingInvitations lists all repository invitations the
 // authenticated user has not yet accepted/declined. Returns an empty
 // slice (not nil) when there are none.
-func PendingInvitations() ([]Invitation, error) {
-	out, err := run("api", "user/repository_invitations")
+func (c *realClient) PendingInvitations() ([]Invitation, error) {
+	out, err := c.run("api", "user/repository_invitations")
 	if err != nil {
 		return nil, err
 	}
@@ -277,40 +207,11 @@ func PendingInvitations() ([]Invitation, error) {
 // AcceptInvitation accepts the invitation identified by id (returned
 // by PendingInvitations). GitHub's PATCH endpoint returns 204 on
 // success; the body is empty, so we discard stdout.
-func AcceptInvitation(id int) error {
-	_, err := run("api", "-X", "PATCH",
+func (c *realClient) AcceptInvitation(id int) error {
+	_, err := c.run("api", "-X", "PATCH",
 		"user/repository_invitations/"+strconv.Itoa(id),
 		"--silent")
 	return err
-}
-
-// UserRepo is the minimal subset of GitHub's repository
-// representation that nous needs for the "accessible but not yet
-// cloned" detection in the brain list view. Mirrors the
-// MinimalRepository fields the /user/repos endpoint returns by
-// default.
-type UserRepo struct {
-	FullName    string   `json:"full_name"`
-	Name        string   `json:"name"`
-	Owner       struct{ Login string } `json:"owner"`
-	Private     bool     `json:"private"`
-	Description string   `json:"description"`
-	Topics      []string `json:"topics"`
-	SSHURL      string   `json:"ssh_url"`
-	CloneURL    string   `json:"clone_url"`
-}
-
-// CloneSSHURL returns a usable ssh clone URL for this repo. Falls
-// back to constructing from FullName when GitHub doesn't populate
-// ssh_url (same MinimalRepository fallback Invitation uses).
-func (r UserRepo) CloneSSHURL() string {
-	if r.SSHURL != "" {
-		return r.SSHURL
-	}
-	if r.FullName == "" {
-		return ""
-	}
-	return "git@github.com:" + r.FullName + ".git"
 }
 
 // UserRepos lists every repository the authenticated user has any
@@ -318,8 +219,8 @@ func (r UserRepo) CloneSSHURL() string {
 // operators with > 100 repos the result is truncated — the
 // "accessible-but-not-cloned" view it powers is informational, not
 // security-critical, so partial results are acceptable.
-func UserRepos() ([]UserRepo, error) {
-	out, err := run("api", "user/repos", "--paginate", "-X", "GET", "-f", "per_page=100")
+func (c *realClient) UserRepos() ([]UserRepo, error) {
+	out, err := c.run("api", "user/repos", "--paginate", "-X", "GET", "-f", "per_page=100")
 	if err != nil {
 		return nil, err
 	}
@@ -339,22 +240,11 @@ func UserRepos() ([]UserRepo, error) {
 // GitHub allows a collaborator to remove themselves (200 OK).
 // Repo owners can remove any collaborator (other than themselves).
 // 204 NoContent on success; bubbled gh error otherwise.
-func RemoveCollaborator(owner, repo, login string) error {
-	_, err := run("api", "-X", "DELETE",
+func (c *realClient) RemoveCollaborator(owner, repo, login string) error {
+	_, err := c.run("api", "-X", "DELETE",
 		fmt.Sprintf("repos/%s/%s/collaborators/%s", owner, repo, login),
 		"--silent")
 	return err
-}
-
-// RepoInvitation is one pending invitation the operator (or another
-// admin on the repo) sent that the invitee hasn't accepted yet.
-// Mirrors GitHub's response to GET /repos/{owner}/{repo}/invitations.
-type RepoInvitation struct {
-	ID        int                    `json:"id"`
-	Invitee   struct{ Login string } `json:"invitee"`
-	Inviter   struct{ Login string } `json:"inviter"`
-	CreatedAt string                 `json:"created_at"`
-	Expired   bool                   `json:"expired"`
 }
 
 // RepoPendingInvitations lists invitations the operator (or other
@@ -366,8 +256,8 @@ type RepoInvitation struct {
 // Requires push or admin access on the repo (GitHub returns 404
 // otherwise). Errors are returned to the caller; nil slice means
 // the call succeeded with no pending invitations.
-func RepoPendingInvitations(owner, repo string) ([]RepoInvitation, error) {
-	out, err := run("api", "--paginate", fmt.Sprintf("repos/%s/%s/invitations", owner, repo))
+func (c *realClient) RepoPendingInvitations(owner, repo string) ([]RepoInvitation, error) {
+	out, err := c.run("api", "--paginate", fmt.Sprintf("repos/%s/%s/invitations", owner, repo))
 	if err != nil {
 		return nil, err
 	}
@@ -382,8 +272,8 @@ func RepoPendingInvitations(owner, repo string) ([]RepoInvitation, error) {
 // AcceptInvitation. Not used in the happy-path flow but useful for
 // the operator-tooling cases where an invite shouldn't actually be
 // accepted (e.g., test artifacts).
-func DeclineInvitation(id int) error {
-	_, err := run("api", "-X", "DELETE",
+func (c *realClient) DeclineInvitation(id int) error {
+	_, err := c.run("api", "-X", "DELETE",
 		"user/repository_invitations/"+strconv.Itoa(id),
 		"--silent")
 	return err
