@@ -6,7 +6,7 @@ github_issue:
 created: 2026-06-05
 updated: 2026-06-05
 estimate_hours: 14
-actual_hours: 13.5
+actual_hours: 0.30
 ---
 
 # shim(gh)+shim'(gh): hermetic GitHub control-plane fake behind a provider-neutral port
