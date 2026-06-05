@@ -199,6 +199,7 @@ control-plane fake meets the tmpdir data plane.
 ## Log
 
 ### 2026-06-05
+- 2026-06-05: closed M2 — go build/vet clean; lib/gh fake: 11 unit tests pass incl. real git clone of tmpdir bare repo; -race clean; three peculiarities (MinimalRepository empty ssh_url, PUT-collaborators no-op vs existing invite, shadow-flag 404) asserted; TUI tests retrofitted to inject the fake; review verdict: FIX-THEN-SHIP
 - 2026-06-05: closed M1 — go build/vet clean; full suite green outside sandbox (lib/brain gpg-agent failures are sandbox-IPC-only, confirmed passing sandbox-disabled @36.8s, count=1); lib/gh endpoint tests pin bug-1 below-seam; grep gate = zero free-function call sites; 13+ consumers migrated to injected gh.Client (constructor/struct DI); review verdict: FIX-THEN-SHIP
 
 Filed from ariadne#71 brainstorm. Decisions locked with operator:

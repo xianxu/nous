@@ -172,23 +172,7 @@ func (c *realClient) DeleteRepoInvitation(owner, repo string, id int) error {
 // no-op (sending no email), so list/delete failures are hard errors
 // rather than swallowed. nous#41 #11.
 func (c *realClient) InviteCollaborator(owner, repo, login, permission string) (InviteResult, error) {
-	var res InviteResult
-	invs, err := c.RepoPendingInvitations(owner, repo)
-	if err != nil {
-		return res, fmt.Errorf("list pending invitations for %s/%s: %w (can't guarantee a stale invitation won't no-op the re-invite)", owner, repo, err)
-	}
-	for _, inv := range invs {
-		if strings.EqualFold(inv.Invitee.Login, login) {
-			if derr := c.DeleteRepoInvitation(owner, repo, inv.ID); derr != nil {
-				return res, fmt.Errorf("delete stale invitation %d for %s on %s/%s: %w (PUT would no-op against it)", inv.ID, login, owner, repo, derr)
-			}
-			res.ReplacedStale = true
-		}
-	}
-	if err := c.AddCollaborator(owner, repo, login, permission); err != nil {
-		return res, err
-	}
-	return res, nil
+	return inviteCollaborator(c, owner, repo, login, permission)
 }
 
 // PendingInvitations lists all repository invitations the

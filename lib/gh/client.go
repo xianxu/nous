@@ -12,6 +12,11 @@
 // service-specific.
 package gh
 
+import (
+	"fmt"
+	"strings"
+)
+
 // Conf is the opaque, service-specific construction config. The one
 // cross-service convention is the shape New(Conf)/NewFake(Conf), not
 // these fields.
@@ -65,4 +70,36 @@ type Client interface {
 	// adapter's CloneURLBase to the MinimalRepository fallback (empty
 	// ssh_url). Real → git@github.com:; fake → file://<tmpdir>/.
 	CloneURL(fullName, sshURL string) string
+}
+
+// inviteCollaborator is the FRESH-invite composite, shared by every
+// adapter (ARCH-DRY / ARCH-PURE: pure orchestration over Client methods,
+// owned by neither adapter). It works around GitHub's behavior where
+// `PUT /collaborators/{login}` is a no-op (204, no email) when an
+// invitation already exists for that login — INCLUDING an expired one —
+// by deleting any existing repo invitation for `login` first, then PUTting.
+//
+// The stale-invitation clearing is load-bearing, not best-effort: if we
+// can't confirm there's no existing invitation, the PUT may silently
+// no-op (sending no email), so list/delete failures are hard errors
+// rather than swallowed. nous#41 #11. Keeping this in one place is what
+// guarantees the real and fake adapters can't drift on this contract.
+func inviteCollaborator(c Client, owner, repo, login, permission string) (InviteResult, error) {
+	var res InviteResult
+	invs, err := c.RepoPendingInvitations(owner, repo)
+	if err != nil {
+		return res, fmt.Errorf("list pending invitations for %s/%s: %w (can't guarantee a stale invitation won't no-op the re-invite)", owner, repo, err)
+	}
+	for _, inv := range invs {
+		if strings.EqualFold(inv.Invitee.Login, login) {
+			if derr := c.DeleteRepoInvitation(owner, repo, inv.ID); derr != nil {
+				return res, fmt.Errorf("delete stale invitation %d for %s on %s/%s: %w (PUT would no-op against it)", inv.ID, login, owner, repo, derr)
+			}
+			res.ReplacedStale = true
+		}
+	}
+	if err := c.AddCollaborator(owner, repo, login, permission); err != nil {
+		return res, err
+	}
+	return res, nil
 }

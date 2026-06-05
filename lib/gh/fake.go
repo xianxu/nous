@@ -82,6 +82,8 @@ func newFakeState(base string) *fakeState {
 }
 
 func (s *fakeState) tokenFor(login string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if u := s.users[login]; u != nil {
 		return u.token
 	}
@@ -263,23 +265,7 @@ func (c *fakeClient) AddCollaborator(owner, repo, login, permission string) erro
 // re-invite actually re-sends instead of no-opping. A list/delete failure
 // is a hard error (nous#41 #11) — not swallowed.
 func (c *fakeClient) InviteCollaborator(owner, repo, login, permission string) (InviteResult, error) {
-	var res InviteResult
-	invs, err := c.RepoPendingInvitations(owner, repo)
-	if err != nil {
-		return res, fmt.Errorf("list pending invitations for %s/%s: %w (can't guarantee a stale invitation won't no-op the re-invite)", owner, repo, err)
-	}
-	for _, inv := range invs {
-		if strings.EqualFold(inv.Invitee.Login, login) {
-			if derr := c.DeleteRepoInvitation(owner, repo, inv.ID); derr != nil {
-				return res, fmt.Errorf("delete stale invitation %d for %s on %s/%s: %w (PUT would no-op against it)", inv.ID, login, owner, repo, derr)
-			}
-			res.ReplacedStale = true
-		}
-	}
-	if err := c.AddCollaborator(owner, repo, login, permission); err != nil {
-		return res, err
-	}
-	return res, nil
+	return inviteCollaborator(c, owner, repo, login, permission)
 }
 
 func (c *fakeClient) RemoveCollaborator(owner, repo, login string) error {

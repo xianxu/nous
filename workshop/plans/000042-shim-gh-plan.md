@@ -538,3 +538,9 @@ Bugs 4 & 5 are brain-logic/data-plane bugs that already have regression homes us
 
 - **Plan bug fixed:** Task 1.5 Step 2b said to retrofit the broken TUI tests to `NewRoot(gh.NewFake(...))`, but `NewFake` is an M2 deliverable — chicken-and-egg. M1 correctly used `gh.New(gh.Conf{})` (real client, never invoked by the nav tests). **Action moved to M2:** once `fake.go` lands, retrofit `lib/tui/brain/root_test.go` + `detail_test.go` to inject the fake for true isolation, at the same `gh.New(gh.Conf{})` sites (the scattered composition root the review flagged).
 - **Important finding addressed in-window:** the bug-1 below-seam guard now covers **all 13** endpoints (`TestRealClient_Endpoints` table + `TestRealClient_InviteCollaborator_ClearsStaleThenAdds`), not just the original 2 — a future endpoint-string regression fails fast instead of waiting for the monthly M3 conformance run.
+
+### 2026-06-05 — M2 boundary review (FIX-THEN-SHIP, resolved)
+
+- **Important (ARCH-DRY/PURE):** `InviteCollaborator` was duplicated verbatim across `real.go`/`fake.go` (incl. the nous#41 #11 error strings). Extracted to one shared `inviteCollaborator(c Client, …)` free function in `client.go`; both adapters delegate. Removes the drift vector the M3 contract test would otherwise expose. (New pure entity — add to Core-concepts if revisited.)
+- **Minor fixed:** `fakeState.tokenFor` now takes the mutex (was the lone lock-free accessor).
+- **Minor noted (transient):** `atlas/.../e2e-integration-testing.md` references `lib/gh/contract_real_test.go` which lands in M3 — a deliberate forward pointer, resolved next milestone.
