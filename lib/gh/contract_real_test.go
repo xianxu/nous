@@ -16,6 +16,12 @@
 // non-destructive beyond invitations/collaborators, which newWorld resets
 // before each subtest and t.Cleanup clears after. If a subtest FAILS, the fake
 // has drifted: fix fake.go (not the test) and re-certify.
+//
+// Eventual consistency: GitHub's post-acceptance endpoints can lag (the spec
+// notes /user/repos by tens of seconds). ListCollaborators is usually prompt,
+// but if the invite→accept→ListCollaborators subtest goes red on the real
+// backend, suspect propagation lag (add a short retry) before concluding the
+// fake drifted.
 
 package gh
 

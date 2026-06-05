@@ -81,6 +81,10 @@ func runContract(t *testing.T, newWorld func(t *testing.T) contractWorld) {
 		}
 	})
 
+	// NOTE: this grounds only the *pending* invitation no-op. The spec also
+	// names the *expired* invitation case (the actual nous#41 #11 surface),
+	// but neither the fake (no expiry field) nor real `gh` (can't mint an
+	// expired invite in-test) can exercise it — expiry is the ungrounded leg.
 	t.Run("add_collaborator_noops_against_existing_invitation", func(t *testing.T) {
 		w := newWorld(t)
 		if err := w.operator.AddCollaborator(w.owner, w.repo, w.inviteeLogin, "push"); err != nil {
