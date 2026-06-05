@@ -56,10 +56,12 @@
 
 ## Milestones (each row is a review boundary → its own `sdlc milestone-close`)
 
-- [ ] **M1 — Port + real adapter + DI migration** (the seam; bug-1 endpoint test)
-- [ ] **M2 — Fake adapter** (state model, peculiarities, tmpdir data-plane coupling)
+- [x] **M1 — Port + real adapter + DI migration** (the seam; bug-1 endpoint test)
+- [x] **M2 — Fake adapter** (state model, peculiarities, tmpdir data-plane coupling)
 - [ ] **M3 — Dual-backend contract test** (grounding; certify against real `gh`)
-- [ ] **M4 — Hermetic regression tests** (nous#26 bugs 2–5 + nous#41 #11; atlas)
+- [ ] **M4 — Hermetic regression tests** (control-plane bugs 2/3/#41 #11; verify 4/5 green)
+- [ ] **M5 — Full-lifecycle simulation** (forward-looking payoff: multi-actor onboarding through
+      the fake) + atlas + `sdlc close`
 
 ---
 
@@ -483,9 +485,9 @@ func TestContract_Fake(t *testing.T) {
 
 ---
 
-## Chunk 4: M4 — Hermetic regression tests + atlas
+## Chunk 4: M4 — Hermetic regression tests
 
-**Outcome:** the nous#26 / nous#41 control-plane flows run hermetically through the fake + tmpdir data plane, each pinning a historical bug; atlas updated.
+**Outcome:** the nous#26 / nous#41 control-plane flows run hermetically through the fake + tmpdir data plane, each pinning a historical bug. (Atlas + close move to M5, which adds the showcase simulation.)
 
 ### Task 4.1: Regression tests — pin each bug at the layer that can see it
 
@@ -494,21 +496,19 @@ func TestContract_Fake(t *testing.T) {
 | Bug | Layer | Where it's pinned | Action in M4 |
 |-----|-------|-------------------|--------------|
 | 1 (wrong endpoint) | below the seam | `lib/gh/real_test.go` (M1) + contract real-run (M3) | already done in M1/M3 |
-| 2 (MinimalRepository empty ssh_url) | control plane (consumer) | **new**, through the fake | write |
-| 3 (accepted-but-unpublished recovery) | control plane (consumer) | **new**, through the fake | write |
-| nous#41 #11 (re-invite re-sends) | control plane (consumer) | **new**, through the fake | write |
+| 2 (MinimalRepository empty ssh_url) | control plane (consumer) | **new** fake-level (`regression_test.go`) | write in M4 |
+| 3 (accepted-but-unpublished recovery) | end-to-end (control+data) | **M5 simulation** asserts the recovery path | write in M5 |
+| nous#41 #11 (re-invite re-sends) | control plane (consumer) | **new** fake-level (`regression_test.go`) | write in M4 |
 | 4 (discovery filter) | data plane / brain-logic | **already** `lib/brainsync/discovery_test.go`, `lib/brain/manifest_test.go` | verify green; do NOT re-pin |
 | 5 (operator pubkey on keys branch) | data plane / brain-logic | **already** `lib/brain/integration_test.go` (`TestPublishOwnPubkeyToRemote_OrphanCreate` + the republish-path tests) | verify green; do NOT re-pin |
 
-Bugs 4 & 5 are brain-logic/data-plane bugs that already have regression homes using `file://` bare repos and never route through `gh` (`PublishOwnPubkeyToRemote` takes a `cloneURL` and execs git directly; `DiscoverAll` is filesystem-only). The gh fake does **not** newly pin them — claiming it does would be the over-reach the spec review caught. M4's *new* contribution is the three control-plane bugs (2, 3, #41 #11), plus optionally lifting `TestEndToEnd_GitHubMediatedOnboarding` to run its control-plane half through the fake (stretch).
+Bugs 4 & 5 are brain-logic/data-plane bugs that already have regression homes using `file://` bare repos and never route through `gh` (`PublishOwnPubkeyToRemote` takes a `cloneURL` and execs git directly; `DiscoverAll` is filesystem-only). The gh fake does **not** newly pin them — claiming it does would be the over-reach the spec review caught. M4's *new* contribution is the three control-plane bugs (2, 3, #41 #11). The full multi-actor onboarding flow through the fake is **no longer a stretch** — it's promoted to its own milestone **M5** (the forward-looking simulation payoff), so bug 3's e2e home is the M5 simulation; in M4, bug 3 is pinned at the fake's recovery-path level (accept → forced push-fail → recovery).
 
 **Files (new control-plane tests):**
-- Create: `lib/gh/regression_test.go` for bug 2's clone-URL behavior and bug #41 #11's re-invite behavior (pure control-plane, fake-only — fastest home).
-- Modify: `lib/brain/integration_test.go` — extend/clone `TestEndToEnd_GitHubMediatedOnboarding` (~line 516) to drive the invite→accept control plane through `gh.NewFake(...)` (it today exercises only the `file://` data plane), giving bugs 2 & 3 an end-to-end home. The fake's `CloneURL` (tmpdir base) is the seam that lets the existing `file://` setup and the fake's invitations meet.
+- Create: `lib/gh/regression_test.go` for bug 2's clone-URL behavior and bug #41 #11's re-invite behavior (pure control-plane, fake-only — fastest home). (Bug 3's end-to-end recovery lands in the M5 simulation, which drives the real join including the push.)
 
-- [ ] **Bug 2 — MinimalRepository empty ssh_url (fake-level + e2e):** in `regression_test.go`, seed an invitation, assert `c.CloneURL(inv.Repository.FullName, inv.Repository.SSHURL)` (with `SSHURL==""`) yields the tmpdir `file://…/owner/repo.git` and a real `git clone` of it succeeds — the pre-fix path fabricated/passed an empty string and failed. In `integration_test.go`, assert the join flow clones via `c.CloneURL(...)` not a hardcoded URL.
-- [ ] **Bug 3 — accepted-but-unpublished recovery (e2e):** in the extended `integration_test.go` flow, accept the invite through the fake, force the gcrypt push to fail (data plane), assert the documented recovery path runs (not a stuck collaborator-but-unpublished state).
-- [ ] **nous#41 #11 — re-invite re-sends (fake-level):** in `regression_test.go`, with a pending invite present, `InviteCollaborator` deletes-then-readds (`ReplacedStale==true`); and assert that when the underlying list/delete fails, `InviteCollaborator` returns a hard error (not swallowed) — inject the failure via a fake knob (e.g. `fakeClient.FailListInvitations(true)`).
+- [ ] **Bug 2 — MinimalRepository empty ssh_url (fake-level):** in `regression_test.go`, seed an invitation, assert `c.CloneURL(inv.Repository.FullName, inv.Repository.SSHURL)` (with `SSHURL==""`) yields the tmpdir `file://…/owner/repo.git` and a real `git clone` of it succeeds — the pre-fix path fabricated/passed an empty string and failed. (Note: `TestFake_CloneURL_ResolvesToTmpdirBareRepo` from M2 already covers the clone-resolves direction; this adds the *invitation-shaped* assertion — empty `ssh_url` from `PendingInvitations` → non-empty `CloneURL`.)
+- [ ] **nous#41 #11 — re-invite re-sends (fake-level):** in `regression_test.go`, with a pending invite present, `InviteCollaborator` deletes-then-readds (`ReplacedStale==true`); and assert that when the underlying list fails, `InviteCollaborator` returns a hard error (not swallowed) via `fakeClient.FailListInvitations(true)`. (Note: M2's `TestFake_InviteCollaborator_*` already cover both; in M4 re-frame/cross-reference them as the explicit nous#41 #11 regression rather than duplicating.)
 - [ ] **Verify bugs 4 & 5 still green** (`-run` is global, so invoke per-package with exact names):
   - bug 4: `go test ./lib/brainsync/ -run 'TestFindSharedBrains' -v` (pinpoint: `TestFindSharedBrains_SingleRecipientWithGcryptRemote`) **and** `go test ./lib/brain/ -run 'TestDiscoverAll' -v`
   - bug 5: `go test ./lib/brain/ -run 'TestEndToEnd_OperatorPubkeyMissingThenRepublish|TestPublishOwnPubkeyToRemote_OrphanCreate' -v`
@@ -517,11 +517,36 @@ Bugs 4 & 5 are brain-logic/data-plane bugs that already have regression homes us
 
 > Note: bug 1 is NOT here — it is pinned by `real_test.go` (M1) + the contract real-run (M3). Do not attempt to reproduce a below-the-seam endpoint bug through the fake.
 
-### Task 4.2: Atlas + close
+### Task 4.2: Close M4
 
-- [ ] **Step 1:** Update `atlas/` for the new `lib/gh` port/adapter/fake surface and the grounding cadence; ensure `atlas/index.md` links any new file. (ARCH note: cite ARCH-PURE — pure `fakeState`/`cloneURL` core + thin `realClient` IO seam — and ARCH-DRY — single `cloneURL`, single contract suite over two backends — in the `## Log`.)
-- [ ] **Step 2:** `go test ./...` → PASS. `sdlc close --issue 42 --actual <h> --verified '<evidence: fake+contract+regression green; real contract certified YYYY-MM-DD>'`.
-- [ ] **Step 3:** This unblocks ariadne#71's `deps`; note in nous `## Log` that the gh instance (instance 1 of the pattern) is complete.
+- [ ] `go test ./...` → PASS (outside sandbox for the gpg-agent tests). `sdlc milestone-close --issue 42 --milestone M4 --actual <h> --verified '<evidence>'` (atlas not touched this window → `--no-atlas` with the why: the port/fake atlas already landed in M1/M2; the simulation + grounding-cadence atlas note lands in M5). Log the verdict.
+
+---
+
+## Chunk 5: M5 — Full-lifecycle simulation (the forward-looking payoff) + atlas + close
+
+**Outcome:** a single hermetic `go test` drives the multi-actor brain-onboarding lifecycle end-to-end through the fake + tmpdir data plane — the demonstration that the shim turns GitHub flows into scriptable simulations, the whole point of the pattern (spec value #2). This is also bug 3's end-to-end home.
+
+### Task 5.1: The lifecycle simulation
+
+**Files:**
+- Create: `lib/brain/onboarding_simulation_test.go` (or extend `integration_test.go`'s `TestEndToEnd_GitHubMediatedOnboarding` ~line 516, which today exercises only the `file://` data plane) to drive the **control plane through `gh.NewFake(...)`**. The fake's `CloneURL` (tmpdir base) is the seam joining the fake's invitations to the existing `file://` bare-repo data plane.
+
+- [ ] **Step 1 — script the lifecycle** as one test with sub-steps, using the fake's `AddUser`/`SwitchUser`/`AsUser`/`CreateRepo` to model operator + joiner over one shared world:
+  1. operator: new-brain (gcrypt remote = tmpdir bare repo the fake's `CloneURL` points at) + publish operator pubkey to keys branch
+  2. operator: `InviteCollaborator(joiner)` → assert it appears in `RepoPendingInvitations`
+  3. joiner (`AsUser`): `PendingInvitations` (assert MinimalRepository empty `ssh_url`) → `AcceptInvitation` → clone via `CloneURL` → publish own pubkey
+  4. operator: auto-admit from keys branch → assert joiner admitted (decrypt **and** signature-verify both succeed — the bug-5 property, here exercised in-flow)
+  5. **bug 3 leg:** force the joiner's post-accept push to fail; assert the recovery path runs (no stuck collaborator-but-unpublished state)
+  6. joiner: `leave` → assert `RemoveCollaborator` + membership records converge
+- [ ] **Step 2:** each sub-step asserts observable state (collaborators, pending invites, keys-branch contents, decrypt+verify). Run: `go test ./lib/brain/ -run Onboarding -v` (outside sandbox) → PASS.
+- [ ] **Step 3: Commit** `#42 M5: simulation: full multi-actor onboarding lifecycle through the fake`.
+
+### Task 5.2: Atlas + close the issue
+
+- [ ] **Step 1:** Update `atlas/nous/e2e-integration-testing.md` (and `lib-layout.md` if needed) to document the lifecycle simulation as the worked example of fake-as-substrate + the grounding cadence; cite ARCH-PURE (pure `fakeState`/`cloneURL`, thin `realClient`) and ARCH-DRY (one `cloneURL`, one `inviteCollaborator`, one contract suite over two backends) in the `## Log`.
+- [ ] **Step 2:** `go test ./...` → PASS (outside sandbox). `sdlc close --issue 42 --milestone M5 --actual <h> --verified '<evidence: fake+contract+regression+simulation green; real contract certified YYYY-MM-DD>'`.
+- [ ] **Step 3:** This unblocks ariadne#71's `deps`; note in nous `## Log` that the gh instance (instance 1 of the pattern) is complete, and that the simulation substrate is now available for future GitHub-touching features.
 
 ---
 

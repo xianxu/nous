@@ -86,8 +86,19 @@ ariadne#71.
    refreshed periodically (~monthly). This pins "what we believe about GitHub." Expensive,
    rare, human-in-loop.
 2. **Everything else tests against the grounded fake** — fast, hermetic, every run. The fake's
-   fidelity is accepted as an axiom between groundings. Payoff is twofold: regression-pinning
-   the historical bugs **and** giving every GitHub-touching nous feature a cheap e2e substrate.
+   fidelity is accepted as an axiom between groundings.
+
+   Two co-equal payoffs:
+   - **Regression-pinning** (backward-looking) — lock in the historical bugs so they can't
+     silently return.
+   - **Simulation-based testing** (forward-looking, the larger win) — the fake + tmpdir data
+     plane turns a whole **multi-actor, multi-step GitHub flow into a hermetic, scriptable
+     simulation**: operator creates a brain → invites → joiner accepts → publishes pubkey →
+     auto-admit runs → membership drifts → someone leaves, all in one `go test`, state evolving
+     across actors and time, no network, no VM. This is the deterministic shell extended
+     *outward* to include GitHub. The payoff isn't "we caught 5 old bugs"; it's that **every
+     future GitHub-touching feature can be developed and self-verified against a realistic
+     simulation before a human ever touches a VM** — the whole point of the shim(X) pattern.
 
 **Division of labor (load-bearing).** A library-level fake *replaces* `lib/gh` entirely, so:
 - bugs in code that *consumes* the port (call sequencing, mishandling empty `ssh_url`, the
@@ -174,6 +185,11 @@ control-plane fake meets the tmpdir data plane.
     runnable without network, **plus** the dual-backend contract test's real-`gh` run. A
     library-level fake structurally cannot see this; the spec's Division-of-labor section says so,
     and "Done when" must not claim otherwise.
+- A **full-lifecycle simulation test** exists (the forward-looking payoff): a single hermetic
+  `go test` drives the multi-actor onboarding flow end-to-end through the fake + tmpdir data
+  plane (operator new-brain → invite → joiner accept → pubkey publish → auto-admit → leave),
+  demonstrating the fake as a self-verification substrate for *future* GitHub-touching features,
+  not just a regression harness.
 - No ariadne files changed. ariadne#71 carries the deferred convention/§5/architecture.md work
   and is linked via `deps`.
 
