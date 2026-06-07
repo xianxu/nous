@@ -192,7 +192,7 @@ yingtest42 → DC73…B6E9 (verified by xianxu on 2026-05-20)
 | `lib/tui/brain/accept_invite.go`  | TUI inline accept-invite flow (the primary invitee surface) |
 | `lib/tui/brain/list.go`           | renders pending invitations + accessible-but-not-cloned rows |
 | `cmd/nous/brain_recipient.go::Verify` | OOB-ceremony CLI + verified.yaml persistence |
-| `lib/gh/gh.go`                    | thin wrappers over `gh api` |
+| `lib/gh/{client.go,real.go,fake.go,types.go}` | GitHub control-plane port (nous#42): `Client` interface; `real.go` execs `gh`, `fake.go` is the in-memory test/sim adapter |
 | `lib/brain/autoadmit.go`          | auto-admit + drift detection logic |
 | `lib/brain/verified.go`           | verified.yaml read/write + LoginForFingerprint |
 | `lib/brain/peerkeys.go::PublishOwnPubkeyToRemote` | invitee-side keys-branch push (with orphan-create) |

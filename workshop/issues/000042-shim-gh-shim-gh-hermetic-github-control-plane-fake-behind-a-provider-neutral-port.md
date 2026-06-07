@@ -287,3 +287,14 @@ GitHub — and the grounding immediately paid off, catching two mismatches:
 
 All 10 invariants now PASS on both the fake (CI) and real `gh`
 (xianxu/yingtest42/shim-conformance, 33.7s). Full gh/brain/brainsync suites green.
+
+### 2026-06-05 — zero-config grounding + atlas dead-pointer fix
+
+Conformance run hardened to need nothing from the operator: tokens resolve from
+`gh auth` (operator) + macOS Keychain (invitee), logins derive from the tokens,
+and the fixture repo auto-provisions (`gh repo create`, never deleted — no
+delete_repo scope). Verified end to end: `go test -tags conformance ./lib/gh/
+-run Contract_Real` with NO env passes all 10 invariants. Pre-merge specs judge
+caught two atlas files still pointing at the deleted `lib/gh/gh.go`
+(recipient-onboarding.md, collaborator-lifecycle.md) — fixed to the new
+port/adapter layout.

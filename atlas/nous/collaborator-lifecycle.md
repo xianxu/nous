@@ -8,9 +8,11 @@ atlas entry is the code map.
 ## Two layers
 
 - **GitHub (transport/ACL)**, keyed by login: pending *invitation* or accepted
-  *collaborator*. `lib/gh/gh.go` — `InviteCollaborator` (clears stale invite then
-  PUT, so re-invite re-sends; list/delete failures are hard errors — a swallowed
-  failure lets the PUT silently no-op, #41 #11), `RemoveCollaborator`,
+  *collaborator*. The `lib/gh` port (`Client` in `client.go`; `real.go` execs
+  `gh`, `fake.go` the in-memory adapter — nous#42) — `InviteCollaborator` (clears
+  stale invite then PUT, so re-invite re-sends; list/delete failures are hard
+  errors — a swallowed failure lets the PUT silently no-op, #41 #11; the composite
+  lives once in `client.go`'s `inviteCollaborator`), `RemoveCollaborator`,
   `RepoPendingInvitations`, `DeleteRepoInvitation`, `CollaboratorPermission`.
 - **Crypto (decryption)**, keyed by GPG fingerprint: manifest `recipients:` +
   the `keys` branch pubkey(s). The keys-branch `<login>.asc` is the canonical
