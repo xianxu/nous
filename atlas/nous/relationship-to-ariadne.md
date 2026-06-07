@@ -91,7 +91,7 @@ The shared-brain machinery proper:
   conflict file detection; resolve verb's plumbing.
 - `lib/identity/*` — GPG key lifecycle (init, list, import,
   export, primary).
-- `lib/gh/*` — thin wrappers over `gh api` (nous#26).
+- `lib/gh/*` — provider-neutral GitHub control-plane port (`Client`; real `gh`-exec adapter + in-memory fake) (nous#26, nous#42).
 - `lib/workspace/*` — workspace root resolution (the "nous
   and brains are siblings" convention encoded in code).
 
