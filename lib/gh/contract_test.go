@@ -134,17 +134,18 @@ func runContract(t *testing.T, newWorld func(t *testing.T) contractWorld) {
 		}
 	})
 
-	t.Run("user_exists_distinguishes_visible_and_missing", func(t *testing.T) {
+	t.Run("user_exists_404s_on_missing_login", func(t *testing.T) {
 		w := newWorld(t)
-		// Use the OWNER as the known-visible login (a repo owner is necessarily
-		// public). Do NOT use the invitee: a secondary/new account can be
-		// invitable yet NOT visible via /users/<login> (the nous#25 lag) — the
-		// 2026-06-05 grounding confirmed yingtest42 is exactly that case, which
-		// is the very asymmetry the fake's shadow-flag models.
-		if err := w.operator.UserExists(w.owner); err != nil {
-			t.Fatalf("UserExists(%q) = %v, want nil (owner is visible)", w.owner, err)
-		}
-		// a clearly-nonexistent login 404s → ErrUserNotVisible
+		// A clearly-nonexistent login 404s → ErrUserNotVisible — the load-bearing
+		// behavior (the nous#25 lag surface; ErrUserNotVisible exists for it).
+		//
+		// We deliberately do NOT assert the "visible → nil" half. It depends on
+		// the queried account being PAST GitHub's /users/<login> propagation lag,
+		// which brand-new throwaway fixtures are not: the 2026-06-06 grounding
+		// confirmed both yingtest42 AND emmatest42 404 on /users/<login> while
+		// their tokens work fine — the exact asymmetry the fake's shadow-flag
+		// models. The "visible" path is trivial (200→nil) and covered by the
+		// fake's unit tests; grounding the 404 mapping is what matters.
 		if err := w.operator.UserExists(missingLogin); !errors.Is(err, ErrUserNotVisible) {
 			t.Fatalf("UserExists(%q) = %v, want ErrUserNotVisible", missingLogin, err)
 		}

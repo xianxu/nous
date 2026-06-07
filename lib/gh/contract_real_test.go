@@ -5,38 +5,39 @@
 // the fake hasn't drifted from GitHub. It is build-tagged `conformance` so it
 // never runs in normal CI — invoke it manually, ~monthly or on suspected drift.
 //
-// ZERO-CONFIG INVOCATION (defaults baked in — see resolveConformanceConfig):
+// TWO THROWAWAY ACCOUNTS — the developer's real account is NOT on this path:
+//   - operator / repo-owner = a disposable account with `repo` + `delete_repo`
+//   - invitee / collaborator = a second disposable account with `repo`
+// Both tokens come from Keychain; `gh auth` is not used.
+//
+// ZERO-CONFIG INVOCATION:
 //
 //	go test -tags conformance ./lib/gh/ -run Contract_Real -v
 //
 // With no env set, it resolves:
-//   - operator token  ← `gh auth token` (your existing gh login)
-//   - invitee token   ← macOS Keychain: `security find-generic-password
-//                        -s nous-conformance-invitee -w`
-//   - owner login     ← derived from the operator token (AuthLogin)
-//   - invitee login   ← derived from the invitee token (AuthLogin)
-//   - repo            ← "shim-conformance" (under the owner)
+//   - operator token ← Keychain `nous-conformance-operator`
+//   - invitee token  ← Keychain `nous-conformance-invitee`
+//   - owner / invitee logins ← derived from the tokens (AuthLogin)
+//   - repo ← "shim-conformance" (created under the operator)
 //
-// ONE-TIME SETUP (stores the invitee token in Keychain — never committed):
+// ONE-TIME SETUP (tokens stored in Keychain — never committed):
 //
+//	security add-generic-password -s nous-conformance-operator \
+//	  -a <operator-login> -w <operator-PAT: classic, repo + delete_repo>
 //	security add-generic-password -s nous-conformance-invitee \
-//	  -a <invitee-login> -w <invitee-PAT-classic-repo-scope>
-//
-// That's the only setup — the fixture repo is auto-provisioned (see below).
+//	  -a <invitee-login>  -w <invitee-PAT: classic, repo>
 //
 // Every value is OVERRIDABLE by env (GH_TOKEN_OP, GH_TOKEN_INVITEE,
-// GH_TEST_OWNER, GH_TEST_REPO, GH_TEST_INVITEE_LOGIN) — that's the path CI uses
-// (encrypted Actions secrets). Tokens NEVER live in the repo: only `gh auth`,
-// Keychain, or CI secrets. If a required value can't be resolved, the test
-// SKIPS (it never fails for missing creds).
+// GH_TEST_OWNER, GH_TEST_REPO, GH_TEST_INVITEE_LOGIN) — the CI path (encrypted
+// Actions secrets). Tokens NEVER live in the repo: only Keychain or CI secrets.
+// If a required value can't be resolved, the test SKIPS (never fails for creds).
 //
-// The fixture repo is ENSURE-CREATED (private) if missing — `gh repo create`,
-// idempotent. We create but never delete (the operator token has `repo`, not
-// `delete_repo` scope), so it persists as an empty private fixture reused next
-// run; it holds no real content. The suite is otherwise non-destructive beyond
-// invitations/collaborators, which newWorld resets before each subtest and
-// t.Cleanup clears after. If a subtest FAILS, the fake has drifted: fix fake.go
-// (not the test) and re-certify.
+// EPHEMERAL FIXTURE: `<operator>/shim-conformance` is created (private) at the
+// start of the run and DELETED on cleanup (the operator token's `delete_repo`).
+// Zero standing test artifacts; nothing touches the real account. The suite is
+// otherwise non-destructive beyond invitations/collaborators, which newWorld
+// resets before each subtest and t.Cleanup clears after. If a subtest FAILS, the
+// fake has drifted: fix fake.go (not the test) and re-certify.
 //
 // Eventual consistency: GitHub's post-acceptance endpoints can lag (the spec
 // notes /user/repos by tens of seconds). ListCollaborators is usually prompt,
@@ -54,16 +55,6 @@ import (
 	"testing"
 )
 
-// ghAuthToken returns the active `gh` login's token (the operator's own auth),
-// or "" if gh isn't installed/authed.
-func ghAuthToken() string {
-	out, err := exec.Command("gh", "auth", "token").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
-
 // keychainSecret reads a generic password from the macOS Keychain by service
 // name, or "" (other OSes, or not present).
 func keychainSecret(service string) string {
@@ -78,13 +69,14 @@ func keychainSecret(service string) string {
 }
 
 // resolveConformanceConfig fills the conformance inputs from env (override) →
-// baked defaults (gh auth + Keychain + token-derived logins). Returns ok=false
-// when a required value can't be resolved, so the caller SKIPS rather than
-// fails. Tokens are never read from the repo.
+// Keychain defaults. Both identities are disposable accounts (operator +
+// invitee); the real `gh auth` account is intentionally not used. Returns
+// ok=false when a required value can't be resolved, so the caller SKIPS rather
+// than fails. Tokens are never read from the repo.
 func resolveConformanceConfig() (opTok, inviteeTok, owner, repo, inviteeLogin string, ok bool) {
 	opTok = os.Getenv("GH_TOKEN_OP")
 	if opTok == "" {
-		opTok = ghAuthToken()
+		opTok = keychainSecret("nous-conformance-operator")
 	}
 	inviteeTok = os.Getenv("GH_TOKEN_INVITEE")
 	if inviteeTok == "" {
@@ -112,12 +104,17 @@ func resolveConformanceConfig() (opTok, inviteeTok, owner, repo, inviteeLogin st
 	return opTok, inviteeTok, owner, repo, inviteeLogin, ok
 }
 
-// ensureConformanceRepo provisions the private fixture repo if it doesn't
-// exist (zero-config). Execs `gh repo create` directly with the operator token
-// rather than via the Client — repo creation isn't part of nous's used surface,
-// so it stays off the port. Idempotent: an "already exists" error is fine.
+// ensureConformanceRepo creates the private fixture repo (operator-owned).
+// Execs `gh repo create` directly with the operator token rather than via the
+// Client — repo lifecycle isn't part of nous's used surface, so it stays off the
+// port. Idempotent: an "already exists" error (e.g. a prior run's delete failed)
+// is fine.
 func ensureConformanceRepo(t *testing.T, opTok, owner, repo string) {
-	cmd := exec.Command("gh", "repo", "create", owner+"/"+repo, "--private")
+	// Bare name (not owner/repo): `gh repo create` then makes it under the authed
+	// user — which IS the operator. Passing owner/repo makes gh resolve the owner
+	// via /users/<owner>, which 404s for a brand-new throwaway account still in
+	// GitHub's visibility lag (the operator here is exactly such an account).
+	cmd := exec.Command("gh", "repo", "create", repo, "--private")
 	cmd.Env = append(os.Environ(), "GH_TOKEN="+opTok)
 	out, err := cmd.CombinedOutput()
 	if err != nil && !strings.Contains(strings.ToLower(string(out)), "already exists") {
@@ -125,15 +122,29 @@ func ensureConformanceRepo(t *testing.T, opTok, owner, repo string) {
 	}
 }
 
+// deleteConformanceRepo removes the ephemeral fixture (operator `delete_repo`).
+// Best-effort: a failed delete must not fail an otherwise-green cert — it just
+// leaves the repo for the next run's ensure-create to reuse — so we warn, not
+// fatal.
+func deleteConformanceRepo(t *testing.T, opTok, owner, repo string) {
+	cmd := exec.Command("gh", "repo", "delete", owner+"/"+repo, "--yes")
+	cmd.Env = append(os.Environ(), "GH_TOKEN="+opTok)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Logf("warning: could not delete ephemeral fixture %s/%s (leaving for next run): %v\n%s", owner, repo, err, out)
+	}
+}
+
 func TestContract_Real(t *testing.T) {
 	opTok, inviteeTok, owner, repo, inviteeLogin, ok := resolveConformanceConfig()
 	if !ok {
-		t.Skip("conformance creds unresolved — set the invitee token in Keychain " +
-			"(security add-generic-password -s nous-conformance-invitee -a <login> -w <PAT>) " +
-			"and `gh auth login`, or pass GH_TOKEN_OP/GH_TOKEN_INVITEE/GH_TEST_* env")
+		t.Skip("conformance creds unresolved — store both throwaway-account tokens in Keychain:\n" +
+			"  security add-generic-password -s nous-conformance-operator -a <login> -w <PAT repo+delete_repo>\n" +
+			"  security add-generic-password -s nous-conformance-invitee  -a <login> -w <PAT repo>\n" +
+			"or pass GH_TOKEN_OP/GH_TOKEN_INVITEE/GH_TEST_* env")
 	}
 
 	ensureConformanceRepo(t, opTok, owner, repo)
+	t.Cleanup(func() { deleteConformanceRepo(t, opTok, owner, repo) }) // ephemeral
 
 	operator := New(Conf{Token: opTok})
 	invitee := New(Conf{Token: inviteeTok})
