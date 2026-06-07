@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	libbrain "github.com/xianxu/nous/lib/brain"
+	"github.com/xianxu/nous/lib/gh"
 )
 
 // readyDetail builds a non-loading detail model with the given status —
@@ -128,7 +129,7 @@ func TestDetail_InviteOnLocalShowsHint(t *testing.T) {
 // list cache so the new rung renders.
 func TestRoot_PublishDoneReturnsToDetail(t *testing.T) {
 	t.Setenv("WORKSPACE_ROOT", t.TempDir())
-	root := NewRoot().(rootModel)
+	root := NewRoot(gh.NewFake(gh.Conf{})).(rootModel)
 	// Seed a cache so we can assert it's cleared.
 	r1, _ := root.Update(listLoadedMsg{data: listLoadedData{myLogin: "me"}})
 	root = r1.(rootModel)

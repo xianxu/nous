@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/xianxu/nous/lib/brainsync"
+	"github.com/xianxu/nous/lib/gh"
 )
 
 // leave.go is the TUI flow run from the detail page when the
@@ -49,14 +50,16 @@ type leaveWorkMsg struct {
 }
 
 type leaveModel struct {
+	gh gh.Client
+
 	brainPath string
 	stage     leaveStage
 	err       error
 	result    brainsync.LeaveResult
 }
 
-func newLeaveModel(brainPath string) leaveModel {
-	return leaveModel{brainPath: brainPath, stage: leaveStageConfirm}
+func newLeaveModel(c gh.Client, brainPath string) leaveModel {
+	return leaveModel{gh: c, brainPath: brainPath, stage: leaveStageConfirm}
 }
 
 func (m leaveModel) Init() tea.Cmd { return nil }
@@ -75,11 +78,12 @@ func (m leaveModel) Update(msg tea.Msg) (leaveModel, tea.Cmd) {
 			case "y", "Y":
 				m.stage = leaveStageWorking
 				path := m.brainPath
+				c := m.gh
 				return m, func() tea.Msg {
 					// deleteLocal=false in the TUI v1 — keep that knob CLI-only
 					// until we've used the default behavior once and confirmed
 					// it's right.
-					res, err := brainsync.LeaveBrain(context.Background(), path, false)
+					res, err := brainsync.LeaveBrain(context.Background(), c, path, false)
 					return leaveWorkMsg{err: err, result: res}
 				}
 			case "esc", "n", "N", "ctrl+c":

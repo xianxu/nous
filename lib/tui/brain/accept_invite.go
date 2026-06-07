@@ -59,6 +59,8 @@ type acceptInviteDoneMsg struct{ err error }
 type acceptWorkMsg struct{ err error }
 
 type acceptInviteModel struct {
+	gh gh.Client
+
 	invitation gh.Invitation
 
 	stage acceptStage
@@ -72,11 +74,11 @@ type acceptInviteModel struct {
 	err     error // populated in done stage on accept/publish failure
 }
 
-func newAcceptInviteModel(inv gh.Invitation) acceptInviteModel {
-	m := acceptInviteModel{invitation: inv}
+func newAcceptInviteModel(c gh.Client, inv gh.Invitation) acceptInviteModel {
+	m := acceptInviteModel{gh: c, invitation: inv}
 
 	// Resolve auth login (filename stem for the published <login>.asc).
-	login, err := gh.AuthLogin()
+	login, err := c.AuthLogin()
 	if err != nil {
 		m.loadErr = fmt.Errorf("resolve github login: %w", err)
 		return m
@@ -174,12 +176,13 @@ func (m acceptInviteModel) updateConfirm(msg tea.Msg) (acceptInviteModel, tea.Cm
 		// acceptWorkMsg so the View can render a status frame in
 		// the meantime.
 		invID := m.invitation.ID
-		cloneURL := m.invitation.CloneSSHURL()
+		c := m.gh
+		cloneURL := c.CloneURL(m.invitation.Repository.FullName, m.invitation.Repository.SSHURL)
 		login := m.myLogin
 		fp := m.pickedFP
 		return m, func() tea.Msg {
 			ctx := context.Background()
-			if err := gh.AcceptInvitation(invID); err != nil {
+			if err := c.AcceptInvitation(invID); err != nil {
 				return acceptWorkMsg{err: fmt.Errorf("accept invitation: %w", err)}
 			}
 			armor, err := identity.Export(fp)

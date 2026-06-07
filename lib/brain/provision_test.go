@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/xianxu/nous/lib/gh"
 )
 
 func TestInitLocal_CreatesLocalBrain(t *testing.T) {
@@ -47,7 +49,7 @@ func TestInitLocal_CreatesLocalBrain(t *testing.T) {
 	}
 
 	// Status: a local brain has no remote and no upstream.
-	s, err := LoadStatus(root)
+	s, err := LoadStatus(gh.New(gh.Conf{}), root)
 	if err != nil {
 		t.Fatalf("LoadStatus: %v", err)
 	}

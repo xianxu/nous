@@ -89,7 +89,7 @@ type CommitInfo struct {
 // brainRoot must be the directory that contains .brain/ (not .brain
 // itself). Reading the manifest is the only step that can hard-fail —
 // everything else degrades gracefully.
-func LoadStatus(brainRoot string) (Status, error) {
+func LoadStatus(c gh.Client, brainRoot string) (Status, error) {
 	abs, err := filepath.Abs(brainRoot)
 	if err != nil {
 		return Status{}, err
@@ -121,7 +121,7 @@ func LoadStatus(brainRoot string) (Status, error) {
 	// status load still succeeds with PendingInvitations==nil.
 	if s.OriginURL != "" {
 		if owner, repo, err := GitHubOwnerRepo(s.OriginURL); err == nil {
-			if invs, err := gh.RepoPendingInvitations(owner, repo); err == nil {
+			if invs, err := c.RepoPendingInvitations(owner, repo); err == nil {
 				s.PendingInvitations = invs
 			}
 		}

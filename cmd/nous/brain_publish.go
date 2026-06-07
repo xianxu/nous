@@ -118,8 +118,9 @@ func runBrainPublish(cmd *cobra.Command, brainPathFlag, anchorFp string, yes boo
 	}
 	ownFp := recipients[0]
 
+	ghc := gh.New(gh.Conf{})
 	name := filepath.Base(abs)
-	owner, _ := gh.AuthLogin() // best-effort, for the confirm message only
+	owner, _ := ghc.AuthLogin() // best-effort, for the confirm message only
 	fmt.Fprintf(out, "About to publish local brain to GitHub:\n")
 	fmt.Fprintf(out, "  brain:      %s\n", name)
 	fmt.Fprintf(out, "  repo:       %s/%s (private)\n", orPlaceholder(owner, "<your-login>"), name)
@@ -170,7 +171,7 @@ func runBrainPublish(cmd *cobra.Command, brainPathFlag, anchorFp string, yes boo
 	// Keys branch: publish recipient pubkeys so future peers can
 	// auto-import before gcrypt signature verification (nous#23). Shared
 	// with `nous brain new`'s multi-recipient path.
-	publishKeysBranch(out, cmd.Context(), abs, recipients, ownFp)
+	publishKeysBranch(ghc, out, cmd.Context(), abs, recipients, ownFp)
 
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "Published. %q is now private (GitHub-backed, gcrypt-encrypted).\n", name)
@@ -256,7 +257,7 @@ func resolvePublishTargetBrain(w io.Writer, in io.Reader, brainPathFlag string) 
 // undo the gcrypt provisioning — the brain works without it, peers just
 // fall back to sneakernet until a later publish succeeds. Shared by
 // `nous brain new` (multi-recipient) and `nous brain publish`.
-func publishKeysBranch(out io.Writer, ctx context.Context, brainAbs string, recipients []string, ownFp string) {
+func publishKeysBranch(c gh.Client, out io.Writer, ctx context.Context, brainAbs string, recipients []string, ownFp string) {
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Publishing recipient pubkeys to the keys branch …")
 	anyFailed := false
@@ -268,7 +269,7 @@ func publishKeysBranch(out io.Writer, ctx context.Context, brainAbs string, reci
 		}
 		fmt.Fprintf(out, "  published %s\n", shortFp(fp))
 	}
-	if myLogin, err := gh.AuthLogin(); err == nil && myLogin != "" {
+	if myLogin, err := c.AuthLogin(); err == nil && myLogin != "" {
 		if err := brain.PublishOwnPubkey(ctx, brainAbs, myLogin, ownFp); err != nil {
 			fmt.Fprintf(out, "  warning: publish %s.asc: %v\n", myLogin, err)
 			anyFailed = true

@@ -130,7 +130,7 @@ type RemovePersonResult struct {
 //   - non-recipient login (pending invitee, or accepted-but-not-admitted) →
 //     cancel the pending invitation + revoke the collaborator. No manifest
 //     touch (they were never a recipient).
-func RemovePerson(ctx context.Context, brainPath, selector string, force bool) (*RemovePersonResult, error) {
+func RemovePerson(ctx context.Context, c gh.Client, brainPath, selector string, force bool) (*RemovePersonResult, error) {
 	res := &RemovePersonResult{Selector: selector}
 	m, err := brain.Read(brainPath)
 	if err != nil {
@@ -150,7 +150,7 @@ func RemovePerson(ctx context.Context, brainPath, selector string, force bool) (
 	if fp != "" {
 		// Recipient path — RemoveRecipient owns manifest + verified + keys +
 		// collaborator (with the nous#40 early login resolution).
-		rr, rerr := RemoveRecipient(ctx, brainPath, fp, force)
+		rr, rerr := RemoveRecipient(ctx, c, brainPath, fp, force)
 		res.Recipient, res.WasRecipient = rr, true
 		if rr != nil {
 			res.Fingerprint, res.Login = rr.Match, rr.Login
@@ -163,7 +163,7 @@ func RemovePerson(ctx context.Context, brainPath, selector string, force bool) (
 		}
 		// Clear any lingering pending invitation for the login too.
 		if rr != nil && rr.HadRemote && res.Login != "" {
-			if cancelled, _ := cancelPendingInvitation(rr.Owner, rr.Repo, res.Login); cancelled {
+			if cancelled, _ := cancelPendingInvitation(c, rr.Owner, rr.Repo, res.Login); cancelled {
 				res.InvitationCancelled = true
 			}
 		}
@@ -182,13 +182,13 @@ func RemovePerson(ctx context.Context, brainPath, selector string, force bool) (
 	}
 	res.Owner, res.Repo, res.Login = owner, repo, selector
 
-	cancelled, _ := cancelPendingInvitation(owner, repo, selector)
+	cancelled, _ := cancelPendingInvitation(c, owner, repo, selector)
 	res.InvitationCancelled = cancelled
 
 	// Revoke the collaborator only if they actually are one (keeps NothingToDo
 	// accurate — gh's DELETE is a silent no-op for non-collaborators).
-	if perm, perr := gh.CollaboratorPermission(owner, repo, selector); perr == nil && perm != "" && perm != "none" {
-		if cerr := gh.RemoveCollaborator(owner, repo, selector); cerr != nil {
+	if perm, perr := c.CollaboratorPermission(owner, repo, selector); perr == nil && perm != "" && perm != "none" {
+		if cerr := c.RemoveCollaborator(owner, repo, selector); cerr != nil {
 			res.CollaboratorErr = cerr
 		} else {
 			res.CollaboratorRevoked = true
@@ -217,14 +217,14 @@ func RemovePerson(ctx context.Context, brainPath, selector string, force bool) (
 
 // cancelPendingInvitation deletes a pending repo invitation for login if one
 // exists. Returns whether it deleted one.
-func cancelPendingInvitation(owner, repo, login string) (bool, error) {
-	invs, err := gh.RepoPendingInvitations(owner, repo)
+func cancelPendingInvitation(c gh.Client, owner, repo, login string) (bool, error) {
+	invs, err := c.RepoPendingInvitations(owner, repo)
 	if err != nil {
 		return false, err
 	}
 	for _, inv := range invs {
 		if strings.EqualFold(inv.Invitee.Login, login) {
-			if derr := gh.DeleteRepoInvitation(owner, repo, inv.ID); derr != nil {
+			if derr := c.DeleteRepoInvitation(owner, repo, inv.ID); derr != nil {
 				return false, derr
 			}
 			return true, nil
@@ -253,7 +253,7 @@ func cancelPendingInvitation(owner, repo, login string) (bool, error) {
 //
 // This is per-brain only — cross-brain fan-out + ban list live in
 // nous#37. It does NOT touch the local GPG keyring.
-func RemoveRecipient(ctx context.Context, brainPath, fpArg string, force bool) (*RemoveRecipientResult, error) {
+func RemoveRecipient(ctx context.Context, c gh.Client, brainPath, fpArg string, force bool) (*RemoveRecipientResult, error) {
 	res := &RemoveRecipientResult{}
 
 	m, err := brain.Read(brainPath)
@@ -293,7 +293,7 @@ func RemoveRecipient(ctx context.Context, brainPath, fpArg string, force bool) (
 		return res, fmt.Errorf("removing %s leaves no decrypt path on %s — pass force to override", res.ShortFp, filepath.Base(brainPath))
 	}
 
-	sr, serr := stripMember(ctx, brainPath, match, fmt.Sprintf("recipient: revoke %s", res.ShortFp), "")
+	sr, serr := stripMember(ctx, c, brainPath, match, fmt.Sprintf("recipient: revoke %s", res.ShortFp), "")
 	res.RemovedLogins = sr.RemovedLogins
 	res.VerifiedErr = sr.VerifiedErr
 	res.Login = sr.Login
@@ -346,7 +346,7 @@ type stripMemberResult struct {
 // just-cleared verified.yaml entry (a removal hint from RemoveVerifiedFor's
 // return — NOT verified.yaml as a canonical mapping, which #3 dropped), then
 // the keys-branch <login>.asc (LoginForFingerprint), then the peer sidecar.
-func stripMember(ctx context.Context, brainPath, fp, commitMsg, knownLogin string) (*stripMemberResult, error) {
+func stripMember(ctx context.Context, c gh.Client, brainPath, fp, commitMsg, knownLogin string) (*stripMemberResult, error) {
 	res := &stripMemberResult{}
 
 	// Resolve the GitHub login NOW — before RevokePubkey (below) deletes the
@@ -410,7 +410,7 @@ func stripMember(ctx context.Context, brainPath, fp, commitMsg, knownLogin strin
 			res.HadRemote = true
 			res.Owner, res.Repo = owner, repo
 			if login != "" {
-				if cerr := gh.RemoveCollaborator(owner, repo, login); cerr != nil {
+				if cerr := c.RemoveCollaborator(owner, repo, login); cerr != nil {
 					res.CollaboratorErr = cerr
 				} else {
 					res.CollaboratorRevoked = true

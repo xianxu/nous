@@ -47,10 +47,10 @@ guarantees:
    brain is automatic.
 3. Resolves `remote.origin.url` → `owner/repo` via
    `brain.GitHubOwnerRepo`.
-4. Calls `gh.InviteCollaborator(owner, repo, login, "push")` —
-   deletes any stale/expired invitation first, then PUTs, so a
-   re-invite actually re-sends (a bare PUT is a no-op when an
-   invitation already exists; nous#39).
+4. Calls `InviteCollaborator(owner, repo, login, "push")` on the
+   injected `gh.Client` port (nous#42) — deletes any stale/expired
+   invitation first, then PUTs, so a re-invite actually re-sends (a
+   bare PUT is a no-op when an invitation already exists; nous#39).
 
 Done. Operator's role ends here. The invitee will be auto-admitted
 once they accept and publish their pubkey.
@@ -63,7 +63,7 @@ via the `nous brain new` markers — description prefix
 `nous-brain:` or topic `nous-brain`) inline with local brains and
 accessible-but-not-cloned repos. The invitee navigates to a
 pending row, presses `enter`, and the inline `accept_invite.go`
-flow handles GPG identity selection, `gh.AcceptInvitation`, and
+flow handles GPG identity selection, the port's `AcceptInvitation`, and
 the plain-git push of `<login>.asc` to the keys branch — all
 without a subprocess or terminal handoff. After the accept, the
 brain appears as accessible-but-not-cloned; `enter` again
@@ -85,8 +85,8 @@ exposed because:
 
 Both paths converge on the same underlying steps:
 
-1. `gh.PendingInvitations()` filtered to brain projects.
-2. `gh.AcceptInvitation(id)` to flip the invitation.
+1. `gh.Client.PendingInvitations()` filtered to brain projects.
+2. `gh.Client.AcceptInvitation(id)` to flip the invitation.
 3. `brain.PublishOwnPubkeyToRemote(remoteURL, login, armor)` to
    plain-git clone the keys branch, write `<login>.asc`, push back.
    Orphan-creates the keys branch if it doesn't exist.
@@ -192,7 +192,7 @@ yingtest42 → DC73…B6E9 (verified by xianxu on 2026-05-20)
 | `lib/tui/brain/accept_invite.go`  | TUI inline accept-invite flow (the primary invitee surface) |
 | `lib/tui/brain/list.go`           | renders pending invitations + accessible-but-not-cloned rows |
 | `cmd/nous/brain_recipient.go::Verify` | OOB-ceremony CLI + verified.yaml persistence |
-| `lib/gh/gh.go`                    | thin wrappers over `gh api` |
+| `lib/gh/{client.go,real.go,fake.go,types.go}` | GitHub control-plane port (nous#42): `Client` interface; `real.go` execs `gh`, `fake.go` is the in-memory test/sim adapter |
 | `lib/brain/autoadmit.go`          | auto-admit + drift detection logic |
 | `lib/brain/verified.go`           | verified.yaml read/write + LoginForFingerprint |
 | `lib/brain/peerkeys.go::PublishOwnPubkeyToRemote` | invitee-side keys-branch push (with orphan-create) |

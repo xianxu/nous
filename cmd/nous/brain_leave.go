@@ -20,6 +20,7 @@ import (
 
 	"github.com/xianxu/nous/lib/brain"
 	"github.com/xianxu/nous/lib/brainsync"
+	"github.com/xianxu/nous/lib/gh"
 )
 
 func newBrainLeaveCmd() *cobra.Command {
@@ -126,7 +127,7 @@ func runBrainLeave(ctx context.Context, out io.Writer, brainPath string, deleteL
 		fmt.Fprintln(out, "cancelled.")
 		return nil
 	}
-	res, err := brainsync.LeaveBrain(ctx, brainPath, deleteLocal)
+	res, err := brainsync.LeaveBrain(ctx, gh.New(gh.Conf{}), brainPath, deleteLocal)
 	if err != nil {
 		return err
 	}

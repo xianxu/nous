@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/xianxu/nous/lib/gh"
 )
 
 func TestMergeRecipients_ManifestOrderThenGcryptExtras(t *testing.T) {
@@ -259,7 +261,7 @@ func TestLoadStatus_EndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s, err := LoadStatus(root)
+	s, err := LoadStatus(gh.New(gh.Conf{}), root)
 	if err != nil {
 		t.Fatalf("LoadStatus: %v", err)
 	}

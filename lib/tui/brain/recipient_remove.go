@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	libbrain "github.com/xianxu/nous/lib/brain"
 	"github.com/xianxu/nous/lib/brainsync"
+	"github.com/xianxu/nous/lib/gh"
 )
 
 // recipient_remove.go is the in-TUI revocation flow. Mirrors the CLI
@@ -47,6 +48,8 @@ type recipientRemovedMsg struct {
 }
 
 type recipientRemoveModel struct {
+	gh gh.Client
+
 	brainPath string
 
 	stage       removeStage
@@ -77,7 +80,7 @@ type recipientRemoveModel struct {
 // another typed-phrase ceremony.
 const selfRemovePhrase = "REMOVE-SELF"
 
-func newRecipientRemoveModel(brainPath string, recipients []libbrain.RecipientInfo) recipientRemoveModel {
+func newRecipientRemoveModel(c gh.Client, brainPath string, recipients []libbrain.RecipientInfo) recipientRemoveModel {
 	sc := textinput.New()
 	sc.Prompt = "  type " + selfRemovePhrase + "> "
 	sc.CharLimit = len(selfRemovePhrase) + 4
@@ -96,6 +99,7 @@ func newRecipientRemoveModel(brainPath string, recipients []libbrain.RecipientIn
 		markers[i] = locked
 	}
 	return recipientRemoveModel{
+		gh:            c,
 		brainPath:     brainPath,
 		stage:         removeStagePick,
 		recipients:    recipients,
@@ -257,6 +261,7 @@ func (m recipientRemoveModel) updateDone(msg tea.Msg) (recipientRemoveModel, tea
 func (m recipientRemoveModel) applyCmd() tea.Cmd {
 	brainPath := m.brainPath
 	chosen := m.chosen
+	c := m.gh
 	return func() tea.Msg {
 		// Route through the shared complete-remove path so the TUI clears
 		// the same state the CLI does — manifest + verified.yaml + keys
@@ -264,7 +269,7 @@ func (m recipientRemoveModel) applyCmd() tea.Cmd {
 		// force=true: the TUI already ran its own REMOVE-SELF lockout
 		// ceremony before reaching apply (nous#38). Best-effort cleanup
 		// failures don't fail the flow (the push is the load-bearing step).
-		res, err := brainsync.RemoveRecipient(context.Background(), brainPath, chosen, true)
+		res, err := brainsync.RemoveRecipient(context.Background(), c, brainPath, chosen, true)
 		if err != nil {
 			return removeApplyResultMsg{err: err}
 		}

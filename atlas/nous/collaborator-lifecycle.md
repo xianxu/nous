@@ -8,9 +8,11 @@ atlas entry is the code map.
 ## Two layers
 
 - **GitHub (transport/ACL)**, keyed by login: pending *invitation* or accepted
-  *collaborator*. `lib/gh/gh.go` — `InviteCollaborator` (clears stale invite then
-  PUT, so re-invite re-sends; list/delete failures are hard errors — a swallowed
-  failure lets the PUT silently no-op, #41 #11), `RemoveCollaborator`,
+  *collaborator*. The `lib/gh` port (`Client` in `client.go`; `real.go` execs
+  `gh`, `fake.go` the in-memory adapter — nous#42) — `InviteCollaborator` (clears
+  stale invite then PUT, so re-invite re-sends; list/delete failures are hard
+  errors — a swallowed failure lets the PUT silently no-op, #41 #11; the composite
+  lives once in `client.go`'s `inviteCollaborator`), `RemoveCollaborator`,
   `RepoPendingInvitations`, `DeleteRepoInvitation`, `CollaboratorPermission`.
 - **Crypto (decryption)**, keyed by GPG fingerprint: manifest `recipients:` +
   the `keys` branch pubkey(s). The keys-branch `<login>.asc` is the canonical
@@ -20,9 +22,9 @@ atlas entry is the code map.
 ## Surface
 
 - **Invite** — `nous brain invite <login>` (`cmd/nous/brain_invite.go`) +
-  TUI `lib/tui/brain/invite_collab.go` → `gh.InviteCollaborator`.
+  TUI `lib/tui/brain/invite_collab.go` → `gh.Client.InviteCollaborator`.
 - **Join / accept + publish** — `nous brain join` (`cmd/nous/brain_join.go`) +
-  TUI `accept_invite.go` → `gh.AcceptInvitation` + `brain.PublishOwnPubkeyToRemote`.
+  TUI `accept_invite.go` → `gh.Client.AcceptInvitation` + `brain.PublishOwnPubkeyToRemote`.
 - **Auto-admit** — `lib/brain/autoadmit.go` `AutoAdmitFromKeysBranch` +
   `lib/brain/peerkeys.go` `ImportAllPubkeys`, driven by the brain-sync watcher
   (`lib/brainsync/watch.go`). Appends keys-branch pubkeys to the manifest +
@@ -65,7 +67,7 @@ atlas entry is the code map.
   auto-admit pauses that tick and retries when clean. Untracked drafts are fine.
 - **Login-rename detection** — `brain.DetectLoginDrift` (pure) flags recorded logins
   (`recipient_logins` keys) that are no longer current GitHub collaborators
-  (`gh.ListCollaborators`); `nous brain recipient list` surfaces the warning. A
+  (`gh.Client.ListCollaborators`); `nous brain recipient list` surfaces the warning. A
   GitHub login rename leaves the old login orphaned in the keys branch /
   recipient_logins; auto-heal is deferred (`nous#41` #10, detection-only).
 

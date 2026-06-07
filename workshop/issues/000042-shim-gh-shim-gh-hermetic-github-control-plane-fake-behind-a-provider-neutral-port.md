@@ -1,11 +1,12 @@
 ---
 id: 000042
-status: working
+status: done
 deps: []
 github_issue:
 created: 2026-06-05
 updated: 2026-06-05
 estimate_hours: 14
+actual_hours: 0.30
 ---
 
 # shim(gh)+shim'(gh): hermetic GitHub control-plane fake behind a provider-neutral port
@@ -86,8 +87,19 @@ ariadne#71.
    refreshed periodically (~monthly). This pins "what we believe about GitHub." Expensive,
    rare, human-in-loop.
 2. **Everything else tests against the grounded fake** — fast, hermetic, every run. The fake's
-   fidelity is accepted as an axiom between groundings. Payoff is twofold: regression-pinning
-   the historical bugs **and** giving every GitHub-touching nous feature a cheap e2e substrate.
+   fidelity is accepted as an axiom between groundings.
+
+   Two co-equal payoffs:
+   - **Regression-pinning** (backward-looking) — lock in the historical bugs so they can't
+     silently return.
+   - **Simulation-based testing** (forward-looking, the larger win) — the fake + tmpdir data
+     plane turns a whole **multi-actor, multi-step GitHub flow into a hermetic, scriptable
+     simulation**: operator creates a brain → invites → joiner accepts → publishes pubkey →
+     auto-admit runs → membership drifts → someone leaves, all in one `go test`, state evolving
+     across actors and time, no network, no VM. This is the deterministic shell extended
+     *outward* to include GitHub. The payoff isn't "we caught 5 old bugs"; it's that **every
+     future GitHub-touching feature can be developed and self-verified against a realistic
+     simulation before a human ever touches a VM** — the whole point of the shim(X) pattern.
 
 **Division of labor (load-bearing).** A library-level fake *replaces* `lib/gh` entirely, so:
 - bugs in code that *consumes* the port (call sequencing, mishandling empty `ssh_url`, the
@@ -160,40 +172,56 @@ control-plane fake meets the tmpdir data plane.
   and, build-tagged, against real `gh` (run once to certify, documented as the periodic step).
 - Regression coverage is pinned to the layer that can actually see each bug (each test fails if
   its fix is reverted):
-  - **Bugs 2–5 + nous#41 #11** — the nous#26/#41 flows run as **hermetic** tests through the
-    fake + tmpdir data plane (bug 2: MinimalRepository empty-`ssh_url` fallback; bug 3:
-    accepted-but-unpublished recovery; bugs 4–5: the discovery-filter / keys-branch-publish bugs
-    the fake makes reachable end-to-end).
+  - **Bugs 2, 3 + nous#41 #11 (control-plane)** — pinned by **new** hermetic tests through the
+    fake + tmpdir data plane (bug 2: MinimalRepository empty-`ssh_url` → `CloneURL` fallback;
+    bug 3: accepted-but-unpublished recovery; #41 #11: re-invite re-sends + hard-errors on a
+    list/delete failure).
+  - **Bugs 4, 5 (data-plane / brain-logic)** — already pinned by existing `file://` tests that
+    don't route through `gh` (`lib/brainsync/discovery_test.go` + `lib/brain/manifest_test.go`
+    for bug 4; `lib/brain/integration_test.go` `TestPublishOwnPubkeyToRemote_*` for bug 5). M4
+    **verifies these stay green**; it does not re-pin them through the fake (the fake doesn't
+    see them — they bypass `gh`). Claiming otherwise was the over-reach the spec review flagged.
   - **Bug 1 (wrong endpoint, below the seam)** — pinned by a `real`-adapter unit test asserting
     the exact endpoint string for the user-existence probe (`/users/<login>` vs `/user`),
     runnable without network, **plus** the dual-backend contract test's real-`gh` run. A
     library-level fake structurally cannot see this; the spec's Division-of-labor section says so,
     and "Done when" must not claim otherwise.
+- A **full-lifecycle simulation test** exists (the forward-looking payoff): a single hermetic
+  `go test` drives the multi-actor onboarding flow end-to-end through the fake + tmpdir data
+  plane (operator new-brain → invite → joiner accept → pubkey publish → auto-admit → leave),
+  demonstrating the fake as a self-verification substrate for *future* GitHub-touching features,
+  not just a regression harness.
 - No ariadne files changed. ariadne#71 carries the deferred convention/§5/architecture.md work
   and is linked via `deps`.
 
 ## Plan
 
-- [ ] Define the provider-neutral port interface + `Conf` (incl. injectable `CloneURLBase`);
+- [x] Define the provider-neutral port interface + `Conf` (incl. injectable `CloneURLBase`);
       settle domain naming and the documented peculiarity extension points.
-- [ ] `real` adapter: move today's exec-`gh` logic behind the port unchanged; nothing else
+- [x] `real` adapter: move today's exec-`gh` logic behind the port unchanged; nothing else
       execs `gh`. Add a `real`-adapter unit test asserting exact endpoint strings (the
       below-the-seam regression home for bug 1 — `/users/<login>` vs `/user`).
-- [ ] Migrate the 13 consumers onto the port (decide injection mechanism: constructor DI vs.
+- [x] Migrate the 13 consumers onto the port (decide injection mechanism: constructor DI vs.
       swappable default).
-- [ ] `shim'(gh)` fake adapter: state model (users/repos/collaborators/invitations), multi-user
+- [x] `shim'(gh)` fake adapter: state model (users/repos/collaborators/invitations), multi-user
       token context, peculiarity behaviors, tmpdir-bare-repo data-plane coupling, per-test
       teardown.
-- [ ] Dual-backend contract test (fake always; real `gh` build-tagged); run the real backend
+- [x] Dual-backend contract test (fake always; real `gh` build-tagged); run the real backend
       once to certify; document the periodic grounding step.
-- [ ] Hermetic regression tests for nous#26 bugs 2–5 + nous#41 #11 through the fake + tmpdir
+- [x] Hermetic regression tests for nous#26 bugs 2–5 + nous#41 #11 through the fake + tmpdir
       data plane (bug 1 is covered by the real-adapter endpoint test + contract test above, not
       here).
-- [ ] Update atlas for the new port/fake surface; record the grounding cadence.
+- [x] Update atlas for the new port/fake surface; record the grounding cadence.
 
 ## Log
 
 ### 2026-06-05
+- 2026-06-05: closed — All 5 milestones complete + reviewed (M1/M2 FIX-THEN-SHIP resolved, M3/M4 SHIP, M5 FIX-THEN-SHIP resolved). Full suite go build/vet/test green outside sandbox; gh.Client port + real/fake adapters; dual-backend contract test (fake green, real conformance pending operator tokens); regression anchors for nous#26 bug2/bug3/#41-#11 (bugs 4/5 verified green at existing homes, bug1 below-seam pinned); full multi-actor onboarding SIMULATION green through the fake. lib/gh tests + lib/brain TestSimulation_OnboardingLifecycle pass.; review verdict: SHIP
+- 2026-06-05: closed M5 — M5 lifecycle simulation green (TestSimulation_OnboardingLifecycle, full multi-actor onboarding through gh.Fake control plane + gcrypt data plane, seam asserted); full suite go build/vet/test green outside sandbox (lib/brain gpg failures are sandbox-IPC-only); fake exported as gh.Fake for cross-package simulations; atlas updated. Real-gh contract certification remains a pending operator step (documented).
+- 2026-06-05: closed M4 — regression anchors green: bug-2 MinimalRepository empty-ssh_url→CloneURL→real git clone; nous#41 #11 re-invite ReplacedStale + hard-error-on-list-failure. Bugs 4/5 verified green at existing data-plane homes (TestFindSharedBrains*, TestDiscoverAll, TestEndToEnd_OperatorPubkeyMissingThenRepublish, TestPublishOwnPubkeyToRemote_OrphanCreate). --no-atlas: atlas consolidation lands in M5 with the simulation; review verdict: SHIP
+- 2026-06-05: closed M3 — contract suite built; TestContract_Fake green (4 port invariants) via two AsUser clients over one fakeState; conformance real backend compiles under -tags conformance and skip-gates cleanly without env; REAL certification pending operator test-account tokens (documented ~monthly manual step in contract_real_test.go header). --no-atlas: grounding cadence already documented in M2 e2e-atlas note + conformance file header; full atlas consolidation lands in M5; review verdict: unknown
+- 2026-06-05: closed M2 — go build/vet clean; lib/gh fake: 11 unit tests pass incl. real git clone of tmpdir bare repo; -race clean; three peculiarities (MinimalRepository empty ssh_url, PUT-collaborators no-op vs existing invite, shadow-flag 404) asserted; TUI tests retrofitted to inject the fake; review verdict: FIX-THEN-SHIP
+- 2026-06-05: closed M1 — go build/vet clean; full suite green outside sandbox (lib/brain gpg-agent failures are sandbox-IPC-only, confirmed passing sandbox-disabled @36.8s, count=1); lib/gh endpoint tests pin bug-1 below-seam; grep gate = zero free-function call sites; 13+ consumers migrated to injected gh.Client (constructor/struct DI); review verdict: FIX-THEN-SHIP
 
 Filed from ariadne#71 brainstorm. Decisions locked with operator:
 - **Interface altitude:** provider-neutral domain port (Ports & Adapters), with documented
@@ -216,3 +244,57 @@ could claim all-5 because its fake was an HTTP bridge, which we rejected). Recon
 nous#41 #11 pinned by the fake+tmpdir flow; bug 1 pinned by a real-adapter endpoint test + the
 contract test. Also specified the clone-URL→tmpdir mechanism (injectable `Conf.CloneURLBase`,
 preserving the MinimalRepository peculiarity) and the bug-1 regression home.
+
+Planning: claimed (#42 working, est 14h), `sdlc start-plan` delivered ARCH-PURE/ARCH-DRY.
+Injection mechanism decided with operator: **constructor/struct DI** (a `gh.Client` threaded
+through all consumers), chosen as the pattern exemplar over a package-default bridge. Durable plan
+at `workshop/plans/000042-shim-gh-plan.md` (4 milestones M1–M4). Plan review (fresh-eyes) caught a
+second scope over-reach: bugs 4 & 5 are data-plane/brain-logic bugs already pinned by existing
+`file://` tests that bypass `gh` (`lib/brainsync/discovery_test.go` `TestFindSharedBrains_SingleRecipientWithGcryptRemote`;
+`lib/brain/integration_test.go` `TestEndToEnd_OperatorPubkeyMissingThenRepublish` /
+`TestPublishOwnPubkeyToRemote_OrphanCreate`) — so M4's *new* contribution is bugs 2/3/#41 #11
+through the fake; 4/5 are only verified-green, not re-pinned. Spec "Done when" corrected to match.
+
+### 2026-06-05 — fake CERTIFIED against real GitHub
+
+Ran the dual-backend contract's real backend (`go test -tags conformance ./lib/gh/
+-run Contract_Real`) against real GitHub: operator `xianxu`, invitee `yingtest42`,
+repo `xianxu/shim-conformance`. **All 4 invariants PASS** (13.9s) — incl. the two
+peculiarities the fake encodes: invitations omit `ssh_url` (MinimalRepository,
+nous#26 bug 2) and `AddCollaborator` no-ops against an existing invitation
+(nous#41 #11). The fake's fidelity is now *verified*, not asserted. Re-run
+~monthly or on suspected drift. (The previously-"pending operator tokens" step is
+now done.)
+
+### 2026-06-05 — widened conformance contract 4→10 invariants; re-certified; 2 findings
+
+Operator: 4 invariants is too thin vs the port surface. Widened `runContract` to
+cover the full used surface — added `AuthLogin`, `UserExists`, `CollaboratorPermission`,
+`UserRepos`, `DeclineInvitation`, `RemoveCollaborator` invariants (10 total; the
+6 previously ungrounded-against-real methods now grounded). Re-ran against real
+GitHub — and the grounding immediately paid off, catching two mismatches:
+
+1. **Real fidelity bug (fixed the fake):** `CollaboratorPermission` for a
+   non-collaborator on a visible repo — real GitHub returns 200 `{"permission":"none"}`,
+   NOT a 404. The fake returned `""` and had drifted. Fixed `fake.go` to return
+   `"none"` (consumers already treat it as no-access: operator.go not-admin/maintain,
+   recipient.go `\!= "none"`). This is the grounding step working exactly as designed.
+2. **Bad test assumption (fixed the test):** the `UserExists` "visible" check used
+   the *invitee* — but the real run showed `yingtest42` 404s on `/users/<login>`
+   despite being invitable: the live nous#25 visibility-lag the fake models a
+   shadow-flag for. Changed the invariant to assert visibility on the *owner*
+   (necessarily public).
+
+All 10 invariants now PASS on both the fake (CI) and real `gh`
+(xianxu/yingtest42/shim-conformance, 33.7s). Full gh/brain/brainsync suites green.
+
+### 2026-06-05 — zero-config grounding + atlas dead-pointer fix
+
+Conformance run hardened to need nothing from the operator: tokens resolve from
+`gh auth` (operator) + macOS Keychain (invitee), logins derive from the tokens,
+and the fixture repo auto-provisions (`gh repo create`, never deleted — no
+delete_repo scope). Verified end to end: `go test -tags conformance ./lib/gh/
+-run Contract_Real` with NO env passes all 10 invariants. Pre-merge specs judge
+caught two atlas files still pointing at the deleted `lib/gh/gh.go`
+(recipient-onboarding.md, collaborator-lifecycle.md) — fixed to the new
+port/adapter layout.
