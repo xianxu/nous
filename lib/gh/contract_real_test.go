@@ -110,7 +110,11 @@ func resolveConformanceConfig() (opTok, inviteeTok, owner, repo, inviteeLogin st
 // port. Idempotent: an "already exists" error (e.g. a prior run's delete failed)
 // is fine.
 func ensureConformanceRepo(t *testing.T, opTok, owner, repo string) {
-	cmd := exec.Command("gh", "repo", "create", owner+"/"+repo, "--private")
+	// Bare name (not owner/repo): `gh repo create` then makes it under the authed
+	// user — which IS the operator. Passing owner/repo makes gh resolve the owner
+	// via /users/<owner>, which 404s for a brand-new throwaway account still in
+	// GitHub's visibility lag (the operator here is exactly such an account).
+	cmd := exec.Command("gh", "repo", "create", repo, "--private")
 	cmd.Env = append(os.Environ(), "GH_TOKEN="+opTok)
 	out, err := cmd.CombinedOutput()
 	if err != nil && !strings.Contains(strings.ToLower(string(out)), "already exists") {
