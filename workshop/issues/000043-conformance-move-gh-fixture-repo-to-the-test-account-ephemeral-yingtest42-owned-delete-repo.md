@@ -48,12 +48,12 @@ sources flip:
 
 ## Plan
 
-- [ ] Rework `resolveConformanceConfig`: operator ← Keychain `nous-conformance-operator`,
+- [x] Rework `resolveConformanceConfig`: operator ← Keychain `nous-conformance-operator`,
       invitee ← Keychain `nous-conformance-invitee` (drop `gh auth` default).
-- [ ] Ephemeral repo: keep ensure-create; add delete-on-cleanup (operator `delete_repo`).
-- [ ] Update header runbook (two-account model, ephemeral, Keychain service names).
-- [ ] Keychain: migrate yingtest42 → `nous-conformance-operator`; emmatest42 → `nous-conformance-invitee` (operator-supplied).
-- [ ] Verify: zero-config conformance green; fixture created+deleted on yingtest42.
+- [x] Ephemeral repo: keep ensure-create; add delete-on-cleanup (operator `delete_repo`).
+- [x] Update header runbook (two-account model, ephemeral, Keychain service names).
+- [x] Keychain: migrate yingtest42 → `nous-conformance-operator`; emmatest42 → `nous-conformance-invitee` (operator-supplied).
+- [x] Verify: zero-config conformance green; fixture created+deleted on yingtest42.
 
 ## Log
 
