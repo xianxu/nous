@@ -21,7 +21,8 @@
 //
 //	security add-generic-password -s nous-conformance-invitee \
 //	  -a <invitee-login> -w <invitee-PAT-classic-repo-scope>
-//	gh repo create <owner>/shim-conformance --private   # ensure the fixture repo
+//
+// That's the only setup — the fixture repo is auto-provisioned (see below).
 //
 // Every value is OVERRIDABLE by env (GH_TOKEN_OP, GH_TOKEN_INVITEE,
 // GH_TEST_OWNER, GH_TEST_REPO, GH_TEST_INVITEE_LOGIN) — that's the path CI uses
@@ -29,11 +30,13 @@
 // Keychain, or CI secrets. If a required value can't be resolved, the test
 // SKIPS (it never fails for missing creds).
 //
-// The repo must already exist and be owned by the operator (we don't
-// create/delete repos here — that's outside the Client surface). The suite is
-// non-destructive beyond invitations/collaborators, which newWorld resets
-// before each subtest and t.Cleanup clears after. If a subtest FAILS, the fake
-// has drifted: fix fake.go (not the test) and re-certify.
+// The fixture repo is ENSURE-CREATED (private) if missing — `gh repo create`,
+// idempotent. We create but never delete (the operator token has `repo`, not
+// `delete_repo` scope), so it persists as an empty private fixture reused next
+// run; it holds no real content. The suite is otherwise non-destructive beyond
+// invitations/collaborators, which newWorld resets before each subtest and
+// t.Cleanup clears after. If a subtest FAILS, the fake has drifted: fix fake.go
+// (not the test) and re-certify.
 //
 // Eventual consistency: GitHub's post-acceptance endpoints can lag (the spec
 // notes /user/repos by tens of seconds). ListCollaborators is usually prompt,
@@ -109,6 +112,19 @@ func resolveConformanceConfig() (opTok, inviteeTok, owner, repo, inviteeLogin st
 	return opTok, inviteeTok, owner, repo, inviteeLogin, ok
 }
 
+// ensureConformanceRepo provisions the private fixture repo if it doesn't
+// exist (zero-config). Execs `gh repo create` directly with the operator token
+// rather than via the Client — repo creation isn't part of nous's used surface,
+// so it stays off the port. Idempotent: an "already exists" error is fine.
+func ensureConformanceRepo(t *testing.T, opTok, owner, repo string) {
+	cmd := exec.Command("gh", "repo", "create", owner+"/"+repo, "--private")
+	cmd.Env = append(os.Environ(), "GH_TOKEN="+opTok)
+	out, err := cmd.CombinedOutput()
+	if err != nil && !strings.Contains(strings.ToLower(string(out)), "already exists") {
+		t.Fatalf("ensure fixture repo %s/%s: %v\n%s", owner, repo, err, out)
+	}
+}
+
 func TestContract_Real(t *testing.T) {
 	opTok, inviteeTok, owner, repo, inviteeLogin, ok := resolveConformanceConfig()
 	if !ok {
@@ -116,6 +132,8 @@ func TestContract_Real(t *testing.T) {
 			"(security add-generic-password -s nous-conformance-invitee -a <login> -w <PAT>) " +
 			"and `gh auth login`, or pass GH_TOKEN_OP/GH_TOKEN_INVITEE/GH_TEST_* env")
 	}
+
+	ensureConformanceRepo(t, opTok, owner, repo)
 
 	operator := New(Conf{Token: opTok})
 	invitee := New(Conf{Token: inviteeTok})
