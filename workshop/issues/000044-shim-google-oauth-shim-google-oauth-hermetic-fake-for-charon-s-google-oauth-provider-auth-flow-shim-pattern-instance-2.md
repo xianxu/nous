@@ -74,7 +74,9 @@ core shared by both adapters; async callback stays adapter-internal).
 
 ## Log
 
+### Milestone review verdicts (fresh-context boundary reviews)
 
+- M2 — **FIX-THEN-SHIP** (window 0f12c7e..HEAD). Two untested fault knobs + orphaned wrapper → fixed in b96d70d. Review ran during `sdlc milestone-close M2`.
 
 
 - 2026-06-08: closed M3 — Migrated charon's oauth consumer onto the Provider port (tokenSupplierFromVault takes oauth.Provider); hermetic consumer test proves NewFake runs charon's GCP token path (refresh+persist) with no Google/browser. Dual-backend contract: TestContract_Fake (always) + TestContract_RealGoogle (//go:build conformance, Keychain-grounded, zero-config-skip). Atlas: e2e-integration-testing.md credential-lifecycle-simulation section + lib-layout.md oauth line + grounding boundary documented. go test ./lib/provider/oauth/... ./lib/charoncli/... ./lib/provider/proxy/... ./lib/tui/... green; go build ./... green. (Pre-existing lib/brain e2e FAILs are environmental: gpg-agent not running in sandbox — unrelated to this port refactor.) Real-Google certification is a one-time manual step pending a throwaway test-account Keychain token (plan open-q #1).; review verdict: SHIP
