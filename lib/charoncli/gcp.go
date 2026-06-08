@@ -184,7 +184,11 @@ func parentToVault(p *gcp.Parent) *vault.GCPParent {
 // credential from the vault on each call, refreshes it when the
 // access token has expired, and persists the rotated credential
 // before returning the access token.
-func tokenSupplierFromVault(v vault.Store, gp *oauth.GoogleProvider, provider, account string) gcp.TokenSupplier {
+//
+// Takes the oauth.Provider port (not the concrete *GoogleProvider) so tests can
+// inject oauth.NewFake — this is the seam that makes charon's GCP/token path
+// run hermetically (nous#44).
+func tokenSupplierFromVault(v vault.Store, gp oauth.Provider, provider, account string) gcp.TokenSupplier {
 	return func(ctx context.Context) (string, error) {
 		cred, err := v.Get(provider, account)
 		if err != nil {

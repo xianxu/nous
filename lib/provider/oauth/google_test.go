@@ -2,7 +2,9 @@ package oauth
 
 import (
 	"encoding/base64"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -57,44 +59,44 @@ func TestParseIDTokenEmail(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := parseIDTokenEmail(tt.token)
+			got, _, err := parseIDToken(tt.token)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("parseIDTokenEmail() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("parseIDToken() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if got != tt.want {
-				t.Errorf("parseIDTokenEmail() = %q, want %q", got, tt.want)
+				t.Errorf("parseIDToken() = %q, want %q", got, tt.want)
 			}
 		})
 	}
 }
 
 func TestBuildAuthURL_LoginHint(t *testing.T) {
-	gp := &GoogleProvider{clientID: "test-client-id", clientSecret: "test-secret"}
+	const authURL, clientID = "https://accounts.google.com/o/oauth2/auth", "test-client-id"
 
 	t.Run("without login hint", func(t *testing.T) {
-		u := gp.buildAuthURL("http://localhost:1234", []string{"openid"}, "", false)
+		u := buildAuthURL(authURL, clientID, "http://localhost:1234", []string{"openid"}, "", false)
 		if containsParam(u, "login_hint") {
 			t.Error("expected no login_hint parameter")
 		}
 	})
 
 	t.Run("with login hint", func(t *testing.T) {
-		u := gp.buildAuthURL("http://localhost:1234", []string{"openid"}, "user@gmail.com", false)
+		u := buildAuthURL(authURL, clientID, "http://localhost:1234", []string{"openid"}, "user@gmail.com", false)
 		if !containsParam(u, "login_hint") {
 			t.Error("expected login_hint parameter")
 		}
 	})
 
 	t.Run("forceFresh sets include_granted_scopes=false", func(t *testing.T) {
-		u := gp.buildAuthURL("http://localhost:1234", []string{"openid"}, "", true)
+		u := buildAuthURL(authURL, clientID, "http://localhost:1234", []string{"openid"}, "", true)
 		if !strings.Contains(u, "include_granted_scopes=false") {
 			t.Errorf("expected include_granted_scopes=false in URL: %s", u)
 		}
 	})
 
 	t.Run("forceFresh=false keeps incremental", func(t *testing.T) {
-		u := gp.buildAuthURL("http://localhost:1234", []string{"openid"}, "", false)
+		u := buildAuthURL(authURL, clientID, "http://localhost:1234", []string{"openid"}, "", false)
 		if !strings.Contains(u, "include_granted_scopes=true") {
 			t.Errorf("expected include_granted_scopes=true in URL: %s", u)
 		}
@@ -138,9 +140,8 @@ func TestRequiredScopesIncluded(t *testing.T) {
 // and minted keys — discovered when an account showed `vertex` but
 // not `ai-studio` in `charon manifest` after a long-running session.
 //
-// Drives the actual HTTP refresh against a stub token endpoint via
-// reflection-free indirection: we override googleTokenURL just for
-// the duration of this test.
+// Drives the actual HTTP refresh against a stub token endpoint by pointing
+// the adapter's TokenURL at an httptest server via Conf.
 func TestRefresh_PreservesSidecars(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -148,14 +149,7 @@ func TestRefresh_PreservesSidecars(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	orig := googleTokenURL
-	googleTokenURL = srv.URL
-	defer func() { googleTokenURL = orig }()
-
-	gp, err := NewGoogleProvider()
-	if err != nil {
-		t.Fatalf("NewGoogleProvider: %v", err)
-	}
+	gp := New(Conf{TokenURL: srv.URL})
 
 	in := &vault.Credential{
 		Type:         vault.TypeOAuth,
@@ -218,4 +212,90 @@ func contains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// TestWaitForCallback_Code drives the real adapter's async redirect callback
+// hermetically — no browser. The channel-inside-the-adapter (waitForCallback)
+// is the below-seam leg the fake can't model; this pins the code-extraction.
+func TestWaitForCallback_Code(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		resp, err := http.Get(fmt.Sprintf("http://%s/?code=abc123", ln.Addr().String()))
+		if err == nil {
+			resp.Body.Close()
+		}
+	}()
+	code, err := waitForCallback(ln)
+	if err != nil || code != "abc123" {
+		t.Fatalf("got (%q,%v), want (abc123,nil)", code, err)
+	}
+}
+
+// TestWaitForCallback_Error pins the callback error leg (?error=access_denied).
+func TestWaitForCallback_Error(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		resp, err := http.Get(fmt.Sprintf("http://%s/?error=access_denied", ln.Addr().String()))
+		if err == nil {
+			resp.Body.Close()
+		}
+	}()
+	if _, err := waitForCallback(ln); err == nil {
+		t.Fatal("expected error for access_denied callback")
+	}
+}
+
+// TestExchangeCode_HTTP grounds the real adapter's token-exchange leg
+// hermetically: it asserts the grant-request form params and that the response
+// routes through the shared credentialFromToken. This is the below-seam
+// translation the fake is structurally blind to.
+func TestExchangeCode_HTTP(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("ParseForm: %v", err)
+		}
+		if got := r.FormValue("grant_type"); got != "authorization_code" {
+			t.Errorf("grant_type = %q, want authorization_code", got)
+		}
+		if got := r.FormValue("code"); got != "the-code" {
+			t.Errorf("code = %q, want the-code", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, fmt.Sprintf(
+			`{"access_token":"at","refresh_token":"rt","id_token":%q,"expires_in":3600,"scope":"openid email"}`,
+			mintIDToken("u@x.com", true)))
+	}))
+	defer srv.Close()
+
+	gp := New(Conf{ClientID: "cid", ClientSecret: "sec", TokenURL: srv.URL})
+	cred, err := gp.exchangeCode("the-code", "http://localhost:1234")
+	if err != nil {
+		t.Fatalf("exchangeCode: %v", err)
+	}
+	if cred.Account != "u@x.com" || cred.AccessToken != "at" || cred.RefreshToken != "rt" {
+		t.Fatalf("bad cred: %+v", cred)
+	}
+}
+
+// TestExchangeCode_RejectsUnverified grounds the verified-email guard on the
+// real HTTP exchange path (not just the pure-function unit test).
+func TestExchangeCode_RejectsUnverified(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, fmt.Sprintf(
+			`{"access_token":"at","refresh_token":"rt","id_token":%q,"expires_in":3600}`,
+			mintIDToken("u@x.com", false)))
+	}))
+	defer srv.Close()
+
+	gp := New(Conf{TokenURL: srv.URL})
+	if _, err := gp.exchangeCode("c", "http://localhost:1234"); err == nil {
+		t.Fatal("expected unverified-email rejection on the real exchange path")
+	}
 }

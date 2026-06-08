@@ -2,7 +2,6 @@ package oauth
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,10 +11,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"os/exec"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/xianxu/nous/lib/provider/vault"
@@ -26,12 +23,13 @@ const (
 	obClientID     = "5a51594157591a504a55575643150c0f1a481a1b5c4a4e431d05121d4007111c0a59065250061f1c041a5a41014a041e041a4f0b421f15031d0c5e0a10051a1d17041a1d410d0c05"
 	obClientSecret = "242722213f360028202410033d440c145f6821021755007837072210322757232d000d"
 
-	googleAuthURL = "https://accounts.google.com/o/oauth2/auth"
+	// Google's production OAuth endpoints. Seeded into Conf by
+	// defaultGoogleConf; the adapter reads them off its fields so tests
+	// (and a future non-Google provider) can point elsewhere via Conf.
+	googleAuthURL   = "https://accounts.google.com/o/oauth2/auth"
+	googleTokenURL  = "https://oauth2.googleapis.com/token"
+	googleRevokeURL = "https://oauth2.googleapis.com/revoke"
 )
-
-// googleTokenURL is a var (not const) so tests can swap in an
-// httptest server. Production callers must not mutate this.
-var googleTokenURL = "https://oauth2.googleapis.com/token"
 
 // DefaultGoogleScopes are requested if none specified.
 //
@@ -52,26 +50,31 @@ var requiredGoogleScopes = []string{
 	"https://www.googleapis.com/auth/userinfo.email",
 }
 
-// GoogleProvider implements the OAuth flow for Google accounts.
+// GoogleProvider is the real adapter — the only thing that talks to Google
+// (HTTP token/refresh/revoke + browser-open + local callback server). It
+// implements the Provider port; construct it with New(Conf) (or the default-
+// Conf wrapper NewGoogleProvider).
 type GoogleProvider struct {
-	clientID     string
-	clientSecret string
+	clientID      string
+	clientSecret  string
+	authURL       string
+	tokenURL      string
+	revokeURL     string
+	defaultScopes []string
 	// Output receives status messages emitted during Auth (e.g. "Opening
 	// browser..."). Defaults to os.Stderr. Set to io.Discard from a TUI
 	// to keep these from corrupting the rendered screen.
 	Output io.Writer
 }
 
+// NewGoogleProvider builds the real adapter against Google's production
+// endpoints with the embedded (obfuscated) client credentials.
 func NewGoogleProvider() (*GoogleProvider, error) {
-	cid, err := XORDecode(obClientID, obKey)
+	conf, err := defaultGoogleConf()
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode client_id: %w", err)
+		return nil, err
 	}
-	cs, err := XORDecode(obClientSecret, obKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode client_secret: %w", err)
-	}
-	return &GoogleProvider{clientID: cid, clientSecret: cs, Output: os.Stderr}, nil
+	return New(conf), nil
 }
 
 // out returns the writer for status messages, falling back to io.Discard if
@@ -81,18 +84,6 @@ func (g *GoogleProvider) out() io.Writer {
 		return io.Discard
 	}
 	return g.Output
-}
-
-// tokenResponse is the JSON response from Google's token endpoint.
-type tokenResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	IDToken      string `json:"id_token"`
-	ExpiresIn    int    `json:"expires_in"`
-	TokenType    string `json:"token_type"`
-	Scope        string `json:"scope"`
-	Error        string `json:"error"`
-	ErrorDesc    string `json:"error_description"`
 }
 
 // Auth runs the OAuth authorization flow: opens browser, waits for callback, exchanges code for tokens.
@@ -107,7 +98,7 @@ type tokenResponse struct {
 // Use forceFresh=true when narrowing scopes for an existing account.
 func (g *GoogleProvider) Auth(account string, scopes []string, existingScopes []string, forceFresh bool) (*vault.Credential, error) {
 	if len(scopes) == 0 {
-		scopes = DefaultGoogleScopes
+		scopes = g.defaultScopes
 	}
 	var allScopes []string
 	if forceFresh {
@@ -129,7 +120,7 @@ func (g *GoogleProvider) Auth(account string, scopes []string, existingScopes []
 	redirectURI := fmt.Sprintf("http://localhost:%d", port)
 
 	// Build authorization URL with optional login hint.
-	authURL := g.buildAuthURL(redirectURI, allScopes, account, forceFresh)
+	authURL := buildAuthURL(g.authURL, g.clientID, redirectURI, allScopes, account, forceFresh)
 
 	// Open browser.
 	fmt.Fprintf(g.out(), "Opening browser for Google OAuth...\n")
@@ -169,7 +160,7 @@ func (g *GoogleProvider) Refresh(cred *vault.Credential) (*vault.Credential, err
 		"grant_type":    {"refresh_token"},
 	}
 
-	resp, err := http.PostForm(googleTokenURL, data)
+	resp, err := http.PostForm(g.tokenURL, data)
 	if err != nil {
 		return nil, fmt.Errorf("token refresh failed: %w", err)
 	}
@@ -183,58 +174,9 @@ func (g *GoogleProvider) Refresh(cred *vault.Credential) (*vault.Credential, err
 		return nil, fmt.Errorf("token refresh error: %s: %s", tok.Error, tok.ErrorDesc)
 	}
 
-	updated := &vault.Credential{
-		Type:         cred.Type,
-		Provider:     cred.Provider,
-		Account:      cred.Account,
-		AccessToken:  tok.AccessToken,
-		RefreshToken: cred.RefreshToken,
-		Expiry:       time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second),
-		Scopes:       cred.Scopes,
-		// Preserve sidecars across refresh. These describe the
-		// account's setup (GCP project metadata, AI Studio key)
-		// and are independent of the OAuth token rotation. Earlier
-		// versions dropped them on every refresh, silently wiping
-		// the user's configured project + minted key.
-		GCP:      cred.GCP,
-		AIStudio: cred.AIStudio,
-		AdminKey: cred.AdminKey,
-		Catalog:  cred.Catalog,
-	}
-
-	// Handle refresh token rotation — Google may return a new refresh token.
-	if tok.RefreshToken != "" {
-		updated.RefreshToken = tok.RefreshToken
-	}
-
-	// Update scopes if changed.
-	if tok.Scope != "" {
-		updated.Scopes = strings.Split(tok.Scope, " ")
-	}
-
-	return updated, nil
-}
-
-func (g *GoogleProvider) buildAuthURL(redirectURI string, scopes []string, loginHint string, forceFresh bool) string {
-	params := url.Values{
-		"client_id":     {g.clientID},
-		"redirect_uri":  {redirectURI},
-		"response_type": {"code"},
-		"scope":         {strings.Join(scopes, " ")},
-		"access_type":   {"offline"}, // request refresh token
-		"prompt":        {"consent"}, // force consent to get refresh token
-	}
-	if forceFresh {
-		// Token will cover only the requested scope set, not the union of
-		// existing grants. Required for the reductive flow.
-		params.Set("include_granted_scopes", "false")
-	} else {
-		params.Set("include_granted_scopes", "true") // incremental authorization
-	}
-	if loginHint != "" {
-		params.Set("login_hint", loginHint)
-	}
-	return googleAuthURL + "?" + params.Encode()
+	// Rotation + sidecar/identity preservation is the shared pure core, so
+	// the real and fake adapters can't drift on this contract.
+	return applyRefresh(cred, tok, time.Now()), nil
 }
 
 // ErrAlreadyRevoked indicates Google considers the token already invalid
@@ -256,7 +198,7 @@ func (g *GoogleProvider) Revoke(refreshToken string) error {
 	if refreshToken == "" {
 		return fmt.Errorf("no refresh token to revoke")
 	}
-	resp, err := http.PostForm("https://oauth2.googleapis.com/revoke", url.Values{
+	resp, err := http.PostForm(g.revokeURL, url.Values{
 		"token": {refreshToken},
 	})
 	if err != nil {
@@ -294,7 +236,7 @@ func (g *GoogleProvider) exchangeCode(code, redirectURI string) (*vault.Credenti
 		"grant_type":    {"authorization_code"},
 	}
 
-	resp, err := http.PostForm(googleTokenURL, data)
+	resp, err := http.PostForm(g.tokenURL, data)
 	if err != nil {
 		return nil, fmt.Errorf("token exchange failed: %w", err)
 	}
@@ -308,51 +250,9 @@ func (g *GoogleProvider) exchangeCode(code, redirectURI string) (*vault.Credenti
 		return nil, fmt.Errorf("token exchange error: %s: %s", tok.Error, tok.ErrorDesc)
 	}
 
-	// Extract authenticated email from ID token.
-	account, err := parseIDTokenEmail(tok.IDToken)
-	if err != nil {
-		return nil, fmt.Errorf("failed to identify account: %w", err)
-	}
-
-	var scopes []string
-	if tok.Scope != "" {
-		scopes = strings.Split(tok.Scope, " ")
-	}
-
-	return &vault.Credential{
-		Provider:     "google",
-		Account:      account,
-		AccessToken:  tok.AccessToken,
-		RefreshToken: tok.RefreshToken,
-		Expiry:       time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second),
-		Scopes:       scopes,
-	}, nil
-}
-
-// parseIDTokenEmail extracts the email claim from a Google ID token (JWT).
-// No signature verification needed — token comes directly from Google's token endpoint over HTTPS.
-func parseIDTokenEmail(idToken string) (string, error) {
-	if idToken == "" {
-		return "", fmt.Errorf("no ID token in response (openid scope may not be granted)")
-	}
-	parts := strings.Split(idToken, ".")
-	if len(parts) != 3 {
-		return "", fmt.Errorf("invalid ID token format")
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return "", fmt.Errorf("failed to decode ID token payload: %w", err)
-	}
-	var claims struct {
-		Email string `json:"email"`
-	}
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return "", fmt.Errorf("failed to parse ID token claims: %w", err)
-	}
-	if claims.Email == "" {
-		return "", fmt.Errorf("no email claim in ID token")
-	}
-	return claims.Email, nil
+	// Shape the credential via the shared pure core (extracts + verifies the
+	// ID-token email, splits scopes, computes expiry).
+	return credentialFromToken(tok, time.Now())
 }
 
 // waitForCallback starts an HTTP server, waits for the OAuth callback, extracts the code.
@@ -394,23 +294,6 @@ func waitForCallback(ln net.Listener) (string, error) {
 		srv.Close()
 		return "", fmt.Errorf("OAuth callback timed out (5 minutes)")
 	}
-}
-
-func mergeScopes(requested, existing []string) []string {
-	seen := make(map[string]bool)
-	for _, s := range existing {
-		seen[s] = true
-	}
-	for _, s := range requested {
-		seen[s] = true
-	}
-	var merged []string
-	for s := range seen {
-		if s != "" {
-			merged = append(merged, s)
-		}
-	}
-	return merged
 }
 
 func openBrowser(url string) {
