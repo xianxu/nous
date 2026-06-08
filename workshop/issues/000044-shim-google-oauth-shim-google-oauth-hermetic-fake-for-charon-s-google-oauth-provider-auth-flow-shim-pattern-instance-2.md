@@ -69,12 +69,16 @@ union of charon's three real consumer interfaces; pure `tokenResponse→Credenti
 core shared by both adapters; async callback stays adapter-internal).
 
 - [x] M1 — Port (`Provider` interface) + `Conf`/`New`/`NewFake` + pure token-shaping core (`credentialFromToken`/`applyRefresh`/`parseIDToken`/`mintIDToken`); real adapter routed through it, behavior-preserving (`ARCH-PURE`/`ARCH-DRY`); `CheckHealth` → shared composite.
-- [ ] M2 — Explicit consumer-POV state machine (S) as a `target` (ariadne#71 finding); stateful `Fake` adapter executing S over the shared pure core, with fault knobs = S's named provider-autonomous transitions; hermetic flow tests (Auth short-circuit, Refresh, Revoke, CheckHealth, fault cases) + below-seam hermetic `waitForCallback`/token-exchange tests for the real adapter.
-- [ ] M3 — Migrate charon's oauth consumers onto the port; dual-backend contract test (Refresh/CheckHealth grounded vs real Google via Keychain; consent + Revoke documented as manual); atlas + grounding-boundary doc.
+- [x] M2 — Explicit consumer-POV state machine (S) as a `target` (ariadne#71 finding); stateful `Fake` adapter executing S over the shared pure core, with fault knobs = S's named provider-autonomous transitions; hermetic flow tests (Auth short-circuit, Refresh, Revoke, CheckHealth, fault cases) + below-seam hermetic `waitForCallback`/token-exchange tests for the real adapter.
+- [x] M3 — Migrate charon's oauth consumers onto the port; dual-backend contract test (Refresh/CheckHealth grounded vs real Google via Keychain; consent + Revoke documented as manual); atlas + grounding-boundary doc.
 
 ## Log
 
 
+
+
+- 2026-06-08: closed M3 — Migrated charon's oauth consumer onto the Provider port (tokenSupplierFromVault takes oauth.Provider); hermetic consumer test proves NewFake runs charon's GCP token path (refresh+persist) with no Google/browser. Dual-backend contract: TestContract_Fake (always) + TestContract_RealGoogle (//go:build conformance, Keychain-grounded, zero-config-skip). Atlas: e2e-integration-testing.md credential-lifecycle-simulation section + lib-layout.md oauth line + grounding boundary documented. go test ./lib/provider/oauth/... ./lib/charoncli/... ./lib/provider/proxy/... ./lib/tui/... green; go build ./... green. (Pre-existing lib/brain e2e FAILs are environmental: gpg-agent not running in sandbox — unrelated to this port refactor.) Real-Google certification is a one-time manual step pending a throwaway test-account Keychain token (plan open-q #1).; review verdict: SHIP
+- 2026-06-08: closed M2 — Explicit S target (oauth-credential-lifecycle) + stateful Fake executing S over the shared pure core (model, not mock — mints tokenResponses through credentialFromToken/applyRefresh/parseIDToken); 10 hermetic fake tests (round-trip + 6 named provider-autonomous fault edges + expiry + consent-leg-modeled); below-seam real-adapter tests (waitForCallback code/error, exchangeCode HTTP grant-params + verified guard). go test -race ./lib/provider/oauth/ clean. Atlas deferred to M3 (full port+fake+grounding entry written together; S target already captures the state-machine surface in workshop/targets/).; review verdict: FIX-THEN-SHIP
 - 2026-06-08: closed M1 — Behavior-preserving refactor: pure token-shaping core (token.go), Provider port + Conf/New (port.go), real adapter routed through pure core, CheckHealth->shared composite. go test ./lib/provider/oauth/ green; go build ./... green; proxy/charoncli/tui tests green. Existing tests pass unchanged except TestRefresh_PreservesSidecars updated to inject TokenURL via Conf. Atlas deferred to M3 (pure internal refactor, no operator-facing surface yet).; review verdict: FIX-THEN-SHIP
 ### 2026-06-06
 
