@@ -26,6 +26,12 @@ type Provider interface {
 
 var _ Provider = (*GoogleProvider)(nil)
 
+// ConformanceKeychainService is the macOS Keychain service holding the
+// throwaway-account Google refresh token the grounding test
+// (contract_real_test.go) reads. cmd/oauth-conformance-provision *writes* this
+// same entry — they must agree by construction, so the name lives here once.
+const ConformanceKeychainService = "nous-oauth-conformance-google"
+
 // Conf is the opaque, service-specific construction config. The one
 // cross-service convention is the shape New(Conf)/NewFake(Conf), not these
 // fields. Endpoints are injectable so tests (and a future non-Google OIDC
