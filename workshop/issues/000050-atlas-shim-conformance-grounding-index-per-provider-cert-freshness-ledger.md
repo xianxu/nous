@@ -42,9 +42,9 @@ certified?"
 
 ## Plan
 
-- [ ] Write `atlas/nous/shim-conformance-grounding.md` (table + framing + cadence + planned rows).
-- [ ] Cross-link from `atlas/nous/e2e-integration-testing.md` (and the two contract test headers if useful).
-- [ ] Append the idea to the ariadne shim pensive (pattern direction).
+- [x] Write `atlas/nous/shim-conformance-grounding.md` (table + framing + cadence + planned rows).
+- [x] Cross-link from `atlas/nous/e2e-integration-testing.md` (and the two contract test headers if useful).
+- [x] Append the idea to the ariadne shim pensive (pattern direction).
 
 ## Log
 
