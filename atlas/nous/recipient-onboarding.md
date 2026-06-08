@@ -196,8 +196,9 @@ yingtest42 → DC73…B6E9 (verified by xianxu on 2026-05-20)
 | `lib/brain/autoadmit.go`          | auto-admit + drift detection logic |
 | `lib/brain/verified.go`           | verified.yaml read/write + LoginForFingerprint |
 | `lib/brain/peerkeys.go::PublishOwnPubkeyToRemote` | invitee-side keys-branch push (with orphan-create) |
-| `lib/brainsync/discovery.go`      | `FindSharedBrains` (watch-list predicate) |
-| `lib/brainsync/watch.go::autoAdmitBrain` | per-tick caller of auto-admit |
+| `lib/brainsync/discovery.go`      | `FindBrains` (watch-list: brains whose `BrainPolicy` is Active) |
+| `lib/brainsync/policy.go`         | `BrainPolicy` / `ComputePolicy` (commit/push/pull/keys-admit per brain) |
+| `lib/brainsync/watch.go::autoAdmitBrain` | per-tick caller of auto-admit (gated on `policy.KeysAdmit`) |
 | `lib/brain/integration_test.go`   | TestEndToEnd_GitHubMediatedOnboarding, _DriftDetection, _OperatorPubkeyMissingThenRepublish |
 
 ## When this doc gets stale

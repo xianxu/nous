@@ -194,6 +194,41 @@ documented in workshop/issues/000099-sync-decision.md.
 	}
 }
 
+func TestRewriteFrontmatter_PreservesAutosaveAndPublish(t *testing.T) {
+	// nous#47: the sync-control fields are hand-edited, so a recipient op
+	// (Read → mutate → RewriteFrontmatter) must not silently drop them.
+	root := t.TempDir()
+	cfg := filepath.Join(root, ".brain", "config.md")
+	if err := os.MkdirAll(filepath.Join(root, ".brain"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	seed := "---\nname: personal\nrecipients: [FP_A]\nautosave: off\npublish: on\n---\n\n# body\n"
+	if err := os.WriteFile(cfg, []byte(seed), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Simulate `nous brain invite`: read, add a recipient, rewrite.
+	m, err := Read(root)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	m.Recipients = append(m.Recipients, "FP_B")
+	if err := RewriteFrontmatter(root, m); err != nil {
+		t.Fatalf("RewriteFrontmatter: %v", err)
+	}
+
+	out, err := Read(root)
+	if err != nil {
+		t.Fatalf("Read after rewrite: %v", err)
+	}
+	if out.Autosave != "off" {
+		t.Errorf("Autosave = %q after rewrite, want off (dropped — the nous#47 bug)", out.Autosave)
+	}
+	if out.Publish != "on" {
+		t.Errorf("Publish = %q after rewrite, want on (dropped — the nous#47 bug)", out.Publish)
+	}
+}
+
 func TestRewriteFrontmatter_RefusesMissingFrontmatter(t *testing.T) {
 	// If the existing manifest doesn't start with `---\n`, refuse to
 	// rewrite — better than silently overwriting an unrecognized

@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"testing"
 )
 
@@ -33,107 +34,112 @@ func mustInitGitRemote(t *testing.T, dir, url string) {
 	}
 }
 
-func TestFindSharedBrains(t *testing.T) {
+// names returns the sorted basenames of a path list — order-independent
+// comparison for the discovery results.
+func names(paths []string) []string {
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		out[i] = filepath.Base(p)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// TestFindBrains exercises the nous#47 semantics: the daemon watches
+// every brain whose policy is Active(). That now includes purely-local
+// and plain-remote private brains (they get the autosave commit safety
+// net); only a fully opted-out brain is excluded.
+func TestFindBrains(t *testing.T) {
 	root := t.TempDir()
-	// Shared = 2+ recipients (derived signal, replaced the old `mode:` field).
+	// Shared (2+ recipients) — watched (full sync).
 	mustWriteBrain(t, filepath.Join(root, "shared-family"), "name: family\nrecipients: [FP1, FP2]\n")
-	mustWriteBrain(t, filepath.Join(root, "private-brain"), "name: personal\nrecipients: [FP1]\n")
-	// Plain dir without .brain/ — must be skipped.
+	// Single recipient, no remote — now watched (commit-only safety net).
+	mustWriteBrain(t, filepath.Join(root, "local-personal"), "name: personal\nrecipients: [FP1]\n")
+	// Plain remote, single recipient, no opt-in — watched (commit-only).
+	plainMirror := filepath.Join(root, "plain-mirror")
+	mustWriteBrain(t, plainMirror, "name: mirror\nrecipients: [FP1]\n")
+	mustInitGitRemote(t, plainMirror, "https://github.com/xianxu/plain-mirror.git")
+	// gcrypt single recipient — watched (the nous#26 just-provisioned case).
+	gcryptDir := filepath.Join(root, "gcrypt-brain")
+	mustWriteBrain(t, gcryptDir, "name: gcryptb\nrecipients: [FP1]\n")
+	mustInitGitRemote(t, gcryptDir, "gcrypt::ssh://git@github.com/xianxu/gcrypt-brain.git")
+	// Plain dir without .brain/ — not a brain, skipped.
 	if err := os.MkdirAll(filepath.Join(root, "code-repo"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// Fully opted out: autosave off + no remote — NOT watched.
+	mustWriteBrain(t, filepath.Join(root, "opted-out"), "name: out\nrecipients: [FP1]\nautosave: off\n")
 
-	got, err := FindSharedBrains([]string{root})
+	got, err := FindBrains([]string{root})
 	if err != nil {
-		t.Fatalf("FindSharedBrains: %v", err)
+		t.Fatalf("FindBrains: %v", err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("want 1 shared brain, got %d: %v", len(got), got)
-	}
-	if filepath.Base(got[0]) != "shared-family" {
-		t.Errorf("want shared-family, got %s", got[0])
+	want := []string{"gcrypt-brain", "local-personal", "plain-mirror", "shared-family"}
+	if g := names(got); !equalStrings(g, want) {
+		t.Errorf("FindBrains = %v, want %v", g, want)
 	}
 }
 
-func TestFindSharedBrains_LegacyModeFieldIgnored(t *testing.T) {
-	// Existing manifests with the old `mode:` field still parse; the
-	// derived signal (recipients length) is what matters.
+func TestFindBrains_PrivatePublishOptIn(t *testing.T) {
+	// A plain-remote brain with `publish: on` is watched (it pushes).
+	// Its opted-out sibling (autosave off, plain remote, no publish) is not.
 	root := t.TempDir()
-	// Single recipient with `mode: shared` left over — NOT shared by
-	// the derived rule, so the daemon shouldn't watch it.
-	mustWriteBrain(t, filepath.Join(root, "stale-shared"), "mode: shared\nname: stale\nrecipients: [FP1]\n")
-	// Two recipients with no `mode:` field at all — IS shared.
-	mustWriteBrain(t, filepath.Join(root, "real-shared"), "name: real\nrecipients: [FP1, FP2]\n")
+	pub := filepath.Join(root, "published")
+	mustWriteBrain(t, pub, "name: published\nrecipients: [FP1]\npublish: on\n")
+	mustInitGitRemote(t, pub, "https://github.com/xianxu/published.git")
 
-	got, err := FindSharedBrains([]string{root})
+	out := filepath.Join(root, "inert")
+	mustWriteBrain(t, out, "name: inert\nrecipients: [FP1]\nautosave: off\n")
+	mustInitGitRemote(t, out, "https://github.com/xianxu/inert.git")
+
+	got, err := FindBrains([]string{root})
 	if err != nil {
-		t.Fatalf("FindSharedBrains: %v", err)
+		t.Fatalf("FindBrains: %v", err)
 	}
-	if len(got) != 1 || filepath.Base(got[0]) != "real-shared" {
-		t.Errorf("got %v, want [real-shared] only", got)
+	if g := names(got); !equalStrings(g, []string{"published"}) {
+		t.Errorf("FindBrains = %v, want [published]", g)
 	}
 }
 
-func TestFindSharedBrains_EmptyRoot(t *testing.T) {
-	got, err := FindSharedBrains([]string{t.TempDir()})
+func TestFindBrains_EmptyRoot(t *testing.T) {
+	got, err := FindBrains([]string{t.TempDir()})
 	if err != nil {
-		t.Fatalf("FindSharedBrains: %v", err)
+		t.Fatalf("FindBrains: %v", err)
 	}
 	if len(got) != 0 {
 		t.Errorf("want 0 brains in empty root, got %v", got)
 	}
 }
 
-func TestFindSharedBrains_BadRoot(t *testing.T) {
-	_, err := FindSharedBrains([]string{"/no/such/path"})
+func TestFindBrains_BadRoot(t *testing.T) {
+	_, err := FindBrains([]string{"/no/such/path"})
 	if err == nil {
 		t.Error("expected error for nonexistent root")
 	}
 }
 
-// TestFindSharedBrains_SingleRecipientWithGcryptRemote captures the
-// nous#26 bug: a brand-new brain that's just been provisioned (one
-// recipient = the operator, gcrypt remote configured, invitation
-// sent to a peer who hasn't been admitted yet) should be watched.
-// Otherwise auto-admit never fires for it — chicken-and-egg.
-func TestFindSharedBrains_SingleRecipientWithGcryptRemote(t *testing.T) {
-	root := t.TempDir()
-	// Single-recipient brain with a gcrypt:: remote = "shared-intent,
-	// not yet admitted." Must be watched.
-	dir := filepath.Join(root, "brain-family")
-	mustWriteBrain(t, dir, "name: brain-family\nrecipients: [FP1]\n")
-	mustInitGitRemote(t, dir, "gcrypt::ssh://git@github.com/xianxu/brain-family.git")
-
-	// Single-recipient brain with NO remote = truly private, must be
-	// skipped (no point watching; nothing to sync).
-	priv := filepath.Join(root, "personal-brain")
-	mustWriteBrain(t, priv, "name: personal\nrecipients: [FP1]\n")
-
-	// Single-recipient brain with non-gcrypt remote (e.g., plain
-	// github mirror) = not subject to our auto-admit flow. Skipped.
-	nongcrypt := filepath.Join(root, "code-repo")
-	mustWriteBrain(t, nongcrypt, "name: code\nrecipients: [FP1]\n")
-	mustInitGitRemote(t, nongcrypt, "https://github.com/xianxu/code-repo.git")
-
-	got, err := FindSharedBrains([]string{root})
-	if err != nil {
-		t.Fatalf("FindSharedBrains: %v", err)
-	}
-	if len(got) != 1 || filepath.Base(got[0]) != "brain-family" {
-		t.Errorf("got %v, want [brain-family] only", got)
-	}
-}
-
-func TestFindAllSharedBrainsInWorkspace(t *testing.T) {
+func TestFindAllBrainsInWorkspace(t *testing.T) {
 	root := t.TempDir()
 	mustWriteBrain(t, filepath.Join(root, "shared-x"), "name: x\nrecipients: [FP1, FP2]\n")
 	t.Setenv("WORKSPACE_ROOT", root)
 
-	got, err := FindAllSharedBrainsInWorkspace()
+	got, err := FindAllBrainsInWorkspace()
 	if err != nil {
-		t.Fatalf("FindAllSharedBrainsInWorkspace: %v", err)
+		t.Fatalf("FindAllBrainsInWorkspace: %v", err)
 	}
 	if len(got) != 1 || filepath.Base(got[0]) != "shared-x" {
 		t.Errorf("got %v, want [shared-x]", got)
 	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

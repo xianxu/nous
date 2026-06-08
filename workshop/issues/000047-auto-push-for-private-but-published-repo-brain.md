@@ -1,10 +1,11 @@
 ---
 id: 000047
-status: working
+status: done
 deps: []
 created: 2026-06-08
 updated: 2026-06-08
 estimate_hours: 3
+actual_hours: 1.27
 ---
 
 # auto push for private but published repo (brain)
@@ -71,11 +72,18 @@ orthogonal axes (commit / push) read consistently in `.brain/config.md`.
 
 ## Plan
 
-- [ ]
+Durable design: `workshop/plans/000047-auto-push-for-private-but-published-brain-plan.md`
+
+- [x] Manifest: add + parse `publish:` field; round-trip `autosave:`/`publish:` in `renderFrontmatter` (root-cause fix for the writer dropping them).
+- [x] Policy: new pure `lib/brainsync/policy.go` (`RemoteKind`, `syncParticipant`, `publishMode`, `ComputePolicy`, `BrainPolicy.Active`) + table tests.
+- [x] Discovery: watch all *active* brains (`FindSharedBrains`→`FindBrains`); rewrite tests.
+- [x] Watch + AutoCommitter: consume policy — commit-all, gate push/pull/keys-admit; `NewAutoCommitter(push bool)`.
+- [x] Atlas: document decoupled cadences + `publish:`; tests green; manual smoke.
 
 ## Log
 
 ### 2026-06-08
+- 2026-06-08: closed — go test ./lib/brain/ ./lib/brainsync/ green (TestComputePolicy table, TestFindBrains, TestAutoCommitter_CommitOnlyNeverPushes, TestRewriteFrontmatter_PreservesAutosaveAndPublish); pre-existing gpg-agent integration failures are environmental. Manual daemon smoke: plain-remote publish:on brain committed + auto-pushed to bare origin; no-remote brain committed locally, never pushed; pull polling ran only for published brain; daemon logged commit+push vs commit-only per brain.; review verdict: SHIP
 
 - Explored the brainsync daemon: `isWatchable` (discovery.go:73) couples
   commit+push into one "shared OR gcrypt-remote" predicate. AutoCommitter
@@ -86,4 +94,21 @@ orthogonal axes (commit / push) read consistently in `.brain/config.md`.
 - Confirmed scope with operator: (Q1) plain mirrors excluded from auto-push by
   default → opt-in marker; (Q2) all brains get local autosave commit even with
   no remote.
+- Operator refined `publish: off` semantics mid-plan: it pauses **only the push
+  half**, pull keeps running (a gcrypt/shared brain with `publish: off` still
+  receives peer changes). Split `Pull` from `Push` in `BrainPolicy` accordingly
+  — `Pull = syncParticipant`, `Push = syncParticipant && publish != off`.
+- Implemented: pure `ComputePolicy` (`ARCH-PURE`, table-tested without daemon),
+  `remoteKind` reusing `brain.ReadOriginURL` (`ARCH-DRY`, deleted the bespoke
+  `hasGcryptRemote` git exec). Watch consumes one policy per brain for
+  commit/push/pull/keys-admit gating.
+- Root-cause fix folded in: `renderFrontmatter` never emitted `autosave:`, so a
+  recipient op (`Read→mutate→RewriteFrontmatter`) silently dropped it — and would
+  drop `publish:` too. Now both round-trip; regression test added.
+- Verified: `go test ./lib/brain/ ./lib/brainsync/` green (pre-existing gpg-agent
+  integration failures are environmental, unrelated). Manual daemon smoke: a
+  plain-remote `publish: on` brain committed + auto-pushed to a bare origin; a
+  no-remote brain committed locally and never pushed; pull polling ran only for
+  the published brain. Daemon log showed `(commit+push)` vs `(commit-only)` modes
+  per brain.
 

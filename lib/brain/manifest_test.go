@@ -75,6 +75,48 @@ sync_substrate: syncthing
 	}
 }
 
+func TestRead_AutosaveAndPublishFields(t *testing.T) {
+	cases := []struct {
+		name         string
+		manifest     string
+		wantAutosave string
+		wantPublish  string
+	}{
+		{
+			name:         "both set",
+			manifest:     "---\nname: n\nrecipients: [FP1]\nautosave: off\npublish: on\n---\n",
+			wantAutosave: "off",
+			wantPublish:  "on",
+		},
+		{
+			name:         "publish off",
+			manifest:     "---\nname: n\nrecipients: [FP1]\npublish: off\n---\n",
+			wantAutosave: "",
+			wantPublish:  "off",
+		},
+		{
+			name:         "neither set (predates fields)",
+			manifest:     "---\nname: n\nrecipients: [FP1]\n---\n",
+			wantAutosave: "",
+			wantPublish:  "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m, err := Read(writeBrain(t, t.TempDir(), tc.manifest))
+			if err != nil {
+				t.Fatalf("Read: %v", err)
+			}
+			if m.Autosave != tc.wantAutosave {
+				t.Errorf("Autosave = %q, want %q", m.Autosave, tc.wantAutosave)
+			}
+			if m.Publish != tc.wantPublish {
+				t.Errorf("Publish = %q, want %q", m.Publish, tc.wantPublish)
+			}
+		})
+	}
+}
+
 func TestShared_Boundary(t *testing.T) {
 	// Boundary: exactly 1 recipient = not shared; 2+ = shared.
 	cases := []struct {
