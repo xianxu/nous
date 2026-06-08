@@ -2,6 +2,7 @@
 id: 000044
 status: working
 deps: []
+target: oauth-credential-lifecycle
 github_issue:
 created: 2026-06-06
 updated: 2026-06-07
@@ -67,12 +68,14 @@ Durable design: `workshop/plans/000044-shim-google-oauth-plan.md` (port surface 
 union of charon's three real consumer interfaces; pure `tokenResponse→Credential`
 core shared by both adapters; async callback stays adapter-internal).
 
-- [ ] M1 — Port (`Provider` interface) + `Conf`/`New`/`NewFake` + pure token-shaping core (`credentialFromToken`/`applyRefresh`/`parseIDToken`/`mintIDToken`); real adapter routed through it, behavior-preserving (`ARCH-PURE`/`ARCH-DRY`); `CheckHealth` → shared composite.
+- [x] M1 — Port (`Provider` interface) + `Conf`/`New`/`NewFake` + pure token-shaping core (`credentialFromToken`/`applyRefresh`/`parseIDToken`/`mintIDToken`); real adapter routed through it, behavior-preserving (`ARCH-PURE`/`ARCH-DRY`); `CheckHealth` → shared composite.
 - [ ] M2 — Explicit consumer-POV state machine (S) as a `target` (ariadne#71 finding); stateful `Fake` adapter executing S over the shared pure core, with fault knobs = S's named provider-autonomous transitions; hermetic flow tests (Auth short-circuit, Refresh, Revoke, CheckHealth, fault cases) + below-seam hermetic `waitForCallback`/token-exchange tests for the real adapter.
 - [ ] M3 — Migrate charon's oauth consumers onto the port; dual-backend contract test (Refresh/CheckHealth grounded vs real Google via Keychain; consent + Revoke documented as manual); atlas + grounding-boundary doc.
 
 ## Log
 
+
+- 2026-06-08: closed M1 — Behavior-preserving refactor: pure token-shaping core (token.go), Provider port + Conf/New (port.go), real adapter routed through pure core, CheckHealth->shared composite. go test ./lib/provider/oauth/ green; go build ./... green; proxy/charoncli/tui tests green. Existing tests pass unchanged except TestRefresh_PreservesSidecars updated to inject TokenURL via Conf. Atlas deferred to M3 (pure internal refactor, no operator-facing surface yet).; review verdict: FIX-THEN-SHIP
 ### 2026-06-06
 
 Filed as instance #2 of the shim(X) pattern (ariadne#71, which now `deps:` on
