@@ -1,15 +1,16 @@
 ---
 name: oauth-conformance-provision
-description: Provision the Google refresh token that grounds the OAuth shim's fake against real Google, and run the certification. Use when the conformance test skips ("no Google conformance refresh token"), on ~monthly re-cert, or when porting this to a new OAuth provider (nous#48 Microsoft).
+description: Provision the Google or Microsoft refresh token that grounds the OAuth shim's fake against the real provider, and run the certification. Use when a conformance test skips ("no Google/Microsoft conformance refresh token"), on re-cert, or when standing up the Microsoft (Entra) grounding (nous#48).
 ---
 
 # OAuth conformance: provision + certify
 
-The OAuth shim's fake (`lib/provider/oauth/fake.go`) is grounded against real
-Google by a build-tagged contract test
-(`lib/provider/oauth/contract_real_test.go`). That test needs a **real Google
-refresh token** in the macOS Keychain; without it, it skips. This tool obtains
-that token and stores it.
+The OAuth shim's fake (`lib/provider/oauth/fake.go`) is grounded against the real
+providers by build-tagged contract tests
+(`lib/provider/oauth/contract_real_test.go`): `Contract_RealGoogle` and
+`Contract_RealMicrosoft`. Each test needs a **real refresh token** in the macOS
+Keychain; without it, it skips. This tool obtains that token and stores it, for
+either provider (`-provider google|microsoft`).
 
 ## Why this tool exists (vs pasting a token)
 
@@ -64,10 +65,54 @@ in the `oauth-credential-lifecycle` target's `## Revisions`. Re-cert ~monthly or
 on suspected drift (re-run the two commands above; the token may need refreshing
 if Google has rotated/expired it — just re-run the provisioner).
 
-## Porting to a new provider (nous#48 Microsoft)
+## Microsoft / Entra (nous#48 — n=2-real grounding)
 
-This is the template. A Microsoft provisioner differs only in the per-provider
-seam: the `offline_access` scope (not `openid` alone for a refresh token), the
-tenant-scoped endpoints, and the identity-claim extractor — none of which change
-the provision→certify→record loop. Reuse this structure; vary the `Conf` and the
-Keychain service const.
+Microsoft is a **public client + PKCE** (no secret), so unlike Google there is
+nothing embedded — you supply your own Entra app's IDs. One-time Azure setup:
+
+1. Azure portal → **App registrations** → **New registration**.
+2. **Supported account types:** *Accounts in this organizational directory only*
+   (single tenant) is enough for grounding.
+3. **Authentication** → **Add a platform** → **Mobile and desktop applications**
+   → redirect URI **`http://localhost`** (the desktop platform wildcards the
+   loopback port, matching charon's random callback port).
+4. **Authentication** → **Allow public client flows** → **Yes**. No client secret.
+5. **API permissions** (delegated, all user-consentable — no admin consent):
+   `openid`, `profile`, `offline_access`.
+6. From **Overview**, copy the **Application (client) ID** and **Directory
+   (tenant) ID**.
+
+Provision (consent with a throwaway Entra account):
+
+```sh
+MICROSOFT_CLIENT_ID=<app-id> MICROSOFT_TENANT_ID=<tenant-id> \
+  go run ./cmd/oauth-conformance-provision -provider microsoft
+```
+
+Stores the token in Keychain `nous-oauth-conformance-microsoft`
+(`oauth.ConformanceKeychainServiceMicrosoft`). Certify (the test reads the same
+env for client/tenant):
+
+```sh
+MICROSOFT_CLIENT_ID=<app-id> MICROSOFT_TENANT_ID=<tenant-id> \
+  go test -tags conformance ./lib/provider/oauth/ -run Contract_RealMicrosoft -v
+```
+
+**Single-use rotation:** Microsoft rotates the refresh token on *every* Refresh.
+The test wraps the provider in `rtCapture` and **persists the final rotated token
+back to Keychain**, so re-runs work. (Google's token is reusable and the Google
+test deliberately does NOT persist — probe semantics.) Re-provision only if the
+stored token goes stale (>90 days idle).
+
+**Microsoft grounding boundary:** `Refresh`/`CheckHealth` grounded; the consent
+leg is interactive; **`Revoke` is `ErrRevokeUnsupported`** — Microsoft has no
+per-token revoke endpoint at all (only Graph `revokeSignInSessions`, which is
+global across every app), so it's ungroundable by mechanism, not just by
+destructiveness.
+
+## The shape generalizes
+
+The provision→certify→record loop is identical across providers; only the
+per-provider seam (scopes, endpoints, identity extractor, client type) varies —
+the `dialect` in `lib/provider/oauth/`. A third provider reuses this structure:
+add a `New<Provider>Provider` + a Keychain-service const, pass `-provider <name>`.

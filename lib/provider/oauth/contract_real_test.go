@@ -13,12 +13,23 @@
 //
 //	GROUNDED here:  Expired→Active (Refresh) + the CheckHealth read.
 //	NOT grounded:   - the consent leg (Auth) — interactive, non-headless;
-//	                - Revoke — destructive (would invalidate the grounding
-//	                  refresh token, breaking every subsequent run);
-//	                - the provider-autonomous →Dead edge — we can't make Google
-//	                  kill a token on demand without a destructive action.
+//	                - Revoke — Google: destructive (would invalidate the
+//	                  grounding token); Microsoft: no per-token revoke endpoint
+//	                  AT ALL (ErrRevokeUnsupported) — ungroundable by mechanism;
+//	                - the provider-autonomous →Dead edge — we can't make the
+//	                  issuer kill a token on demand without a destructive action.
 //	These are fake-only (fake_test.go) / documented-manual. Don't claim coverage
 //	the mechanism can't deliver.
+//
+// MICROSOFT ROTATION WRINKLE (the n=2 grounding finding): Microsoft refresh
+// tokens are SINGLE-USE — every Refresh rotates them. The shared contract body
+// (Refresh, then CheckHealth which itself Refreshes) therefore burns the seeded
+// token and leaves the only live token in CheckHealth's discarded rotation. So
+// the Microsoft test wraps the provider in rtCapture (records every rotation)
+// and persists the final live token back to Keychain — making the grounding
+// repeatable. Google's token is reusable, so its test deliberately does NOT
+// persist (probe semantics, invariant 1). Same S contract, opposite persistence
+// discipline: that asymmetry IS the cross-provider evidence.
 //
 // ZERO-CONFIG: a throwaway test-account refresh token resolves from Keychain
 // `nous-oauth-conformance-google` (override via $OAUTH_GOOGLE_REFRESH_TOKEN).
@@ -86,4 +97,97 @@ func keychainSecret(service string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// keychainStore upserts a Keychain generic-password secret (the conformance
+// test's write-back path for Microsoft's single-use refresh tokens). Best-effort:
+// errors are returned for the caller to log, not fatal.
+func keychainStore(service, account, secret string) error {
+	return exec.Command("security", "add-generic-password", "-U",
+		"-s", service, "-a", account, "-w", secret).Run()
+}
+
+// rtCapture is a Provider decorator that records the most recent non-empty
+// refresh token returned by Refresh — including the rotation buried inside
+// CheckHealth, because it routes CheckHealth through its own Refresh via the
+// shared checkHealth helper. It lets the Microsoft grounding test persist the
+// final live (rotated) token back to Keychain, surviving single-use rotation.
+type rtCapture struct {
+	inner Provider
+	last  string
+}
+
+func (c *rtCapture) Auth(account string, scopes, existingScopes []string, forceFresh bool) (*vault.Credential, error) {
+	return c.inner.Auth(account, scopes, existingScopes, forceFresh)
+}
+
+func (c *rtCapture) Refresh(cred *vault.Credential) (*vault.Credential, error) {
+	fresh, err := c.inner.Refresh(cred)
+	if err == nil && fresh.RefreshToken != "" {
+		c.last = fresh.RefreshToken
+	}
+	return fresh, err
+}
+
+func (c *rtCapture) Revoke(refreshToken string) error { return c.inner.Revoke(refreshToken) }
+
+func (c *rtCapture) CheckHealth(cred *vault.Credential) HealthState {
+	return checkHealth(c.Refresh, cred) // route through our Refresh so the probe's rotation is captured
+}
+
+func TestContract_RealMicrosoft(t *testing.T) {
+	clientID := os.Getenv("MICROSOFT_CLIENT_ID")
+	tenant := os.Getenv("MICROSOFT_TENANT_ID")
+	if clientID == "" || tenant == "" {
+		t.Skip("no Microsoft client/tenant ($MICROSOFT_CLIENT_ID / $MICROSOFT_TENANT_ID); " +
+			"create a public-client Entra app, then provision with: " +
+			"MICROSOFT_CLIENT_ID=… MICROSOFT_TENANT_ID=… go run ./cmd/oauth-conformance-provision -provider microsoft")
+	}
+	rt := os.Getenv("OAUTH_MICROSOFT_REFRESH_TOKEN")
+	if rt == "" {
+		rt = keychainSecret(ConformanceKeychainServiceMicrosoft)
+	}
+	if rt == "" {
+		t.Skip("no Microsoft conformance refresh token " +
+			"(Keychain " + ConformanceKeychainServiceMicrosoft + " or $OAUTH_MICROSOFT_REFRESH_TOKEN); " +
+			"provision with: go run ./cmd/oauth-conformance-provision -provider microsoft")
+	}
+
+	c := &rtCapture{inner: NewMicrosoftProvider(clientID, tenant)}
+	cred := &vault.Credential{
+		Type:         vault.TypeOAuth,
+		Provider:     "microsoft",
+		Account:      "conformance@grounding", // preserved across refresh; not asserted for correctness
+		AccessToken:  "stale",
+		RefreshToken: rt,
+		Expiry:       time.Now().Add(-time.Hour),
+		Scopes:       []string{"openid", "profile", "offline_access"},
+	}
+
+	// Persist the final live (rotated) token back to Keychain so re-runs work
+	// despite Microsoft's single-use rotation. Always attempt it (even on a
+	// failing body) since the seed token is consumed regardless.
+	defer func() {
+		if c.last != "" {
+			if err := keychainStore(ConformanceKeychainServiceMicrosoft, "conformance@grounding", c.last); err != nil {
+				t.Logf("warning: failed to persist rotated refresh token back to Keychain: %v", err)
+			} else {
+				t.Logf("persisted rotated refresh token back to Keychain %s (single-use rotation)", ConformanceKeychainServiceMicrosoft)
+			}
+		}
+	}()
+
+	// MS-specific pre-assertion: a refresh rotates the token (always-rotate —
+	// Google's contract can't assert this). Re-seed cred to the live token so the
+	// shared body runs against it, not the now-dead seed.
+	fresh, err := c.Refresh(cred)
+	if err != nil {
+		t.Fatalf("Refresh (rotation check): %v", err)
+	}
+	if fresh.RefreshToken == "" || fresh.RefreshToken == cred.RefreshToken {
+		t.Fatalf("Microsoft should rotate the refresh token on every use: got %q (seed %q)", fresh.RefreshToken, cred.RefreshToken)
+	}
+	cred.RefreshToken = fresh.RefreshToken
+
+	runOAuthContract(t, c, cred)
 }
