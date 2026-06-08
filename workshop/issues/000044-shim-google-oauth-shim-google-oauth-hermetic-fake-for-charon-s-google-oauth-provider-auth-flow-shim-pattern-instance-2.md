@@ -1,12 +1,13 @@
 ---
 id: 000044
-status: working
+status: done
 deps: []
 target: oauth-credential-lifecycle
 github_issue:
 created: 2026-06-06
-updated: 2026-06-07
+updated: 2026-06-08
 estimate_hours: 6
+actual_hours: 1.60
 ---
 
 # shim(google-oauth)+shim'(google-oauth): hermetic fake for charon's Google OAuth provider-auth flow (shim pattern instance #2)
@@ -74,6 +75,8 @@ core shared by both adapters; async callback stays adapter-internal).
 
 ## Log
 
+
+- 2026-06-08: closed — shim(google-oauth) complete (instance #2): Provider port + Conf/New/NewFake; pure tokenResponse->Credential core shared by real+fake; stateful Fake executing the explicit oauth-credential-lifecycle S machine (fault-knobs = provider-autonomous edges); consumer migrated onto the port (charon GCP token path runs hermetically via NewFake); dual-backend contract (fake always + //go:build conformance real-Google grounding of Refresh/CheckHealth); atlas + grounding boundary documented. 3 milestones reviewed (M1/M2 FIX-THEN-SHIP fixed, M3 SHIP) — verdict table in Log. go test ./lib/provider/oauth/... ./lib/charoncli/... ./lib/provider/proxy/... ./lib/tui/... green; go build ./... green. Microsoft 2nd-provider + real-Google cert tracked as #48.
 ### Milestone review verdicts (fresh-context boundary reviews)
 
 - M1 — **FIX-THEN-SHIP** (window 0f12c7e..HEAD). `buildAuthURL`/`mergeScopes` extraction + email-verified boundary nuance → fixed in bce3101. Review ran during `sdlc milestone-close M1`.
