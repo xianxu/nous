@@ -162,4 +162,3 @@ func decodeIDClaims(idToken string, into any) error {
 	}
 	return nil
 }
-

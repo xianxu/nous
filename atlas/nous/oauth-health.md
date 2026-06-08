@@ -6,7 +6,7 @@ Per `nous#15`, charon's stored OAuth credentials can become stale (Google revoke
 
 ```
 lib/provider/oauth/health.go           HealthState enum (Healthy / NeedsReauth / Unknown)
-                                        + (*GoogleProvider).CheckHealth(*Credential) HealthState
+                                        + (*OIDCProvider).CheckHealth(*Credential) HealthState
                                         + FriendlyError(err) for user-facing prose
 lib/tui/health.go                       AccountHealth string-typed enum + AccountHealthChecker fn type
                                         (kept domain-neutral so the adapter lives in the caller)

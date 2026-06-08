@@ -90,6 +90,8 @@ MS dialect dimensions.
 ## Log
 
 ### 2026-06-08
+- 2026-06-08: closed M1 — go test ./lib/provider/oauth/ green: one OIDCProvider+dialect; Microsoft adapter (PKCE/preferred_username/offline_access/ErrRevokeUnsupported); dialect-aware Fake certifies the S contract under BOTH Google & Microsoft dialects (TestContract_Fake + TestContract_FakeMicrosoft); MS wire grounded vs httptest (verifier+no client_secret+rotation); Google behavior unchanged (existing tests pass).
+- 2026-06-08: M1 boundary review = **FIX-THEN-SHIP** (info; no Critical/correctness). Fixed both Important: atlas drift (`atlas/nous/oauth-health.md` `*GoogleProvider`→`*OIDCProvider`) + removed a stray tracked `oauth-conformance-provision` binary (+.gitignore). gofmt'd oidc.go/token.go/token_test.go. Lessons recorded (rename sweeps must include atlas/docs; no build artifacts in `git add -A`). Deferred minors in lessons.md.
 
 Filed from the nous#44 M3 scope decision (operator: 2nd OAuth provider lands as a
 separate follow-up, symmetric to nous#46 for gh, not bundled into #44). The

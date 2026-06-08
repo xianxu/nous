@@ -27,9 +27,9 @@ func TestDecodeIDClaims_Errors(t *testing.T) {
 	// The JWT-decode error paths (empty / malformed / bad base64 / bad json)
 	// moved from parseIDToken onto the provider-neutral decodeIDClaims.
 	bad := []string{
-		"",                  // no token
-		"not-a-jwt",         // != 3 parts
-		"header.!!!.sig",    // bad base64 payload
+		"",               // no token
+		"not-a-jwt",      // != 3 parts
+		"header.!!!.sig", // bad base64 payload
 		"header." + base64.RawURLEncoding.EncodeToString([]byte("not json")) + ".sig", // bad json
 	}
 	var into struct {

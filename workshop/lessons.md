@@ -192,3 +192,34 @@ Process notes for M5:
   taxes the common case and couples an unnecessary dependency is a false
   economy. Corollary: when the operator asks "why do we need X here?",
   treat it as a design smell, not a request for justification.
+
+---
+
+## 2026-06-08 — nous#48 M1 boundary review
+
+`FIX-THEN-SHIP` (info): no Critical/correctness; two Important, both
+hygiene/drift, both cheap.
+
+1. **A type rename's blast-radius sweep must include `atlas/` + docs, not
+   just `.go` callers.** The `GoogleProvider`→`OIDCProvider` rename updated
+   every Go comment/usage but left `atlas/nous/oauth-health.md` documenting
+   `(*GoogleProvider).CheckHealth` — drift the rename *created now*, even
+   though the plan had scheduled atlas work for a later milestone. **Rule:**
+   when renaming an exported symbol, `grep -rn OldName` across the WHOLE
+   tree (atlas, plans, docs, SKILL.md), not just code; fix the doc drift in
+   the same milestone that creates it, regardless of when the atlas pass was
+   planned.
+
+2. **Never `git add -A` without checking for build artifacts.** A compiled
+   `oauth-conformance-provision` Mach-O binary was tracked at the repo root
+   (added in an earlier "update ariadne" commit, surfaced in this review's
+   window). `git rm --cached` + a `.gitignore` entry fixed it. **Rule:**
+   `cmd/<x>` binaries share the dir-leaf name of their package — gitignore
+   the built binary when you add the command, and skim `git status` for
+   executables before a broad `add -A`.
+
+Minors deferred (non-blocking, recorded): `OIDCProvider.Revoke("")` returns
+"no refresh token" before reaching the MS `ErrRevokeUnsupported` path
+(harmless ordering — empty token is a caller error for any provider); no
+symmetric Google-side "client_secret IS sent" assertion (MS asserts its
+absence; Google happy-path covers presence).

@@ -31,12 +31,12 @@ import (
 //   - usePKCE and revoke are real-adapter-only: the fake does no PKCE wire and
 //     has its own provider-neutral Revoke (deleting the live grant).
 type dialect struct {
-	providerID     string                                       // vault.Credential.Provider ("google"/"microsoft")
-	requiredScopes []string                                     // structural scopes always merged into a request
-	usePKCE        bool                                         // real Auth adds code_challenge + sends code_verifier
-	authParams     func(forceFresh bool) url.Values             // provider-specific authorization-URL params
-	extractID      func(idToken string) (account string, e error) // identity-claim extraction
-	mintID         func(account string, verified bool) string   // fake-side: mint a token extractID can read
+	providerID     string                                           // vault.Credential.Provider ("google"/"microsoft")
+	requiredScopes []string                                         // structural scopes always merged into a request
+	usePKCE        bool                                             // real Auth adds code_challenge + sends code_verifier
+	authParams     func(forceFresh bool) url.Values                 // provider-specific authorization-URL params
+	extractID      func(idToken string) (account string, e error)   // identity-claim extraction
+	mintID         func(account string, verified bool) string       // fake-side: mint a token extractID can read
 	revoke         func(g *OIDCProvider, refreshToken string) error // real-adapter revoke mechanism
 }
 
