@@ -210,6 +210,10 @@ client, so it can't be a pasted PAT like gh's). First certified 2026-06-08 again
 real Google (nous#49); re-cert ~monthly. See that command's `SKILL.md` for the
 provision→certify→re-cert loop (and the nous#48 Microsoft template).
 
+The per-shim **last-certified ledger** across all providers lives in
+`atlas/nous/shim-conformance-grounding.md` — the freshness index of this whole
+grounding layer.
+
 ## Mechanisms covered today
 
 | Mechanism | Function | Test |

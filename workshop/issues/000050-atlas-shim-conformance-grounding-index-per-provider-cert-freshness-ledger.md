@@ -1,12 +1,13 @@
 ---
 id: 000050
-status: working
+status: done
 deps: []
 github_issue:
 target: oauth-credential-lifecycle
 created: 2026-06-08
 updated: 2026-06-08
 estimate_hours: 0.5
+actual_hours: 0.03
 ---
 
 # atlas: shim conformance-grounding index (per-provider cert freshness ledger)
@@ -42,13 +43,14 @@ certified?"
 
 ## Plan
 
-- [ ] Write `atlas/nous/shim-conformance-grounding.md` (table + framing + cadence + planned rows).
-- [ ] Cross-link from `atlas/nous/e2e-integration-testing.md` (and the two contract test headers if useful).
-- [ ] Append the idea to the ariadne shim pensive (pattern direction).
+- [x] Write `atlas/nous/shim-conformance-grounding.md` (table + framing + cadence + planned rows).
+- [x] Cross-link from `atlas/nous/e2e-integration-testing.md` (and the two contract test headers if useful).
+- [x] Append the idea to the ariadne shim pensive (pattern direction).
 
 ## Log
 
 ### 2026-06-08
+- 2026-06-08: closed — Created atlas/nous/shim-conformance-grounding.md: per-(shim,provider) freshness ledger (gh GitHub cert 2026-06-06, oauth Google cert 2026-06-08; gitlab/bitbucket #46 + Microsoft #48 listed pending), with the grounding-boundary-per-row + R/M/S bisimulation-oracle framing. Cross-linked from e2e-integration-testing.md. ariadne shim pensive updated to record the conformance-grounding index as a candidate #71 pattern element. Pure docs; go build ./... green. --no-atlas: this issue IS the atlas addition (the deliverable is an atlas page, not code needing a separate atlas note).; review verdict: SHIP
 
 Filed from operator request after the oauth fake was certified against real
 Google (#49): we should have a single atlas index of every shim's
