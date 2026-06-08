@@ -138,9 +138,8 @@ func TestRequiredScopesIncluded(t *testing.T) {
 // and minted keys — discovered when an account showed `vertex` but
 // not `ai-studio` in `charon manifest` after a long-running session.
 //
-// Drives the actual HTTP refresh against a stub token endpoint via
-// reflection-free indirection: we override googleTokenURL just for
-// the duration of this test.
+// Drives the actual HTTP refresh against a stub token endpoint by pointing
+// the adapter's TokenURL at an httptest server via Conf.
 func TestRefresh_PreservesSidecars(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -148,14 +147,7 @@ func TestRefresh_PreservesSidecars(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	orig := googleTokenURL
-	googleTokenURL = srv.URL
-	defer func() { googleTokenURL = orig }()
-
-	gp, err := NewGoogleProvider()
-	if err != nil {
-		t.Fatalf("NewGoogleProvider: %v", err)
-	}
+	gp := New(Conf{TokenURL: srv.URL})
 
 	in := &vault.Credential{
 		Type:         vault.TypeOAuth,
