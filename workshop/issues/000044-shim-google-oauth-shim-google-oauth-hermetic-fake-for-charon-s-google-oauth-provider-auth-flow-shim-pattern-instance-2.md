@@ -63,12 +63,13 @@ Follow the nous#42 convention (`shim(gh)` is the reference instance):
 
 ## Plan
 
-- [ ] Inventory charon's actual Google-OAuth surface (auth, callback, exchange, refresh, email-from-ID-token) + consumers.
-- [ ] Define the port + `Conf`; settle the async-callback shape (channel/await inside the adapter).
-- [ ] `real` adapter: move `google.go` behind the port unchanged.
-- [ ] `fake` adapter: in-memory token/refresh/ID-token model + callback short-circuit + fault knobs.
-- [ ] Migrate consumers; hermetic flow tests.
-- [ ] Dual-backend contract test (token/refresh vs real Google); document the consent-leg grounding boundary.
+Durable design: `workshop/plans/000044-shim-google-oauth-plan.md` (port surface =
+union of charon's three real consumer interfaces; pure `tokenResponse→Credential`
+core shared by both adapters; async callback stays adapter-internal).
+
+- [ ] M1 — Port (`Provider` interface) + `Conf`/`New`/`NewFake` + pure token-shaping core (`credentialFromToken`/`applyRefresh`/`parseIDToken`/`mintIDToken`); real adapter routed through it, behavior-preserving (`ARCH-PURE`/`ARCH-DRY`); `CheckHealth` → shared composite.
+- [ ] M2 — Explicit consumer-POV state machine (S) as a `target` (ariadne#71 finding); stateful `Fake` adapter executing S over the shared pure core, with fault knobs = S's named provider-autonomous transitions; hermetic flow tests (Auth short-circuit, Refresh, Revoke, CheckHealth, fault cases) + below-seam hermetic `waitForCallback`/token-exchange tests for the real adapter.
+- [ ] M3 — Migrate charon's oauth consumers onto the port; dual-backend contract test (Refresh/CheckHealth grounded vs real Google via Keychain; consent + Revoke documented as manual); atlas + grounding-boundary doc.
 
 ## Log
 

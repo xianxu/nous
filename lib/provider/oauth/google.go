@@ -2,7 +2,6 @@ package oauth
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -81,18 +80,6 @@ func (g *GoogleProvider) out() io.Writer {
 		return io.Discard
 	}
 	return g.Output
-}
-
-// tokenResponse is the JSON response from Google's token endpoint.
-type tokenResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	IDToken      string `json:"id_token"`
-	ExpiresIn    int    `json:"expires_in"`
-	TokenType    string `json:"token_type"`
-	Scope        string `json:"scope"`
-	Error        string `json:"error"`
-	ErrorDesc    string `json:"error_description"`
 }
 
 // Auth runs the OAuth authorization flow: opens browser, waits for callback, exchanges code for tokens.
@@ -327,32 +314,6 @@ func (g *GoogleProvider) exchangeCode(code, redirectURI string) (*vault.Credenti
 		Expiry:       time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second),
 		Scopes:       scopes,
 	}, nil
-}
-
-// parseIDTokenEmail extracts the email claim from a Google ID token (JWT).
-// No signature verification needed — token comes directly from Google's token endpoint over HTTPS.
-func parseIDTokenEmail(idToken string) (string, error) {
-	if idToken == "" {
-		return "", fmt.Errorf("no ID token in response (openid scope may not be granted)")
-	}
-	parts := strings.Split(idToken, ".")
-	if len(parts) != 3 {
-		return "", fmt.Errorf("invalid ID token format")
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return "", fmt.Errorf("failed to decode ID token payload: %w", err)
-	}
-	var claims struct {
-		Email string `json:"email"`
-	}
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return "", fmt.Errorf("failed to parse ID token claims: %w", err)
-	}
-	if claims.Email == "" {
-		return "", fmt.Errorf("no email claim in ID token")
-	}
-	return claims.Email, nil
 }
 
 // waitForCallback starts an HTTP server, waits for the OAuth callback, extracts the code.
