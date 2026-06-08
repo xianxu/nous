@@ -1,9 +1,10 @@
 ---
 id: 000047
-status: open
+status: working
 deps: []
 created: 2026-06-08
 updated: 2026-06-08
+estimate_hours: 3
 ---
 
 # auto push for private but published repo (brain)
@@ -12,10 +13,61 @@ auto commit and auto publish was designed to work with shared brain. now it seem
 
 ## Done when
 
--
+- Every brain (any `.brain/config.md` dir) gets the local autosave commit safety net, even with no remote.
+- A private-but-published brain (single recipient, plain non-gcrypt remote) auto-pushes when the operator opts in, without being confused with a read-only mirror.
+- gcrypt/shared brains keep their current auto-push behavior (no regression).
+- A plain-remote brain with no opt-in is committed locally but NOT auto-pushed.
 
 ## Spec
 
+Today the brainsync daemon couples two things into one "is this brain watchable?"
+predicate (`isWatchable` in `lib/brainsync/discovery.go`): a brain is watched
+iff it is **shared** (≥2 recipients) OR has a **gcrypt::** remote. A watched
+brain gets *both* the local autosave commit loop AND the auto-push loop. A
+single-recipient brain with a plain remote, or with no remote, is skipped
+entirely — no commit, no push.
+
+This issue decouples the two cadences (commit vs. push) on a per-brain basis:
+
+**Commit (autosave) — applies to every brain.** Local safety net. A brain's
+work is less structured than code; we don't want the operator hand-managing
+commit boundaries. Default on; existing `autosave: off` opt-out still disables
+it. No-remote brains commit locally (push is simply skipped).
+
+**Push (publish) — derived, with an opt-in for plain remotes.**
+- gcrypt remote OR shared (≥2 recipients) → auto-push (current behavior, no regression).
+- plain remote (e.g. a private GitHub repo) → auto-push ONLY if the manifest
+  opts in (so a read-only mirror isn't surprised by auto-pushes).
+- no remote → never push (nothing to publish), but still commits locally.
+
+**Marker.** Add a manifest field `publish:` controlling the push axis:
+- absent → *derived*: gcrypt/shared → push; plain remote → no push; no remote → no push.
+- `publish: on` → auto-push whenever a remote exists (the "private but published" opt-in).
+- `publish: off` → never auto-push (commit-only, even with a remote).
+
+This mirrors the existing `autosave:` absent→on→off vocabulary, so the two
+orthogonal axes (commit / push) read consistently in `.brain/config.md`.
+
+### Why this shape
+- `ARCH-DRY` — one per-brain policy computed once, consumed by the commit loop,
+  the push loop, and the pull/keys tick — rather than re-deriving "is this
+  shared?" at each call site.
+- `ARCH-PURE` — the policy derivation is a pure function of (manifest, remote
+  url); the IO (git config read) is a thin shell over it, so it unit-tests
+  without a daemon.
+- Simplicity — the operator's mental model is two switches: "save my work" and
+  "publish my work," each defaulting sensibly.
+
+### Affected surface
+- `lib/brain/manifest.go` — parse + accessor for the `publish:` field.
+- `lib/brainsync/discovery.go` — watch ALL brains; expose a per-brain policy
+  (commit / push / sync) instead of a single watchable bool.
+- `lib/brainsync/watch.go` — gate the per-tick network block (pull/keys/auto-admit)
+  and the RefWatcher startup-push on the push/sync policy; create AutoCommitters
+  for all brains.
+- `lib/brainsync/autocommit.go` — push half becomes a no-op when push is disabled
+  (commit-only mode).
+- `atlas/nous/autosave-and-checkpoint.md` — document the decoupled cadences + `publish:`.
 
 ## Plan
 
@@ -24,4 +76,14 @@ auto commit and auto publish was designed to work with shared brain. now it seem
 ## Log
 
 ### 2026-06-08
+
+- Explored the brainsync daemon: `isWatchable` (discovery.go:73) couples
+  commit+push into one "shared OR gcrypt-remote" predicate. AutoCommitter
+  already does commit (5s) + push (60s); the per-tick loop does pull/keys/
+  auto-admit. `SyncGcryptParticipantsFromManifest` and the keys/auto-admit
+  steps already no-op gracefully on plain / keys-less remotes, so broadening
+  the watch set is safe.
+- Confirmed scope with operator: (Q1) plain mirrors excluded from auto-push by
+  default → opt-in marker; (Q2) all brains get local autosave commit even with
+  no remote.
 
