@@ -1,12 +1,12 @@
 ---
 id: 000048
-status: open
+status: working
 deps: [nous#44]
 github_issue:
 target: oauth-credential-lifecycle
 created: 2026-06-08
 updated: 2026-06-08
-estimate_hours:
+estimate_hours: 5
 ---
 
 # shim(oauth): add Microsoft/Entra as the 2nd real OAuth provider behind the Provider port (n=2-real validation)
