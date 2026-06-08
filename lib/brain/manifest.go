@@ -115,8 +115,8 @@ func Read(brainRoot string) (Manifest, error) {
 // $WORKSPACE_ROOT, $NOUS_DIR's parent, the running binary's grandparent,
 // or $HOME/workspace as the final fallback) one level deep and returns
 // every directory that's a brain. Mirrors
-// lib/brainsync.FindAllSharedBrainsInWorkspace but doesn't filter by
-// mode — useful for `nous identity list` and `nous brain list`.
+// lib/brainsync.FindAllBrainsInWorkspace but doesn't filter by the
+// watch policy — useful for `nous identity list` and `nous brain list`.
 func DiscoverAll() ([]Manifest, error) {
 	root, err := workspace.Root()
 	if err != nil {

@@ -1,10 +1,11 @@
 ---
 id: 000047
-status: working
+status: done
 deps: []
 created: 2026-06-08
 updated: 2026-06-08
 estimate_hours: 3
+actual_hours: 1.27
 ---
 
 # auto push for private but published repo (brain)
@@ -82,6 +83,7 @@ Durable design: `workshop/plans/000047-auto-push-for-private-but-published-brain
 ## Log
 
 ### 2026-06-08
+- 2026-06-08: closed — go test ./lib/brain/ ./lib/brainsync/ green (TestComputePolicy table, TestFindBrains, TestAutoCommitter_CommitOnlyNeverPushes, TestRewriteFrontmatter_PreservesAutosaveAndPublish); pre-existing gpg-agent integration failures are environmental. Manual daemon smoke: plain-remote publish:on brain committed + auto-pushed to bare origin; no-remote brain committed locally, never pushed; pull polling ran only for published brain; daemon logged commit+push vs commit-only per brain.; review verdict: SHIP
 
 - Explored the brainsync daemon: `isWatchable` (discovery.go:73) couples
   commit+push into one "shared OR gcrypt-remote" predicate. AutoCommitter
