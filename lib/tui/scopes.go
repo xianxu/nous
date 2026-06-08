@@ -38,7 +38,7 @@ type scopeRow struct {
 }
 
 // Authenticator is the OAuth dispatch the scope view uses to apply target
-// state. Production wires *oauth.GoogleProvider; tests inject stubs.
+// state. Production wires *oauth.OIDCProvider; tests inject stubs.
 //
 // forceFresh on Auth: false for additive (incremental) flows, true for
 // reductive flows where the issued token must be scoped exactly to what

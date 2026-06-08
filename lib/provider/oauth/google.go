@@ -1,21 +1,13 @@
 package oauth
 
 import (
-	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html"
 	"io"
-	"log"
-	"net"
 	"net/http"
 	"net/url"
-	"os/exec"
-	"runtime"
-	"time"
-
-	"github.com/xianxu/nous/lib/provider/vault"
 )
 
 const (
@@ -50,133 +42,85 @@ var requiredGoogleScopes = []string{
 	"https://www.googleapis.com/auth/userinfo.email",
 }
 
-// GoogleProvider is the real adapter — the only thing that talks to Google
-// (HTTP token/refresh/revoke + browser-open + local callback server). It
-// implements the Provider port; construct it with New(Conf) (or the default-
-// Conf wrapper NewGoogleProvider).
-type GoogleProvider struct {
-	clientID      string
-	clientSecret  string
-	authURL       string
-	tokenURL      string
-	revokeURL     string
-	defaultScopes []string
-	// Output receives status messages emitted during Auth (e.g. "Opening
-	// browser..."). Defaults to os.Stderr. Set to io.Discard from a TUI
-	// to keep these from corrupting the rendered screen.
-	Output io.Writer
+// googleDialect is the Google variant of the Provider port. Google authenticates
+// by the verified `email` claim, requests a refresh token via access_type=offline,
+// and revokes via the RFC-7009 endpoint. usePKCE is false (confidential client
+// with an embedded secret).
+var googleDialect = dialect{
+	providerID:     "google",
+	requiredScopes: requiredGoogleScopes,
+	usePKCE:        false,
+	authParams:     googleAuthParams,
+	extractID:      googleIdentity,
+	mintID:         mintGoogleIDToken,
+	revoke:         googleRevoke,
 }
 
-// NewGoogleProvider builds the real adapter against Google's production
-// endpoints with the embedded (obfuscated) client credentials.
-func NewGoogleProvider() (*GoogleProvider, error) {
-	conf, err := defaultGoogleConf()
-	if err != nil {
-		return nil, err
+// googleAuthParams are Google's authorization-URL dialect: access_type=offline +
+// prompt=consent request a refresh token; include_granted_scopes toggles
+// incremental (additive) vs reductive consent.
+func googleAuthParams(forceFresh bool) url.Values {
+	p := url.Values{
+		"access_type": {"offline"}, // request refresh token
+		"prompt":      {"consent"}, // force consent to get refresh token
 	}
-	return New(conf), nil
-}
-
-// out returns the writer for status messages, falling back to io.Discard if
-// Output isn't set (defensive against zero-value GoogleProvider).
-func (g *GoogleProvider) out() io.Writer {
-	if g.Output == nil {
-		return io.Discard
-	}
-	return g.Output
-}
-
-// Auth runs the OAuth authorization flow: opens browser, waits for callback, exchanges code for tokens.
-//
-// If account is provided, it's used as a login_hint to pre-select the Google account.
-// The actual authenticated email is extracted from the ID token and set as the credential's Account.
-//
-// forceFresh controls whether the issued token covers the union of all
-// previously-granted scopes (false, additive/incremental — Google returns the
-// union via include_granted_scopes=true) or only the requested set (true,
-// reductive — Google returns exactly what's asked, ignoring older grants).
-// Use forceFresh=true when narrowing scopes for an existing account.
-func (g *GoogleProvider) Auth(account string, scopes []string, existingScopes []string, forceFresh bool) (*vault.Credential, error) {
-	if len(scopes) == 0 {
-		scopes = g.defaultScopes
-	}
-	var allScopes []string
 	if forceFresh {
-		// Reductive: request only the desired scope set + structural required.
-		// Don't merge existingScopes (those are what we're trying to drop).
-		allScopes = mergeScopes(scopes, requiredGoogleScopes)
+		// Token covers only the requested scope set, not the union of existing
+		// grants. Required for the reductive flow.
+		p.Set("include_granted_scopes", "false")
 	} else {
-		// Additive: merge desired + existing + required. Google's
-		// include_granted_scopes=true returns a token covering the union.
-		allScopes = mergeScopes(mergeScopes(scopes, existingScopes), requiredGoogleScopes)
+		p.Set("include_granted_scopes", "true") // incremental authorization
 	}
-
-	// Start local callback server.
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return nil, fmt.Errorf("failed to start callback server: %w", err)
-	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	redirectURI := fmt.Sprintf("http://localhost:%d", port)
-
-	// Build authorization URL with optional login hint.
-	authURL := buildAuthURL(g.authURL, g.clientID, redirectURI, allScopes, account, forceFresh)
-
-	// Open browser.
-	fmt.Fprintf(g.out(), "Opening browser for Google OAuth...\n")
-	fmt.Fprintf(g.out(), "If browser doesn't open, visit:\n%s\n\n", authURL)
-	openBrowser(authURL)
-
-	// Wait for callback with authorization code.
-	code, err := waitForCallback(ln)
-	if err != nil {
-		return nil, fmt.Errorf("OAuth callback failed: %w", err)
-	}
-
-	// Exchange code for tokens — email extracted from ID token.
-	cred, err := g.exchangeCode(code, redirectURI)
-	if err != nil {
-		return nil, err
-	}
-
-	// Warn if authenticated account doesn't match the requested one.
-	if account != "" && cred.Account != account {
-		fmt.Fprintf(g.out(), "Note: requested %s but authenticated as %s\n", account, cred.Account)
-	}
-
-	return cred, nil
+	return p
 }
 
-// Refresh uses a refresh token to get a new access token.
-func (g *GoogleProvider) Refresh(cred *vault.Credential) (*vault.Credential, error) {
-	if cred.RefreshToken == "" {
-		return nil, fmt.Errorf("no refresh token for %s/%s", cred.Provider, cred.Account)
+// googleIdentity extracts + verifies the Google identity from an ID token: the
+// `email` claim, rejecting email_verified==false. Accepting an unverified email
+// would let a caller bind a credential to an address they don't control. Real
+// Google returns email_verified==true for the consent flow, so production is
+// unaffected; the fake's unverified knob exercises this guard.
+//
+// The guard lives HERE (not in the shared credentialFromToken) because it is a
+// Google-layer payload concern: Microsoft has no email_verified claim at all
+// (nous#48). email_verified is accepted as a bool or the string "true"; an
+// ABSENT claim is treated as false → rejected (the zero value), preserving the
+// prior production behavior — invariant 4, do not relax to "absent = trusted".
+func googleIdentity(idToken string) (string, error) {
+	var claims struct {
+		Email         string      `json:"email"`
+		EmailVerified interface{} `json:"email_verified"`
 	}
+	if err := decodeIDClaims(idToken, &claims); err != nil {
+		return "", err
+	}
+	if claims.Email == "" {
+		return "", fmt.Errorf("no email claim in ID token")
+	}
+	var verified bool
+	switch v := claims.EmailVerified.(type) {
+	case bool:
+		verified = v
+	case string:
+		verified = v == "true"
+	}
+	if !verified {
+		return "", fmt.Errorf("id token email %q is not verified", claims.Email)
+	}
+	return claims.Email, nil
+}
 
-	data := url.Values{
-		"client_id":     {g.clientID},
-		"client_secret": {g.clientSecret},
-		"refresh_token": {cred.RefreshToken},
-		"grant_type":    {"refresh_token"},
-	}
-
-	resp, err := http.PostForm(g.tokenURL, data)
-	if err != nil {
-		return nil, fmt.Errorf("token refresh failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var tok tokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tok); err != nil {
-		return nil, fmt.Errorf("failed to parse token response: %w", err)
-	}
-	if tok.Error != "" {
-		return nil, fmt.Errorf("token refresh error: %s: %s", tok.Error, tok.ErrorDesc)
-	}
-
-	// Rotation + sidecar/identity preservation is the shared pure core, so
-	// the real and fake adapters can't drift on this contract.
-	return applyRefresh(cred, tok, time.Now()), nil
+// mintGoogleIDToken builds a structurally-valid unsigned ID token (header.
+// payload. with an empty signature segment) carrying email + email_verified.
+// The fake uses it (via googleDialect.mintID) so its tokens flow through the
+// *same* googleIdentity the real adapter uses — exercising real parsing.
+func mintGoogleIDToken(email string, verified bool) string {
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
+	payloadJSON, _ := json.Marshal(struct {
+		Email         string `json:"email"`
+		EmailVerified bool   `json:"email_verified"`
+	}{Email: email, EmailVerified: verified})
+	payload := base64.RawURLEncoding.EncodeToString(payloadJSON)
+	return header + "." + payload + "."
 }
 
 // ErrAlreadyRevoked indicates Google considers the token already invalid
@@ -186,18 +130,11 @@ func (g *GoogleProvider) Refresh(cred *vault.Credential) (*vault.Credential, err
 // so genuine failures still surface.
 var ErrAlreadyRevoked = errors.New("token already revoked or invalid on Google's side")
 
-// Revoke calls Google's revoke endpoint, invalidating the refresh token (and
-// the underlying authorization grant). After this, neither this token nor any
-// access tokens minted from it are usable. Use for "I'm done with this app
-// entirely" — not the routine scope-reduction flow.
-//
-// Returns ErrAlreadyRevoked when Google responds with HTTP 400 and a body
-// indicating the token is already invalid (`{"error":"invalid_token"}`).
-// Callers that just want the token gone may treat this as success.
-func (g *GoogleProvider) Revoke(refreshToken string) error {
-	if refreshToken == "" {
-		return fmt.Errorf("no refresh token to revoke")
-	}
+// googleRevoke calls Google's RFC-7009 revoke endpoint, invalidating the
+// refresh token (and the underlying authorization grant). Returns
+// ErrAlreadyRevoked when Google responds 400 invalid_token (already revoked /
+// never valid); callers that just want the token gone may treat that as success.
+func googleRevoke(g *OIDCProvider, refreshToken string) error {
 	resp, err := http.PostForm(g.revokeURL, url.Values{
 		"token": {refreshToken},
 	})
@@ -209,9 +146,9 @@ func (g *GoogleProvider) Revoke(refreshToken string) error {
 		return nil
 	}
 	// HTTP != 200. Try to parse Google's standard OAuth error envelope
-	// {"error": "...", "error_description": "..."}. Google's revoke
-	// endpoint returns 400 with `error=invalid_token` for tokens that
-	// are already revoked or never were valid; treat that as success.
+	// {"error": "...", "error_description": "..."}. Google's revoke endpoint
+	// returns 400 with error=invalid_token for tokens already revoked or never
+	// valid; treat that as success.
 	body, _ := io.ReadAll(resp.Body)
 	var oauthErr struct {
 		Error            string `json:"error"`
@@ -227,87 +164,33 @@ func (g *GoogleProvider) Revoke(refreshToken string) error {
 	return fmt.Errorf("revoke returned HTTP %d", resp.StatusCode)
 }
 
-func (g *GoogleProvider) exchangeCode(code, redirectURI string) (*vault.Credential, error) {
-	data := url.Values{
-		"client_id":     {g.clientID},
-		"client_secret": {g.clientSecret},
-		"code":          {code},
-		"redirect_uri":  {redirectURI},
-		"grant_type":    {"authorization_code"},
-	}
-
-	resp, err := http.PostForm(g.tokenURL, data)
+// NewGoogleProvider builds the real adapter against Google's production
+// endpoints with the embedded (obfuscated) client credentials.
+func NewGoogleProvider() (*OIDCProvider, error) {
+	conf, err := defaultGoogleConf()
 	if err != nil {
-		return nil, fmt.Errorf("token exchange failed: %w", err)
+		return nil, err
 	}
-	defer resp.Body.Close()
-
-	var tok tokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tok); err != nil {
-		return nil, fmt.Errorf("failed to parse token response: %w", err)
-	}
-	if tok.Error != "" {
-		return nil, fmt.Errorf("token exchange error: %s: %s", tok.Error, tok.ErrorDesc)
-	}
-
-	// Shape the credential via the shared pure core (extracts + verifies the
-	// ID-token email, splits scopes, computes expiry).
-	return credentialFromToken(tok, time.Now())
+	return New(conf), nil
 }
 
-// waitForCallback starts an HTTP server, waits for the OAuth callback, extracts the code.
-func waitForCallback(ln net.Listener) (string, error) {
-	codeCh := make(chan string, 1)
-	errCh := make(chan error, 1)
-
-	srv := &http.Server{
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			code := r.URL.Query().Get("code")
-			if code == "" {
-				errMsg := r.URL.Query().Get("error")
-				if errMsg == "" {
-					errMsg = "no authorization code received"
-				}
-				fmt.Fprintf(w, "<html><body><h1>Authorization Failed</h1><p>%s</p><p>You can close this tab.</p></body></html>", html.EscapeString(errMsg))
-				errCh <- fmt.Errorf("OAuth error: %s", errMsg)
-				return
-			}
-			fmt.Fprint(w, "<html><body><h1>Authorization Successful</h1><p>You can close this tab and return to the terminal.</p></body></html>")
-			codeCh <- code
-		}),
+// defaultGoogleConf decodes the obfuscated client credentials and sets Google's
+// production endpoints + default scopes. NewGoogleProvider wraps it.
+func defaultGoogleConf() (Conf, error) {
+	cid, err := XORDecode(obClientID, obKey)
+	if err != nil {
+		return Conf{}, fmt.Errorf("failed to decode client_id: %w", err)
 	}
-
-	go srv.Serve(ln)
-
-	select {
-	case code := <-codeCh:
-		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-		defer cancel()
-		srv.Shutdown(ctx)
-		return code, nil
-	case err := <-errCh:
-		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-		defer cancel()
-		srv.Shutdown(ctx)
-		return "", err
-	case <-time.After(5 * time.Minute):
-		srv.Close()
-		return "", fmt.Errorf("OAuth callback timed out (5 minutes)")
+	cs, err := XORDecode(obClientSecret, obKey)
+	if err != nil {
+		return Conf{}, fmt.Errorf("failed to decode client_secret: %w", err)
 	}
-}
-
-func openBrowser(url string) {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "linux":
-		cmd = exec.Command("xdg-open", url)
-	default:
-		log.Printf("Please open this URL manually: %s", url)
-		return
-	}
-	if err := cmd.Start(); err == nil {
-		go cmd.Wait() // reap child process
-	}
+	return Conf{
+		ClientID:      cid,
+		ClientSecret:  cs,
+		AuthURL:       googleAuthURL,
+		TokenURL:      googleTokenURL,
+		RevokeURL:     googleRevokeURL,
+		DefaultScopes: DefaultGoogleScopes,
+	}, nil
 }

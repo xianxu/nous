@@ -7,13 +7,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/xianxu/nous/lib/provider/vault"
 )
 
-func TestParseIDTokenEmail(t *testing.T) {
+func TestGoogleIdentity(t *testing.T) {
 	tests := []struct {
 		name    string
 		token   string
@@ -21,9 +20,19 @@ func TestParseIDTokenEmail(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:  "valid token",
-			token: makeTestJWT(`{"email":"test@gmail.com","sub":"123"}`),
+			name:  "valid verified token",
+			token: makeTestJWT(`{"email":"test@gmail.com","email_verified":true,"sub":"123"}`),
 			want:  "test@gmail.com",
+		},
+		{
+			name:    "unverified email rejected",
+			token:   makeTestJWT(`{"email":"test@gmail.com","email_verified":false,"sub":"123"}`),
+			wantErr: true,
+		},
+		{
+			name:    "absent email_verified rejected",
+			token:   makeTestJWT(`{"email":"test@gmail.com","sub":"123"}`),
+			wantErr: true,
 		},
 		{
 			name:    "empty token",
@@ -59,13 +68,13 @@ func TestParseIDTokenEmail(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, _, err := parseIDToken(tt.token)
+			got, err := googleIdentity(tt.token)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("parseIDToken() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("googleIdentity() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if got != tt.want {
-				t.Errorf("parseIDToken() = %q, want %q", got, tt.want)
+				t.Errorf("googleIdentity() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -75,32 +84,35 @@ func TestBuildAuthURL_LoginHint(t *testing.T) {
 	const authURL, clientID = "https://accounts.google.com/o/oauth2/auth", "test-client-id"
 
 	t.Run("without login hint", func(t *testing.T) {
-		u := buildAuthURL(authURL, clientID, "http://localhost:1234", []string{"openid"}, "", false)
+		u := buildAuthURL(authURL, clientID, "http://localhost:1234", []string{"openid"}, "", googleAuthParams(false))
 		if containsParam(u, "login_hint") {
 			t.Error("expected no login_hint parameter")
 		}
 	})
 
 	t.Run("with login hint", func(t *testing.T) {
-		u := buildAuthURL(authURL, clientID, "http://localhost:1234", []string{"openid"}, "user@gmail.com", false)
+		u := buildAuthURL(authURL, clientID, "http://localhost:1234", []string{"openid"}, "user@gmail.com", googleAuthParams(false))
 		if !containsParam(u, "login_hint") {
 			t.Error("expected login_hint parameter")
 		}
 	})
+}
 
-	t.Run("forceFresh sets include_granted_scopes=false", func(t *testing.T) {
-		u := buildAuthURL(authURL, clientID, "http://localhost:1234", []string{"openid"}, "", true)
-		if !strings.Contains(u, "include_granted_scopes=false") {
-			t.Errorf("expected include_granted_scopes=false in URL: %s", u)
-		}
-	})
-
-	t.Run("forceFresh=false keeps incremental", func(t *testing.T) {
-		u := buildAuthURL(authURL, clientID, "http://localhost:1234", []string{"openid"}, "", false)
-		if !strings.Contains(u, "include_granted_scopes=true") {
-			t.Errorf("expected include_granted_scopes=true in URL: %s", u)
-		}
-	})
+// TestGoogleAuthParams pins Google's auth-URL dialect (moved out of buildAuthURL
+// into the dialect): access_type=offline + prompt=consent always, and
+// include_granted_scopes toggling reductive (forceFresh) vs incremental consent.
+func TestGoogleAuthParams(t *testing.T) {
+	additive := googleAuthParams(false)
+	if additive.Get("access_type") != "offline" || additive.Get("prompt") != "consent" {
+		t.Errorf("missing access_type/prompt: %v", additive)
+	}
+	if additive.Get("include_granted_scopes") != "true" {
+		t.Errorf("forceFresh=false should keep incremental (include_granted_scopes=true): %v", additive)
+	}
+	reductive := googleAuthParams(true)
+	if reductive.Get("include_granted_scopes") != "false" {
+		t.Errorf("forceFresh=true should set include_granted_scopes=false: %v", reductive)
+	}
 }
 
 func TestMergeScopes(t *testing.T) {
@@ -269,12 +281,12 @@ func TestExchangeCode_HTTP(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, fmt.Sprintf(
 			`{"access_token":"at","refresh_token":"rt","id_token":%q,"expires_in":3600,"scope":"openid email"}`,
-			mintIDToken("u@x.com", true)))
+			mintGoogleIDToken("u@x.com", true)))
 	}))
 	defer srv.Close()
 
 	gp := New(Conf{ClientID: "cid", ClientSecret: "sec", TokenURL: srv.URL})
-	cred, err := gp.exchangeCode("the-code", "http://localhost:1234")
+	cred, err := gp.exchangeCode("the-code", "http://localhost:1234", "")
 	if err != nil {
 		t.Fatalf("exchangeCode: %v", err)
 	}
@@ -290,12 +302,12 @@ func TestExchangeCode_RejectsUnverified(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, fmt.Sprintf(
 			`{"access_token":"at","refresh_token":"rt","id_token":%q,"expires_in":3600}`,
-			mintIDToken("u@x.com", false)))
+			mintGoogleIDToken("u@x.com", false)))
 	}))
 	defer srv.Close()
 
 	gp := New(Conf{TokenURL: srv.URL})
-	if _, err := gp.exchangeCode("c", "http://localhost:1234"); err == nil {
+	if _, err := gp.exchangeCode("c", "http://localhost:1234", ""); err == nil {
 		t.Fatal("expected unverified-email rejection on the real exchange path")
 	}
 }

@@ -44,7 +44,7 @@ type Server struct {
 	Addr       string // listen address, e.g. "127.0.0.1:8230"
 	CA         *CA
 	Transport  http.RoundTripper
-	Refreshers map[string]Refresher // provider name → refresher (e.g. "google" → GoogleProvider)
+	Refreshers map[string]Refresher // provider name → refresher (e.g. "google" → OIDCProvider)
 	Verbose    bool                 // enable debug logging
 	// Now returns the current time. Defaults to time.Now. Override in tests.
 	Now func() time.Time

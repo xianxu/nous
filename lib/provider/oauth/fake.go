@@ -23,7 +23,8 @@ import (
 //
 // All exported methods are safe for concurrent use.
 type Fake struct {
-	conf Conf
+	conf    Conf
+	dialect dialect
 
 	mu        sync.Mutex
 	live      map[string]string // live refresh token → account email
@@ -46,11 +47,21 @@ type Fake struct {
 
 var _ Provider = (*Fake)(nil)
 
-// NewFake builds an in-memory issuer. Conf endpoints/scopes are used only to
-// build the recorded authorization URL and the default scope set; no network.
+// NewFake builds an in-memory Google-dialect issuer (back-compat). Conf
+// endpoints/scopes are used only to build the recorded authorization URL and the
+// default scope set; no network.
 func NewFake(conf Conf) *Fake {
+	return newFake(conf, googleDialect)
+}
+
+// newFake builds an in-memory issuer for a specific dialect — so the fake mints
+// the right ID-token shape and tags credentials with the right provider id,
+// letting the same S-machine contract certify against both Google and Microsoft
+// (hermetic n=2).
+func newFake(conf Conf, d dialect) *Fake {
 	return &Fake{
 		conf:      conf,
+		dialect:   d,
 		live:      map[string]string{},
 		dead:      map[string]bool{},
 		downgrade: map[string][]string{},
@@ -96,7 +107,7 @@ func (f *Fake) SeedAccount(account string, scopes []string) *vault.Credential {
 	f.live[rt] = account
 	return &vault.Credential{
 		Type:         vault.TypeOAuth,
-		Provider:     "google",
+		Provider:     f.dialect.providerID,
 		Account:      account,
 		AccessToken:  f.mintToken("at"),
 		RefreshToken: rt,
@@ -166,15 +177,17 @@ func (f *Fake) Auth(account string, scopes, existingScopes []string, forceFresh 
 	}
 	var allScopes []string
 	if forceFresh {
-		allScopes = mergeScopes(scopes, requiredGoogleScopes)
+		allScopes = mergeScopes(scopes, f.dialect.requiredScopes)
 	} else {
-		allScopes = mergeScopes(mergeScopes(scopes, existingScopes), requiredGoogleScopes)
+		allScopes = mergeScopes(mergeScopes(scopes, existingScopes), f.dialect.requiredScopes)
 	}
 
 	// Build + record the authorization request — the consent leg is modeled,
-	// not faked away. No real browser, so the redirect URI is synthetic.
+	// not faked away. No real browser, so the redirect URI is synthetic. PKCE is
+	// a real-adapter wire concern (not an S edge), so the fake's recorded URL
+	// carries only the dialect's static auth params.
 	redirectURI := "http://127.0.0.1:0/fake-oauth-callback"
-	f.lastAuthURL = buildAuthURL(f.conf.AuthURL, f.conf.ClientID, redirectURI, allScopes, account, forceFresh)
+	f.lastAuthURL = buildAuthURL(f.conf.AuthURL, f.conf.ClientID, redirectURI, allScopes, account, f.dialect.authParams(forceFresh))
 
 	// Consent short-circuit: the PendingConsent sub-state resolves immediately.
 	if f.denyConsent {
@@ -190,11 +203,11 @@ func (f *Fake) Auth(account string, scopes, existingScopes []string, forceFresh 
 	tok := tokenResponse{
 		AccessToken:  f.mintToken("at"),
 		RefreshToken: rt,
-		IDToken:      mintIDToken(email, f.verified),
+		IDToken:      f.dialect.mintID(email, f.verified),
 		ExpiresIn:    3600,
 		Scope:        strings.Join(allScopes, " "),
 	}
-	cred, err := credentialFromToken(tok, f.now())
+	cred, err := credentialFromToken(tok, f.dialect.providerID, f.dialect.extractID, f.now())
 	if err != nil {
 		return nil, err
 	}

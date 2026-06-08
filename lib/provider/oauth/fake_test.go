@@ -67,12 +67,33 @@ func TestFake_DenyConsent(t *testing.T) {
 }
 
 // TestFake_UnverifiedEmail: Auth shaping rejects email_verified==false via the
-// shared credentialFromToken guard (a payload concern below the per-provider seam).
+// googleIdentity guard (a Google-layer payload concern, inside the per-provider
+// seam — Microsoft has no such guard, see TestFakeMicrosoft_NoVerifiedGuard).
 func TestFake_UnverifiedEmail(t *testing.T) {
 	f := NewFake(Conf{ClientID: "cid"})
 	f.SetAuthEmail("u@x.com", false)
 	if _, err := f.Auth("", []string{"openid"}, nil, false); err == nil {
 		t.Fatal("expected rejection of unverified email")
+	}
+}
+
+// TestFakeMicrosoft_NoVerifiedGuard: the unverified-email guard is Google-only.
+// Microsoft has no email_verified claim, so the MS fake's identity extractor
+// (preferred_username) has no verified guard — "unverified" is meaningless and
+// Auth succeeds. This is the cross-provider evidence the guard was never a
+// shared S-machine concern (nous#48).
+func TestFakeMicrosoft_NoVerifiedGuard(t *testing.T) {
+	f := newFake(Conf{ClientID: "cid"}, microsoftDialect)
+	f.SetAuthEmail("u@xldigit.com", false) // "unverified" is meaningless for MS
+	cred, err := f.Auth("", []string{"openid"}, nil, false)
+	if err != nil {
+		t.Fatalf("MS Auth should not apply a verified-email guard: %v", err)
+	}
+	if cred.Account != "u@xldigit.com" {
+		t.Errorf("account = %q, want u@xldigit.com", cred.Account)
+	}
+	if cred.Provider != "microsoft" {
+		t.Errorf("provider = %q, want microsoft", cred.Provider)
 	}
 }
 

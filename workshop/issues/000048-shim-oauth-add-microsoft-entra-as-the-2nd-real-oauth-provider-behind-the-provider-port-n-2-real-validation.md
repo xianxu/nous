@@ -75,11 +75,17 @@ cross-provider validation finding — record it.
 
 ## Plan
 
-- [ ] (design) Read MS identity-platform token/refresh/id-token shape; map each MS behavior to an `S` edge; identify exactly what the Google-only adapter hardcodes that MS varies.
-- [ ] Factor the identity-claim extractor out of `credentialFromToken` (Google: email+verified; MS: preferred_username/upn) — the per-provider seam.
-- [ ] Microsoft `real` adapter: endpoints/dialect via `Conf`, `offline_access`, Graph-based revoke, MS id-token extraction.
-- [ ] Ground Refresh/CheckHealth against real MS (Keychain refresh token, build-tagged like Google); document the MS consent/revoke boundary.
-- [ ] Record the port/`S` adjustments MS forced → `oauth-credential-lifecycle` Revisions + ariadne#71.
+Durable plan: `workshop/plans/000048-shim-oauth-microsoft-entra-plan.md` (designed via
+superpowers-writing-plans; fresh-eyes plan review: APPROVED). Decision (operator,
+2026-06-08): public-client + **PKCE**, single-tenant Entra app (`xian@xldigit.com`'s
+`xldigit.com` tenant); certify against real Microsoft this session. Architecture: one
+generic `OIDCProvider` + injected per-provider `dialect` (ARCH-DRY); Google/Microsoft
+as sibling provider files over a shared OIDC core; identity-extractor is the seam MS
+forces; PKCE + `offline_access` scope + no-token-revoke + always-rotate are the other
+MS dialect dimensions.
+
+- [ ] M1 — Factor the per-provider seam (identity extractor + `dialect`, rename to `OIDCProvider`) + Microsoft adapter (PKCE, `preferred_username`, `offline_access`, `ErrRevokeUnsupported`) + dialect-aware `Fake` certifying the `S` contract under both Google and Microsoft dialects (hermetic n=2). All hermetic tests green; Google behavior unchanged.
+- [ ] M2 — Real-Microsoft grounding: generalize the conformance provisioner (`-provider microsoft`), `TestContract_RealMicrosoft` with rotated-token persistence (MS single-use), certify against real MS this session; record the n=2 findings → `oauth-credential-lifecycle` Revisions + ariadne#71.
 
 ## Log
 
