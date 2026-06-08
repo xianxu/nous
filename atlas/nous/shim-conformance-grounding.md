@@ -27,7 +27,7 @@ below is the last *passing* run; refresh by re-running that row's command.
 |------|----------|------------------|-----|----------------------------------|----------------|--------|
 | `lib/gh` | **GitHub** | `lib/gh/contract_real_test.go` | `go test -tags conformance ./lib/gh/ -run Contract_Real -v` | `nous-conformance-operator`, `nous-conformance-invitee` (two throwaway accounts; ephemeral fixture repo) | **2026-06-06** | PASS (10/10 invariants; operator=emmatest42, invitee=yingtest42) — nous#43 |
 | `lib/gh` | GitLab / Bitbucket | *(planned)* | — | — | — | pending (nous#46) |
-| `lib/provider/oauth` | **Google** | `lib/provider/oauth/contract_real_test.go` | `go test -tags conformance ./lib/provider/oauth/ -run Contract_Real -v` | `nous-oauth-conformance-google` (throwaway refresh token; provision via `cmd/oauth-conformance-provision`) | **2026-06-08** | PASS (Refresh + CheckHealth) — nous#49 |
+| `lib/provider/oauth` | **Google** | `lib/provider/oauth/contract_real_test.go` (`TestContract_RealGoogle`) | `go test -tags conformance ./lib/provider/oauth/ -run Contract_RealGoogle -v` | `nous-oauth-conformance-google` (throwaway refresh token; provision via `cmd/oauth-conformance-provision`) | **2026-06-08** | PASS (Refresh + CheckHealth) — nous#49 |
 | `lib/provider/oauth` | Microsoft / Entra | *(planned)* | — | — | — | pending (nous#48) |
 
 > Keep "Last certified" current: after a successful re-cert, update the cell here
