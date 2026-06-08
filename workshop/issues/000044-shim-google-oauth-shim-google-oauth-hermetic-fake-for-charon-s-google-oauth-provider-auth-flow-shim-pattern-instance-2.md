@@ -1,11 +1,11 @@
 ---
 id: 000044
-status: open
+status: working
 deps: []
 github_issue:
 created: 2026-06-06
-updated: 2026-06-06
-estimate_hours:
+updated: 2026-06-07
+estimate_hours: 6
 ---
 
 # shim(google-oauth)+shim'(google-oauth): hermetic fake for charon's Google OAuth provider-auth flow (shim pattern instance #2)
