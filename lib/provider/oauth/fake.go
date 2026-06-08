@@ -261,6 +261,12 @@ func (f *Fake) Revoke(refreshToken string) error {
 
 // CheckHealth is the shared composite over Refresh — identical classification
 // to the real adapter, driven by the fake's own faults.
+//
+// Note: the probe runs a real Refresh, so under SetRotateRefreshTokens it
+// rotates the live token and under DowngradeScope it consumes the one-shot —
+// the "read" has side effects. This is faithful, not a bug: a real rotating
+// issuer also rotates server-side on any refresh (which is why the credential
+// is deliberately not persisted here — invariant 1 of the S target).
 func (f *Fake) CheckHealth(cred *vault.Credential) HealthState {
 	return checkHealth(f.Refresh, cred)
 }

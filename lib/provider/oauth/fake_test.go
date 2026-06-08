@@ -214,3 +214,17 @@ func TestFake_RevokeFails(t *testing.T) {
 		t.Fatal("expected Revoke to surface the network error")
 	}
 }
+
+// TestFake_RefreshPreservesScopes: a plain refresh (no downgrade) keeps the
+// existing scope set — the applyRefresh default-to-old-scopes path.
+func TestFake_RefreshPreservesScopes(t *testing.T) {
+	f := NewFake(Conf{ClientID: "cid"})
+	cred := f.SeedAccount("u@x.com", []string{"openid", "email"})
+	refreshed, err := f.Refresh(cred)
+	if err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	if len(refreshed.Scopes) != 2 || refreshed.Scopes[0] != "openid" || refreshed.Scopes[1] != "email" {
+		t.Fatalf("plain refresh should preserve scopes, got %v", refreshed.Scopes)
+	}
+}

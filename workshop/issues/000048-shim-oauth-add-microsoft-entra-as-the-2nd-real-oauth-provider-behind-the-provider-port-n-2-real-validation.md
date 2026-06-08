@@ -93,3 +93,13 @@ the seam); this issue is the grounding that turns "by inspection" into evidence,
 and the identity-claim extractor is the seam MS will force into existence. State
 machine + framing: `target: oauth-credential-lifecycle` +
 `ariadne/workshop/pensive/2026-06-08-01-pensive-shim-state-machines.md`.
+
+Precise seam to factor (from the nous#44 M3 SHIP review): `credentialFromToken`
+(`lib/provider/oauth/token.go`) currently hardcodes **both** `Provider: "google"`
+**and** the email-verified guard. The MS adapter parameterizes it by provider-id +
+an injected identity-claim extractor (Google: `email`+`email_verified`; MS:
+`preferred_username`/`upn`, no verified claim) — that parameterization *is* the
+"one-function swap" the target promises, not a copy of `credentialFromToken`.
+Also: the manual real-Google cert (nous#44) should assert the *consent exchange*
+yields a credential (not just that Refresh works), since the `email_verified`
+guard sits on the ungrounded `Auth`/`exchangeCode` path.
