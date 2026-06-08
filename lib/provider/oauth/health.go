@@ -68,27 +68,31 @@ func (h HealthState) String() string {
 // to the vault. This is intentional: probes happen on a TUI event
 // loop where unexpected vault writes would be confusing.
 func (g *GoogleProvider) CheckHealth(cred *vault.Credential) HealthState {
+	return checkHealth(g.Refresh, cred)
+}
+
+// checkHealth is the provider-neutral probe shared by every Provider adapter
+// (the real adapter passes g.Refresh; the fake passes its own), so the
+// healthy / needs-reauth / unknown classification has one source of truth and
+// the fake's refresh faults drive the same outcomes as the real adapter's.
+//
+//   - nil cred or no refresh token → NeedsReauth (never authenticated, or the
+//     token was wiped; either way the account is unusable until reauth).
+//   - refresh ok → Healthy.
+//   - refresh fails with an RFC 6749 §5.2 token-state error → NeedsReauth.
+//   - any other failure (network, 5xx, malformed) → Unknown, so the TUI renders
+//     a neutral "?" instead of penalizing the operator for transient issues.
+func checkHealth(refresh func(*vault.Credential) (*vault.Credential, error), cred *vault.Credential) HealthState {
 	if cred == nil || cred.RefreshToken == "" {
-		// No refresh token to probe with — operator either never
-		// authenticated or the token was wiped. Either way: needs
-		// reauth before the account is usable.
 		return HealthNeedsReauth
 	}
-
-	_, err := g.Refresh(cred)
-	if err == nil {
-		return HealthHealthy
+	if _, err := refresh(cred); err != nil {
+		if isReauthRequired(err) {
+			return HealthNeedsReauth
+		}
+		return HealthUnknown
 	}
-
-	if isReauthRequired(err) {
-		return HealthNeedsReauth
-	}
-
-	// Network failures, 5xx from Google's server, malformed responses,
-	// etc. — we don't know if the token is bad or just unreachable.
-	// Return Unknown so the TUI can render a neutral state ("?")
-	// instead of penalizing the operator.
-	return HealthUnknown
+	return HealthHealthy
 }
 
 // isReauthRequired classifies an error from g.Refresh as a "the
