@@ -179,3 +179,38 @@ func TestFake_AuthURLModeled(t *testing.T) {
 		}
 	}
 }
+
+// TestFake_RotateRefreshTokens: with always-rotate on (Microsoft-like), each
+// Refresh issues a new refresh token and the old one becomes single-use-dead.
+func TestFake_RotateRefreshTokens(t *testing.T) {
+	f := NewFake(Conf{ClientID: "cid"})
+	f.SetRotateRefreshTokens(true)
+	cred := f.SeedAccount("u@x.com", []string{"openid"})
+	oldRT := cred.RefreshToken
+
+	refreshed, err := f.Refresh(cred)
+	if err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	if refreshed.RefreshToken == oldRT || refreshed.RefreshToken == "" {
+		t.Fatalf("expected rotated refresh token, got %q (old %q)", refreshed.RefreshToken, oldRT)
+	}
+	// old refresh token is now invalid (single-use rotation)
+	if _, err := f.Refresh(cred); err == nil {
+		t.Fatal("expected old refresh token to be invalid after rotation")
+	}
+	// the rotated token still works
+	if _, err := f.Refresh(refreshed); err != nil {
+		t.Fatalf("rotated refresh token should refresh: %v", err)
+	}
+}
+
+// TestFake_RevokeFails: the Revoke request itself surfaces a network-shaped error.
+func TestFake_RevokeFails(t *testing.T) {
+	f := NewFake(Conf{ClientID: "cid"})
+	cred := f.SeedAccount("u@x.com", []string{"openid"})
+	f.RevokeFails(true)
+	if err := f.Revoke(cred.RefreshToken); err == nil {
+		t.Fatal("expected Revoke to surface the network error")
+	}
+}

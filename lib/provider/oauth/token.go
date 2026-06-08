@@ -182,13 +182,6 @@ func parseIDToken(idToken string) (email string, verified bool, err error) {
 	return claims.Email, verified, nil
 }
 
-// parseIDTokenEmail is the email-only convenience over parseIDToken, kept for
-// callers that don't care about the verified flag.
-func parseIDTokenEmail(idToken string) (string, error) {
-	email, _, err := parseIDToken(idToken)
-	return email, err
-}
-
 // mintIDToken builds a structurally-valid unsigned ID token (header.payload.
 // with an empty signature segment) carrying the given email + email_verified
 // claims. The fake uses it so its tokens flow through the *same* parseIDToken
