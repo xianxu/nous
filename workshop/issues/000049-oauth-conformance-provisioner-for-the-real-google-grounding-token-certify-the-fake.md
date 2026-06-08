@@ -54,10 +54,10 @@ refresh token where the test reads it.
 
 ## Plan
 
-- [ ] Build `cmd/oauth-conformance-provision` (consent → refresh token → Keychain).
-- [ ] Operator runs it with a throwaway account (interactive consent).
-- [ ] Run the conformance test; certify; record date+result in the target Revisions.
-- [ ] Ship `SKILL.md` (provision/certify/re-cert; MS template note for #48).
+- [x] Build `cmd/oauth-conformance-provision` (consent → refresh token → Keychain).
+- [x] Operator runs it with a throwaway account (interactive consent).
+- [x] Run the conformance test; certify (PASS 2026-06-08, xiantester2003@gmail.com); record in target Revisions.
+- [x] Ship `SKILL.md` (provision/certify/re-cert; MS template note for #48).
 
 ## Log
 
