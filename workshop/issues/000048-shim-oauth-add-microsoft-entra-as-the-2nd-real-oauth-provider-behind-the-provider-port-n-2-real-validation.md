@@ -84,7 +84,7 @@ as sibling provider files over a shared OIDC core; identity-extractor is the sea
 forces; PKCE + `offline_access` scope + no-token-revoke + always-rotate are the other
 MS dialect dimensions.
 
-- [ ] M1 — Factor the per-provider seam (identity extractor + `dialect`, rename to `OIDCProvider`) + Microsoft adapter (PKCE, `preferred_username`, `offline_access`, `ErrRevokeUnsupported`) + dialect-aware `Fake` certifying the `S` contract under both Google and Microsoft dialects (hermetic n=2). All hermetic tests green; Google behavior unchanged.
+- [x] M1 — Factor the per-provider seam (identity extractor + `dialect`, rename to `OIDCProvider`) + Microsoft adapter (PKCE, `preferred_username`, `offline_access`, `ErrRevokeUnsupported`) + dialect-aware `Fake` certifying the `S` contract under both Google and Microsoft dialects (hermetic n=2). All hermetic tests green; Google behavior unchanged.
 - [ ] M2 — Real-Microsoft grounding: generalize the conformance provisioner (`-provider microsoft`), `TestContract_RealMicrosoft` with rotated-token persistence (MS single-use), certify against real MS this session; record the n=2 findings → `oauth-credential-lifecycle` Revisions + ariadne#71.
 
 ## Log
