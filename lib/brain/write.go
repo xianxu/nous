@@ -113,6 +113,16 @@ func renderFrontmatter(m Manifest) string {
 	if m.SyncSubstrate != "" {
 		fmt.Fprintf(&b, "sync_substrate: %s\n", m.SyncSubstrate)
 	}
+	// Round-trip the operator-set sync-control fields. Both are
+	// hand-edited (no `nous brain` verb sets them yet), so unless we
+	// re-emit them here a recipient op (Read → mutate → RewriteFrontmatter,
+	// e.g. `nous brain invite`) would silently drop them — see nous#47.
+	if m.Autosave != "" {
+		fmt.Fprintf(&b, "autosave: %s\n", m.Autosave)
+	}
+	if m.Publish != "" {
+		fmt.Fprintf(&b, "publish: %s\n", m.Publish)
+	}
 	b.WriteString("---\n\n")
 	return b.String()
 }

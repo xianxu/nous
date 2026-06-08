@@ -53,6 +53,7 @@ type AutoCommitter struct {
 	peer           string
 	commitDebounce time.Duration
 	pushDebounce   time.Duration
+	push           bool // when false, run commit-only (never auto-push) — nous#47
 	verbose        bool
 
 	fs *fsnotify.Watcher
@@ -72,7 +73,13 @@ type AutoCommitter struct {
 // NewAutoCommitter wires up an fsnotify recursive watch on the brain
 // content (excluding .git/). Returns a started committer; caller must
 // Stop() it on shutdown.
-func NewAutoCommitter(brain, peer string, commitDebounce, pushDebounce time.Duration, verbose bool) (*AutoCommitter, error) {
+//
+// push controls the push half: when false the committer runs commit-only
+// (the local autosave safety net) and never flushes to origin — the
+// arming of the push debounce becomes a no-op. nous#47 uses this for
+// brains whose BrainPolicy has Push=false (e.g. a plain-remote brain with
+// no `publish: on` opt-in, or `publish: off`).
+func NewAutoCommitter(brain, peer string, commitDebounce, pushDebounce time.Duration, push, verbose bool) (*AutoCommitter, error) {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
@@ -82,6 +89,7 @@ func NewAutoCommitter(brain, peer string, commitDebounce, pushDebounce time.Dura
 		peer:           peer,
 		commitDebounce: commitDebounce,
 		pushDebounce:   pushDebounce,
+		push:           push,
 		verbose:        verbose,
 		fs:             w,
 		refChanged:     make(chan struct{}, 4),
@@ -119,8 +127,12 @@ func (a *AutoCommitter) Stop() {
 func (a *AutoCommitter) loop() {
 	defer close(a.done)
 	defer log.Printf("autocommit %s: loop exiting", a.brain)
-	log.Printf("autocommit %s: loop started (commit-debounce=%v, push-debounce=%v)",
-		a.brain, a.commitDebounce, a.pushDebounce)
+	mode := "commit+push"
+	if !a.push {
+		mode = "commit-only"
+	}
+	log.Printf("autocommit %s: loop started (%s, commit-debounce=%v, push-debounce=%v)",
+		a.brain, mode, a.commitDebounce, a.pushDebounce)
 
 	// Timers start as nil; we lazy-create them on the first event so
 	// a freshly-started AutoCommitter doesn't immediately fire a commit
@@ -161,6 +173,12 @@ func (a *AutoCommitter) loop() {
 		}
 	}
 	armPush := func() {
+		// Commit-only mode (nous#47): never arm the push timer, so the
+		// pushC() case can't fire. Commits still flow; they accumulate
+		// locally until an explicit `nous push` or a policy change.
+		if !a.push {
+			return
+		}
 		if pushTimer == nil {
 			pushTimer = time.NewTimer(a.pushDebounce)
 		} else {

@@ -1,43 +1,33 @@
-// Package brainsync implements the shared-brain sync daemon.
+// Package brainsync implements the brain sync daemon.
 //
 // Identification: a directory is a "brain" iff it contains .brain/config.md.
-// Whether the daemon watches it is the *Shared* test (more than one
-// recipient) — the legacy `mode: shared` field is no longer authoritative.
+// Whether the daemon watches it — and what it does for it (commit / push /
+// pull / keys-admit) — is the per-brain BrainPolicy (see policy.go). nous#47
+// decoupled the commit and push cadences, so every brain gets a local
+// autosave commit while auto-push stays opt-in for plain remotes; a brain is
+// watched iff its policy is Active().
 package brainsync
 
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/xianxu/nous/lib/brain"
 	"github.com/xianxu/nous/lib/workspace"
 )
 
-// FindSharedBrains walks each root, returning the absolute path of
-// every brain that should be watched by the brain-sync daemon. A
-// brain is "watchable" when it's either:
-//
-//   - currently shared (≥2 recipients — the derived signal, see
-//     lib/brain.Manifest.Shared); OR
-//   - provisioned for github-mediated sharing (has a gcrypt::
-//     remote.origin.url configured) even when currently single-
-//     recipient. That's the "operator just provisioned, invited a
-//     peer, but auto-admit hasn't run yet" state — and brain-sync
-//     IS the loop that runs auto-admit, so excluding it creates
-//     a chicken-and-egg (auto-admit never fires → recipient count
-//     stays at 1 → brain never gets included in the watch list).
-//     See nous#26's first manual-test bug.
-//
-// Truly private brains (single recipient, no gcrypt remote) are
-// excluded — there's nothing to sync.
+// FindBrains walks each root, returning the absolute path of every brain
+// the daemon should watch — i.e. every brain whose BrainPolicy is
+// Active() (at least one of commit / push / pull applies). This now
+// includes purely-local brains (autosave commit safety net) and private
+// plain-remote brains; only a fully opted-out brain (autosave off and
+// not a sync participant) is excluded. See policy.go for the derivation.
 //
 // Walks one level deep — brains live as immediate children of the
 // workspace root (parent of nous; see lib/workspace.Root). A nested
 // .brain/ inside a brain isn't a distinct brain.
-func FindSharedBrains(roots []string) ([]string, error) {
+func FindBrains(roots []string) ([]string, error) {
 	var found []string
 	for _, root := range roots {
 		entries, err := os.ReadDir(root)
@@ -53,7 +43,7 @@ func FindSharedBrains(roots []string) ([]string, error) {
 			if err != nil {
 				continue // not a brain, fine
 			}
-			if !isWatchable(p, m) {
+			if !ComputePolicy(m, remoteKind(p)).Active() {
 				continue
 			}
 			abs, err := filepath.Abs(p)
@@ -66,44 +56,16 @@ func FindSharedBrains(roots []string) ([]string, error) {
 	return found, nil
 }
 
-// isWatchable encodes the "should brain-sync watch this?" predicate.
-// Split out so the rule is easy to test and easy to evolve when we
-// add more sync substrates (e.g., a future "shared brain over an
-// HTTPS remote without gcrypt" mode).
-func isWatchable(brainRoot string, m brain.Manifest) bool {
-	if m.Shared() {
-		return true
-	}
-	return hasGcryptRemote(brainRoot)
-}
-
-// hasGcryptRemote checks whether the brain's git remote.origin.url
-// starts with "gcrypt::" — the marker for github-mediated shared
-// brains (vs. a plain github mirror or no remote at all).
-//
-// Best-effort: a git outage or missing .git/ directory returns
-// false, which lands the brain in the "private" bucket. False
-// positives (a brain that was once shared, has the remote
-// configured, but the operator now wants it private) are rare and
-// recoverable by removing the remote.
-func hasGcryptRemote(brainRoot string) bool {
-	out, err := exec.Command("git", "-C", brainRoot, "config", "--get", "remote.origin.url").Output()
-	if err != nil {
-		return false
-	}
-	return strings.HasPrefix(strings.TrimSpace(string(out)), "gcrypt::")
-}
-
-// FindAllSharedBrainsInWorkspace looks under the workspace root
+// FindAllBrainsInWorkspace looks under the workspace root
 // (lib/workspace.Root — $WORKSPACE_ROOT, $NOUS_DIR's parent, the running
-// binary's grandparent, or $HOME/workspace) for shared brains. Used as
+// binary's grandparent, or $HOME/workspace) for watchable brains. Used as
 // the auto-discovery default when the operator doesn't pass --brain
 // flags.
-func FindAllSharedBrainsInWorkspace() ([]string, error) {
+func FindAllBrainsInWorkspace() ([]string, error) {
 	root, err := workspace.Root()
 	if err != nil {
 		return nil, err
 	}
-	return FindSharedBrains([]string{root})
+	return FindBrains([]string{root})
 }
 

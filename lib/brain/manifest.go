@@ -43,11 +43,24 @@ type Manifest struct {
 	// inline in the manifest as `recipient_logins: {login: FP, ...}`.
 	RecipientLogins map[string]string
 
-	// Autosave controls whether the brainsync daemon auto-commits
-	// tracked-file edits in this brain (debounced) and pushes them on
-	// a slower debounce. Values: "" (unset → on), "on", "off". Use
-	// AutosaveEnabled() instead of comparing the string.
+	// Autosave controls the *commit* axis: whether the brainsync daemon
+	// auto-commits tracked-file edits in this brain (5s debounce) as a
+	// local safety net. Independent of the push axis (see Publish) since
+	// nous#47 decoupled the two cadences. Values: "" (unset → on), "on",
+	// "off". Use AutosaveEnabled() instead of comparing the string.
 	Autosave string
+
+	// Publish controls the *push* axis: whether the daemon auto-pushes
+	// committed changes to origin (60s debounce). Tri-state, consumed by
+	// lib/brainsync's ComputePolicy/shouldPush:
+	//   - "" (unset) → derived: gcrypt/shared brains push; a plain remote
+	//     pushes only if shared; a private plain-remote brain does not.
+	//   - "on"  → auto-push whenever a remote exists (the "private but
+	//     published" opt-in for plain remotes).
+	//   - "off" → never auto-push (pull still runs if the brain is a sync
+	//     participant; only the push half is paused).
+	// Orthogonal to Autosave: a brain can commit locally without pushing.
+	Publish string
 
 	// LegacyMode holds the value of the deprecated `mode:` field when an
 	// existing manifest carries it. Readers don't act on it (shared-vs-
@@ -66,7 +79,8 @@ func (m Manifest) Shared() bool {
 }
 
 // AutosaveEnabled reports whether the brainsync daemon should
-// auto-commit + auto-push this brain. Default on — only an explicit
+// auto-commit this brain (the commit axis only — the push axis is the
+// Publish field, decoupled in nous#47). Default on — only an explicit
 // `autosave: off` in the manifest disables it. Any other value
 // (including the empty string from a manifest that predates the
 // field) means enabled.
@@ -163,6 +177,8 @@ func parseManifest(content string) (Manifest, error) {
 			m.RecipientLogins = parseInlineMap(val)
 		case "autosave":
 			m.Autosave = unquote(val)
+		case "publish":
+			m.Publish = unquote(val)
 		}
 	}
 	return m, nil

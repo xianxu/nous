@@ -122,32 +122,50 @@ func Watch(ctx context.Context, brains []string, fetchEvery time.Duration, verbo
 	peer := PeerIDFor(brains[0])
 	log.Printf("brainsync: watching %d brain(s) as peer %q", len(brains), peer)
 
-	// Per-brain AutoCommitter for brains whose manifest doesn't
-	// opt out via `autosave: off` (default on). When present, the
-	// committer owns the push side for that brain: RefWatcher events
-	// get routed to its push-debounce timer instead of triggering an
-	// immediate push, so a manual `git commit` from the operator's
-	// shell coalesces with autosave activity in the same window.
-	autocommitters := map[string]*AutoCommitter{}
+	// Per-brain policy (nous#47): commit / push / pull / keys-admit, derived
+	// once from the manifest + remote kind. Read here at Watch start, like
+	// the prior autosave read — a manifest edit that flips a brain's policy
+	// takes effect on the next daemon restart / discovery re-add, not live.
+	policies := map[string]BrainPolicy{}
 	for _, b := range brains {
 		m, err := brain.Read(b)
 		if err != nil {
-			log.Printf("brainsync: read manifest %s: %v (autosave skipped)", b, err)
+			log.Printf("brainsync: read manifest %s: %v (assuming commit-only)", b, err)
+			policies[b] = BrainPolicy{Commit: true}
 			continue
 		}
-		if !m.AutosaveEnabled() {
+		policies[b] = ComputePolicy(m, remoteKind(b))
+	}
+
+	// Per-brain AutoCommitter for brains whose policy enables the commit
+	// loop (autosave on — now every brain by default, not just shared
+	// ones). When present, the committer owns the push side for that
+	// brain: RefWatcher events get routed to its push-debounce timer
+	// instead of triggering an immediate push, so a manual `git commit`
+	// from the operator's shell coalesces with autosave activity in the
+	// same window. The committer's push half is itself gated on
+	// policy.Push, so a commit-only brain accumulates local commits
+	// without flushing to origin.
+	autocommitters := map[string]*AutoCommitter{}
+	for _, b := range brains {
+		pol := policies[b]
+		if !pol.Commit {
 			if verbose {
 				log.Printf("brainsync: autosave OFF for %s (manifest opt-out)", b)
 			}
 			continue
 		}
-		ac, err := NewAutoCommitter(b, peer, DefaultCommitDebounce, DefaultPushDebounce, verbose)
+		ac, err := NewAutoCommitter(b, peer, DefaultCommitDebounce, DefaultPushDebounce, pol.Push, verbose)
 		if err != nil {
 			log.Printf("brainsync: autosave init %s: %v (skipping)", b, err)
 			continue
 		}
 		autocommitters[b] = ac
-		log.Printf("brainsync: autosave ON for %s", b)
+		if pol.Push {
+			log.Printf("brainsync: autosave ON for %s (commit+push)", b)
+		} else {
+			log.Printf("brainsync: autosave ON for %s (commit-only)", b)
+		}
 	}
 	defer func() {
 		for _, ac := range autocommitters {
@@ -176,8 +194,12 @@ func Watch(ctx context.Context, brains []string, fetchEvery time.Duration, verbo
 	// pre-existing unpushed commit waits for the *next* ref change to
 	// fire RefWatcher — which may be never if the operator commits
 	// rarely. PushBrain is idempotent (no-ops via HasUnpushedCommits),
-	// so this is cheap on a clean repo.
+	// so this is cheap on a clean repo. Only for brains whose policy
+	// pushes (skips commit-only and local-only brains entirely).
 	for _, b := range brains {
+		if !policies[b].Push {
+			continue
+		}
 		pushed, err := PushBrain(b, peer, time.Now)
 		if err != nil {
 			log.Printf("brainsync: startup push %s: %v", b, err)
@@ -191,9 +213,16 @@ func Watch(ctx context.Context, brains []string, fetchEvery time.Duration, verbo
 		case b := <-rw.Events():
 			// Autosave-enabled brains route through the per-brain
 			// push debouncer so a manual commit doesn't bypass the
-			// 60s window that autosave commits also live under.
+			// 60s window that autosave commits also live under. (The
+			// committer no-ops the push itself when policy.Push is
+			// false, so a commit-only brain stays local.)
 			if ac, ok := autocommitters[b]; ok {
 				ac.NotifyRefChange()
+				continue
+			}
+			// No committer (autosave off). Push immediately only if the
+			// brain's policy pushes; otherwise the ref change is local-only.
+			if !policies[b].Push {
 				continue
 			}
 			pushed, err := PushBrain(b, peer, time.Now)
@@ -204,6 +233,12 @@ func Watch(ctx context.Context, brains []string, fetchEvery time.Duration, verbo
 			}
 		case <-ticker.C:
 			for _, b := range brains {
+				// Skip the whole network block for brains that don't
+				// pull (local-only and commit-only brains): no remote
+				// to fetch from, nothing to sync. nous#47.
+				if !policies[b].Pull {
+					continue
+				}
 				// Negative cache check (nous#34). If ls-remote
 				// against the raw url returns the same SHA list as
 				// last tick, skip the entire per-brain block — no
@@ -235,6 +270,13 @@ func Watch(ctx context.Context, brains []string, fetchEvery time.Duration, verbo
 				// tick retries the fetch path rather than skipping.
 				if err == nil && snapOK {
 					lastSeenRefs[b] = snap
+				}
+				// Keys-sync + auto-admit are gcrypt/shared-specific
+				// (a plain private brain has no keys branch). Skip them
+				// for brains whose policy doesn't admit — they'd only
+				// soft-fail every tick. nous#47.
+				if !policies[b].KeysAdmit {
+					continue
 				}
 				// Also refresh peer pubkeys from the keys branch
 				// (nous#23). A peer added by anyone on this brain

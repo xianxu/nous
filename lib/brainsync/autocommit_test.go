@@ -39,7 +39,7 @@ func readCommitMessages(t *testing.T, repo string) []string {
 func TestAutoCommitter_CommitsModifiedTrackedFile(t *testing.T) {
 	_, peerA, _ := twoPeerRepo(t)
 
-	a, err := NewAutoCommitter(peerA, "test", shortCommit, shortPush, false)
+	a, err := NewAutoCommitter(peerA, "test", shortCommit, shortPush, true, false)
 	if err != nil {
 		t.Fatalf("NewAutoCommitter: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestAutoCommitter_CommitsModifiedTrackedFile(t *testing.T) {
 func TestAutoCommitter_DebouncesBurstOfSaves(t *testing.T) {
 	_, peerA, _ := twoPeerRepo(t)
 
-	a, err := NewAutoCommitter(peerA, "test", shortCommit, shortPush, false)
+	a, err := NewAutoCommitter(peerA, "test", shortCommit, shortPush, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestAutoCommitter_DebouncesBurstOfSaves(t *testing.T) {
 func TestAutoCommitter_SkipsUntracked(t *testing.T) {
 	_, peerA, _ := twoPeerRepo(t)
 
-	a, err := NewAutoCommitter(peerA, "test", shortCommit, shortPush, false)
+	a, err := NewAutoCommitter(peerA, "test", shortCommit, shortPush, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestAutoCommitter_SkipsUntracked(t *testing.T) {
 func TestAutoCommitter_SkipsUnstagedDeletion(t *testing.T) {
 	_, peerA, _ := twoPeerRepo(t)
 
-	a, err := NewAutoCommitter(peerA, "test", shortCommit, shortPush, false)
+	a, err := NewAutoCommitter(peerA, "test", shortCommit, shortPush, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestAutoCommitter_SkipsDuringMerge(t *testing.T) {
 	must(t, os.WriteFile(filepath.Join(peerA, ".git", "MERGE_HEAD"),
 		[]byte("deadbeef\n"), 0o644))
 
-	a, err := NewAutoCommitter(peerA, "test", shortCommit, shortPush, false)
+	a, err := NewAutoCommitter(peerA, "test", shortCommit, shortPush, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestAutoCommitter_SkipsDuringMerge(t *testing.T) {
 func TestAutoCommitter_WatchesNewSubdirs(t *testing.T) {
 	_, peerA, _ := twoPeerRepo(t)
 
-	a, err := NewAutoCommitter(peerA, "test", shortCommit, shortPush, false)
+	a, err := NewAutoCommitter(peerA, "test", shortCommit, shortPush, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ func TestAutoCommitter_WatchesNewSubdirs(t *testing.T) {
 func TestAutoCommitter_PushDebounceFires(t *testing.T) {
 	bare, peerA, _ := twoPeerRepo(t)
 
-	a, err := NewAutoCommitter(peerA, "test", shortCommit, shortPush, false)
+	a, err := NewAutoCommitter(peerA, "test", shortCommit, shortPush, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,6 +244,41 @@ func TestAutoCommitter_PushDebounceFires(t *testing.T) {
 	}
 }
 
+// TestAutoCommitter_CommitOnlyNeverPushes verifies the nous#47
+// commit-only mode (push=false): edits still commit locally as a safety
+// net, but nothing is ever flushed to origin even after the push
+// debounce window elapses.
+func TestAutoCommitter_CommitOnlyNeverPushes(t *testing.T) {
+	bare, peerA, _ := twoPeerRepo(t)
+
+	a, err := NewAutoCommitter(peerA, "test", shortCommit, shortPush, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Stop()
+
+	must(t, os.WriteFile(filepath.Join(peerA, "paris.md"), []byte("local only\n"), 0o644))
+
+	// Wait past commit + push windows: a push, if it were going to
+	// happen, would have fired by now.
+	time.Sleep(shortCommit + shortPush + settle)
+
+	// Local commit landed (the safety net).
+	msgs := readCommitMessages(t, peerA)
+	if len(msgs) == 0 || !strings.HasPrefix(msgs[0], "autosave:") {
+		t.Fatalf("expected a local autosave commit, got %v", msgs)
+	}
+
+	// Origin must NOT have received it.
+	out, err := RunGit(bare, "log", "main", "--format=%s")
+	if err != nil {
+		t.Fatalf("log on bare: %v", err)
+	}
+	if strings.Contains(string(out), "autosave:") {
+		t.Errorf("commit-only committer pushed to origin/main — got log:\n%s", out)
+	}
+}
+
 // TestAutoCommitter_RefChangedSignalResetsPushTimer: invoking
 // NotifyRefChange (simulating RefWatcher seeing a manual commit)
 // should produce a push after the debounce window, even when the
@@ -251,7 +286,7 @@ func TestAutoCommitter_PushDebounceFires(t *testing.T) {
 func TestAutoCommitter_RefChangedSignalResetsPushTimer(t *testing.T) {
 	bare, peerA, _ := twoPeerRepo(t)
 
-	a, err := NewAutoCommitter(peerA, "test", shortCommit, shortPush, false)
+	a, err := NewAutoCommitter(peerA, "test", shortCommit, shortPush, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}

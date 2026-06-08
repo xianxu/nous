@@ -16,13 +16,13 @@ import (
 //     path; what `nous serve --brain <path>` produces.
 //
 //   Auto mode (opts.Brains is empty): runs a discovery loop that
-//     periodically re-scans the workspace root for shared brains
-//     (manifest recipient count > 1) and reconciles the watched set.
-//     Starts with whatever the first scan finds (often zero — that's
-//     no longer fatal); picks up new shared brains as they appear,
-//     drops watchers for brains that are removed or downgraded to
-//     private. Each watched brain runs in its own goroutine, so a
-//     failure on one doesn't tear down the others.
+//     periodically re-scans the workspace root for watchable brains
+//     (those whose BrainPolicy is Active — see policy.go) and reconciles
+//     the watched set. Starts with whatever the first scan finds (often
+//     zero — that's no longer fatal); picks up new brains as they appear,
+//     drops watchers for brains that are removed or fully opt out. Each
+//     watched brain runs in its own goroutine, so a failure on one
+//     doesn't tear down the others.
 //
 // Returns nil on clean ctx-cancellation; errors only on unrecoverable
 // setup problems. A failing Watch on a single brain is logged but
@@ -46,7 +46,7 @@ func Run(ctx context.Context, opts RunOptions) error {
 // RunOptions bundles config for Run. All fields optional.
 type RunOptions struct {
 	// Brains is the list of absolute brain-root paths to watch. Empty
-	// → auto-discover shared brains under the workspace root and
+	// → auto-discover watchable brains under the workspace root and
 	// periodically rescan for new ones.
 	Brains []string
 
@@ -55,7 +55,7 @@ type RunOptions struct {
 
 	// DiscoverEvery is the auto-mode rescan interval (the cadence at
 	// which the workspace root is re-walked looking for new/removed
-	// shared brains). Zero → 60s. Ignored in static mode.
+	// watchable brains). Zero → 60s. Ignored in static mode.
 	DiscoverEvery time.Duration
 
 	// Verbose enables logging on every successful push/pull (not just
@@ -64,7 +64,7 @@ type RunOptions struct {
 }
 
 // runWithAutoDiscovery implements the auto-mode loop: periodic
-// FindAllSharedBrainsInWorkspace → reconcile against the currently-
+// FindAllBrainsInWorkspace → reconcile against the currently-
 // watched set → spawn/cancel per-brain Watch goroutines.
 //
 // Reconciliation is set-diff: brains in the new scan but not currently
@@ -102,7 +102,7 @@ func runWithAutoDiscovery(ctx context.Context, fetchEvery, discoverEvery time.Du
 	}
 
 	reconcile := func() {
-		desired, err := FindAllSharedBrainsInWorkspace()
+		desired, err := FindAllBrainsInWorkspace()
 		if err != nil {
 			log.Printf("brainsync: discovery failed: %v", err)
 			return
@@ -117,7 +117,7 @@ func runWithAutoDiscovery(ctx context.Context, fetchEvery, discoverEvery time.Du
 			if !desiredSet[path] {
 				toStop = append(toStop, w)
 				delete(watched, path)
-				log.Printf("brainsync: removed %s (no longer shared, or directory gone)", path)
+				log.Printf("brainsync: removed %s (no longer watchable, or directory gone)", path)
 			}
 		}
 		toStart := make([]string, 0)
@@ -148,9 +148,9 @@ func runWithAutoDiscovery(ctx context.Context, fetchEvery, discoverEvery time.Du
 	initialCount := len(watched)
 	mu.Unlock()
 	if initialCount == 0 {
-		log.Printf("brainsync: no shared brains yet; rescanning workspace every %s", discoverEvery)
+		log.Printf("brainsync: no watchable brains yet; rescanning workspace every %s", discoverEvery)
 	} else {
-		log.Printf("brainsync: auto-discovered %d shared brain(s); rescanning every %s", initialCount, discoverEvery)
+		log.Printf("brainsync: auto-discovered %d brain(s); rescanning every %s", initialCount, discoverEvery)
 	}
 
 	// Set up an fsnotify watch on the rescan-signal file so any
