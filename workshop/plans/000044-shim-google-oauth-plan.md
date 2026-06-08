@@ -417,3 +417,29 @@ func TestWaitForCallback_Error(t *testing.T) {
 3. **`vault` field names.** The test literals (`vault.GCPData`, sidecar fields) are written from the digest; confirm exact names against `lib/provider/vault` when implementing.
 4. **2nd OAuth provider (Microsoft) — design-aware here, adapter is a follow-up.** Per the ≥2-real-providers process finding, the port + S must *fit* Microsoft (kept honest by the separable `parseIDToken` seam, parameterized `Conf` endpoints, no `email_verified` in the shared core). Building the **Microsoft `real` adapter** is out of #44's scope — it's symmetric to the gh 2nd-provider work in #46 and belongs either in a follow-up ticket or under nous#45's full-surface harness. **Decision to confirm with operator before M3 close:** separate ticket vs fold into #45. Until then, #44 ships Google-real + fake, with the seams proven Microsoft-ready by inspection, not by a built MS adapter.
 ```
+---
+
+## Revisions
+
+### 2026-06-08 — M1 close (review verdict FIX-THEN-SHIP → addressed)
+
+The M1 boundary review (`Review-Window: 0f12c7e..HEAD`) returned FIX-THEN-SHIP
+(no Critical; two Important). Deltas applied before crossing into M2:
+
+- **`buildAuthURL` extracted to a free function** (`token.go`), per the
+  Core-concepts table and Task 1.1 Step 3 — it had remained a `*GoogleProvider`
+  method, which would have blocked the M2 `Fake` from reusing it (ARCH-DRY).
+  Signature: `buildAuthURL(authURL, clientID, redirectURI string, scopes []string, loginHint string, forceFresh bool)`. `TestBuildAuthURL_LoginHint` updated to call it directly.
+- **`mergeScopes` moved to `token.go`** (was the Minor table/code mismatch);
+  the Pure-entities table is now accurate for both.
+- **Boundary-label nuance:** M1 is behavior-preserving **except the deliberate
+  `email_verified==false` rejection** in `credentialFromToken` on the
+  `Auth`/`exchangeCode` path (Task 1.1 / risk #2). Production-safe — Google
+  returns `email_verified:true` for the consent flow; no existing test asserted
+  accept-unverified (`TestParseIDTokenEmail` exercises the unchanged
+  `parseIDTokenEmail` wrapper).
+- **Atlas deferral made explicit (not silently skipped):** the new `Provider`
+  port/`Conf` surface is documented at **M3 Task 3.3**, alongside the fake +
+  grounding boundary, so the oauth-shim atlas entry is written once as a whole
+  rather than churned across M1→M3. The port isn't live consumer surface until
+  the M3 migration. `sdlc milestone-close M1` ran with `--no-atlas` + rationale.

@@ -13,7 +13,6 @@ import (
 	"net/url"
 	"os/exec"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/xianxu/nous/lib/provider/vault"
@@ -121,7 +120,7 @@ func (g *GoogleProvider) Auth(account string, scopes []string, existingScopes []
 	redirectURI := fmt.Sprintf("http://localhost:%d", port)
 
 	// Build authorization URL with optional login hint.
-	authURL := g.buildAuthURL(redirectURI, allScopes, account, forceFresh)
+	authURL := buildAuthURL(g.authURL, g.clientID, redirectURI, allScopes, account, forceFresh)
 
 	// Open browser.
 	fmt.Fprintf(g.out(), "Opening browser for Google OAuth...\n")
@@ -178,28 +177,6 @@ func (g *GoogleProvider) Refresh(cred *vault.Credential) (*vault.Credential, err
 	// Rotation + sidecar/identity preservation is the shared pure core, so
 	// the real and fake adapters can't drift on this contract.
 	return applyRefresh(cred, tok, time.Now()), nil
-}
-
-func (g *GoogleProvider) buildAuthURL(redirectURI string, scopes []string, loginHint string, forceFresh bool) string {
-	params := url.Values{
-		"client_id":     {g.clientID},
-		"redirect_uri":  {redirectURI},
-		"response_type": {"code"},
-		"scope":         {strings.Join(scopes, " ")},
-		"access_type":   {"offline"}, // request refresh token
-		"prompt":        {"consent"}, // force consent to get refresh token
-	}
-	if forceFresh {
-		// Token will cover only the requested scope set, not the union of
-		// existing grants. Required for the reductive flow.
-		params.Set("include_granted_scopes", "false")
-	} else {
-		params.Set("include_granted_scopes", "true") // incremental authorization
-	}
-	if loginHint != "" {
-		params.Set("login_hint", loginHint)
-	}
-	return g.authURL + "?" + params.Encode()
 }
 
 // ErrAlreadyRevoked indicates Google considers the token already invalid
@@ -317,23 +294,6 @@ func waitForCallback(ln net.Listener) (string, error) {
 		srv.Close()
 		return "", fmt.Errorf("OAuth callback timed out (5 minutes)")
 	}
-}
-
-func mergeScopes(requested, existing []string) []string {
-	seen := make(map[string]bool)
-	for _, s := range existing {
-		seen[s] = true
-	}
-	for _, s := range requested {
-		seen[s] = true
-	}
-	var merged []string
-	for s := range seen {
-		if s != "" {
-			merged = append(merged, s)
-		}
-	}
-	return merged
 }
 
 func openBrowser(url string) {

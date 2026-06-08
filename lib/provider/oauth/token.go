@@ -4,11 +4,61 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/xianxu/nous/lib/provider/vault"
 )
+
+// buildAuthURL constructs the OAuth2 authorization-code request URL. Free
+// function (not a method) so both the real adapter — which opens it in a
+// browser — and the fake — which records it for assertions without a browser —
+// build the identical request through one code path.
+//
+// access_type=offline + prompt=consent + include_granted_scopes are Google's
+// dialect for "issue a refresh token" + incremental vs reductive consent; a
+// non-Google adapter would vary these (e.g. the offline_access scope).
+func buildAuthURL(authURL, clientID, redirectURI string, scopes []string, loginHint string, forceFresh bool) string {
+	params := url.Values{
+		"client_id":     {clientID},
+		"redirect_uri":  {redirectURI},
+		"response_type": {"code"},
+		"scope":         {strings.Join(scopes, " ")},
+		"access_type":   {"offline"}, // request refresh token
+		"prompt":        {"consent"}, // force consent to get refresh token
+	}
+	if forceFresh {
+		// Token covers only the requested scope set, not the union of existing
+		// grants. Required for the reductive flow.
+		params.Set("include_granted_scopes", "false")
+	} else {
+		params.Set("include_granted_scopes", "true") // incremental authorization
+	}
+	if loginHint != "" {
+		params.Set("login_hint", loginHint)
+	}
+	return authURL + "?" + params.Encode()
+}
+
+// mergeScopes returns the set-union of two scope lists (order-independent,
+// empties dropped). Pure; shared by the auth flow in both adapters.
+func mergeScopes(requested, existing []string) []string {
+	seen := make(map[string]bool)
+	for _, s := range existing {
+		seen[s] = true
+	}
+	for _, s := range requested {
+		seen[s] = true
+	}
+	var merged []string
+	for s := range seen {
+		if s != "" {
+			merged = append(merged, s)
+		}
+	}
+	return merged
+}
 
 // tokenResponse is the JSON response from an OAuth2 token endpoint
 // (RFC 6749 §5.1/§5.2). Shared by the real adapter (which decodes it from
