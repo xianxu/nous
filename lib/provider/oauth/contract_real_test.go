@@ -49,11 +49,12 @@ import (
 func TestContract_RealGoogle(t *testing.T) {
 	rt := os.Getenv("OAUTH_GOOGLE_REFRESH_TOKEN")
 	if rt == "" {
-		rt = keychainSecret("nous-oauth-conformance-google")
+		rt = keychainSecret(ConformanceKeychainService)
 	}
 	if rt == "" {
 		t.Skip("no Google conformance refresh token " +
-			"(Keychain nous-oauth-conformance-google or $OAUTH_GOOGLE_REFRESH_TOKEN); skipping grounding")
+			"(Keychain " + ConformanceKeychainService + " or $OAUTH_GOOGLE_REFRESH_TOKEN); " +
+			"provision with: go run ./cmd/oauth-conformance-provision")
 	}
 
 	gp, err := NewGoogleProvider()

@@ -1,12 +1,13 @@
 ---
 id: 000049
-status: working
+status: done
 deps: []
 github_issue:
 target: oauth-credential-lifecycle
 created: 2026-06-08
 updated: 2026-06-08
 estimate_hours: 1
+actual_hours: 0.11
 ---
 
 # oauth conformance: provisioner for the real-Google grounding token + certify the fake
@@ -54,14 +55,15 @@ refresh token where the test reads it.
 
 ## Plan
 
-- [ ] Build `cmd/oauth-conformance-provision` (consent → refresh token → Keychain).
-- [ ] Operator runs it with a throwaway account (interactive consent).
-- [ ] Run the conformance test; certify; record date+result in the target Revisions.
-- [ ] Ship `SKILL.md` (provision/certify/re-cert; MS template note for #48).
+- [x] Build `cmd/oauth-conformance-provision` (consent → refresh token → Keychain).
+- [x] Operator runs it with a throwaway account (interactive consent).
+- [x] Run the conformance test; certify (PASS 2026-06-08, xiantester2003@gmail.com); record in target Revisions.
+- [x] Ship `SKILL.md` (provision/certify/re-cert; MS template note for #48).
 
 ## Log
 
 ### 2026-06-08
+- 2026-06-08: closed — cmd/oauth-conformance-provision built + unit-tested (keychainStoreArgs pure helper); operator ran it with throwaway xiantester2003@gmail.com -> refresh token stored in Keychain nous-oauth-conformance-google; go test -tags conformance ./lib/provider/oauth/ -run Contract_Real -v PASSED (fake certified against real Google on Refresh/CheckHealth). Certification recorded in oauth-credential-lifecycle target Revisions + e2e atlas; SKILL.md ships the provision/certify/re-cert loop. go build ./... green.; review verdict: SHIP
 
 Filed from the nous#44 leftover (real-Google cert was wired but uncertified —
 needs a charon-client refresh token in Keychain, obtainable only via the

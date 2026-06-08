@@ -180,6 +180,21 @@ control-plane sibling).
   only the proxy/token-supplier distinguishes them (refresh-on-expiry). If nothing
   else does, the distinction stays an implementation detail of the read path.
 
+## Revisions
+
+### 2026-06-08 — first real-Google grounding certification (nous#49)
+
+The Google `real` backend is now **certified**, not just wired. With a
+throwaway-account refresh token (`xiantester2003@gmail.com`, issued by charon's
+client, stored in Keychain `nous-oauth-conformance-google` via
+`cmd/oauth-conformance-provision`), `go test -tags conformance
+./lib/provider/oauth/ -run Contract_Real` **PASSED** — the fake matches real
+Google on the grounded edges (`Expired→Active` Refresh + the `CheckHealth` read).
+The grounding column of the transition table above is now backed by a passing run,
+not just an intended one. Re-cert ~monthly or on suspected drift (re-run the
+provisioner + the conformance test; see `cmd/oauth-conformance-provision/SKILL.md`).
+The consent leg, `Revoke`, and `→Dead` remain fake-only/manual as documented.
+
 ---
 
 *Agent-drafted 2026-06-08 during nous#44 M2. The commitment layer — slim;

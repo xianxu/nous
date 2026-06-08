@@ -204,6 +204,12 @@ provider-autonomous **`→Dead`** edge are fake-only/manual — the harder bound
 nous#42 flagged: don't claim coverage the mechanism can't deliver. The
 transition table's grounding column in the target *is* the boundary doc.
 
+The Keychain refresh token is obtained via `cmd/oauth-conformance-provision`
+(charon's own consent flow — a Google refresh token is bound to the issuing
+client, so it can't be a pasted PAT like gh's). First certified 2026-06-08 against
+real Google (nous#49); re-cert ~monthly. See that command's `SKILL.md` for the
+provision→certify→re-cert loop (and the nous#48 Microsoft template).
+
 ## Mechanisms covered today
 
 | Mechanism | Function | Test |
