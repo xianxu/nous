@@ -172,6 +172,38 @@ their own simulations against it (cf. `httptest.Server`). The fake is grounded
 against real GitHub by `lib/gh/contract_real_test.go` (`-tags conformance`, run
 ~monthly); below-the-seam endpoint correctness is pinned by `lib/gh/real_test.go`.
 
+## Credential-lifecycle simulation via the oauth fake (nous#44)
+
+`shim(google-oauth)` (`lib/provider/oauth/`) is instance #2 of the same pattern,
+and the first with an **async redirect callback**. The provider-neutral
+`Provider` port (`port.go`: `Auth`/`Refresh`/`Revoke`/`CheckHealth` — the union
+of what charon's TUI/proxy/charoncli consumers use) has two implementations: the
+real adapter (`google.go`, the only thing that talks to Google — HTTP + browser +
+the `waitForCallback` channel) and a stateful in-memory `Fake` (`fake.go`,
+`oauth.NewFake(Conf)`). Both shape credentials through one **pure core**
+(`token.go`: `credentialFromToken`/`applyRefresh`/`parseIDToken`/`mintIDToken`),
+so they cannot drift on rotation/sidecar-preservation/verified-email — and the
+fake mints ID tokens the real `parseIDToken` actually parses (a model, not a
+mock). Charon's GCP token path runs hermetically through the fake
+(`lib/charoncli/oauth_seam_test.go`).
+
+What makes the fake a *model* rather than a mock: it executes an explicit
+**consumer-POV state machine** (`workshop/targets/oauth-credential-lifecycle.md`
+— `NoGrant`/`Active`/`Expired`/`Dead`), and its fault knobs are that machine's
+**provider-autonomous edges** — the transitions the issuer makes underneath us
+that we only observe late (`RevokeGrant`→`Dead`, `Transient`→`Unknown`,
+`DowngradeScope`, `DenyConsent`, `WrongAccount`). Hidden provider state surfaces
+as faults on our side; see the shim state-machine pensive (ariadne) for the
+R/M/S framing.
+
+**Grounding boundary** (`lib/provider/oauth/contract_real_test.go`, `-tags
+conformance`): `Refresh` + the `CheckHealth` read are grounded against real
+Google via a Keychain test-account refresh token. The **consent leg** (`Auth` —
+non-headless), **`Revoke`** (destructive to the grounding token), and the
+provider-autonomous **`→Dead`** edge are fake-only/manual — the harder boundary
+nous#42 flagged: don't claim coverage the mechanism can't deliver. The
+transition table's grounding column in the target *is* the boundary doc.
+
 ## Mechanisms covered today
 
 | Mechanism | Function | Test |

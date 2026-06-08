@@ -48,7 +48,16 @@ lib/
                  humans think in fingerprints, agent thinks in keygrips.
   provider/    — AI provider domain. Single roof for everything
                  credential-and-proxy:
-                   provider/oauth/     OAuth flows
+                   provider/oauth/     OAuth provider-auth port (shim,
+                                       ariadne#71/nous#44, instance #2). The
+                                       `Provider` interface (port.go) is the
+                                       seam; `google.go` is the only thing that
+                                       talks to Google (`oauth.New(Conf)`), a
+                                       stateful `fake.go` (`oauth.NewFake`)
+                                       executes the consumer-POV state machine
+                                       (target: oauth-credential-lifecycle), and
+                                       `token.go` is the shared pure core. See
+                                       e2e-integration-testing.md for grounding.
                    provider/providers/ per-provider impls (anthropic,
                                        gcp, openai) + catalog (scopes)
                    provider/proxy/     the credential proxy daemon
