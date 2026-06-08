@@ -2,7 +2,9 @@ package oauth
 
 import (
 	"encoding/base64"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -210,4 +212,90 @@ func contains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// TestWaitForCallback_Code drives the real adapter's async redirect callback
+// hermetically — no browser. The channel-inside-the-adapter (waitForCallback)
+// is the below-seam leg the fake can't model; this pins the code-extraction.
+func TestWaitForCallback_Code(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		resp, err := http.Get(fmt.Sprintf("http://%s/?code=abc123", ln.Addr().String()))
+		if err == nil {
+			resp.Body.Close()
+		}
+	}()
+	code, err := waitForCallback(ln)
+	if err != nil || code != "abc123" {
+		t.Fatalf("got (%q,%v), want (abc123,nil)", code, err)
+	}
+}
+
+// TestWaitForCallback_Error pins the callback error leg (?error=access_denied).
+func TestWaitForCallback_Error(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		resp, err := http.Get(fmt.Sprintf("http://%s/?error=access_denied", ln.Addr().String()))
+		if err == nil {
+			resp.Body.Close()
+		}
+	}()
+	if _, err := waitForCallback(ln); err == nil {
+		t.Fatal("expected error for access_denied callback")
+	}
+}
+
+// TestExchangeCode_HTTP grounds the real adapter's token-exchange leg
+// hermetically: it asserts the grant-request form params and that the response
+// routes through the shared credentialFromToken. This is the below-seam
+// translation the fake is structurally blind to.
+func TestExchangeCode_HTTP(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("ParseForm: %v", err)
+		}
+		if got := r.FormValue("grant_type"); got != "authorization_code" {
+			t.Errorf("grant_type = %q, want authorization_code", got)
+		}
+		if got := r.FormValue("code"); got != "the-code" {
+			t.Errorf("code = %q, want the-code", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, fmt.Sprintf(
+			`{"access_token":"at","refresh_token":"rt","id_token":%q,"expires_in":3600,"scope":"openid email"}`,
+			mintIDToken("u@x.com", true)))
+	}))
+	defer srv.Close()
+
+	gp := New(Conf{ClientID: "cid", ClientSecret: "sec", TokenURL: srv.URL})
+	cred, err := gp.exchangeCode("the-code", "http://localhost:1234")
+	if err != nil {
+		t.Fatalf("exchangeCode: %v", err)
+	}
+	if cred.Account != "u@x.com" || cred.AccessToken != "at" || cred.RefreshToken != "rt" {
+		t.Fatalf("bad cred: %+v", cred)
+	}
+}
+
+// TestExchangeCode_RejectsUnverified grounds the verified-email guard on the
+// real HTTP exchange path (not just the pure-function unit test).
+func TestExchangeCode_RejectsUnverified(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, fmt.Sprintf(
+			`{"access_token":"at","refresh_token":"rt","id_token":%q,"expires_in":3600}`,
+			mintIDToken("u@x.com", false)))
+	}))
+	defer srv.Close()
+
+	gp := New(Conf{TokenURL: srv.URL})
+	if _, err := gp.exchangeCode("c", "http://localhost:1234"); err == nil {
+		t.Fatal("expected unverified-email rejection on the real exchange path")
+	}
 }
