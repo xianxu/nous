@@ -173,6 +173,25 @@ if [ -z "$LEARNER_ENABLE_SYNC" ]; then
         NOUS_QUIET=1                     # no passphrase splash
     )
 fi
+
+# A pre-existing Homebrew (e.g. shipped in a VM base image) can be owned by
+# another user, so brew errors "permission denied" and asks for sudo — both in
+# nous's Brewfile (run by the handoff below) and in our casks. If brew is
+# already here and its prefix isn't writable, fix ownership once, up front. A
+# brew freshly installed by nous is already user-owned, so this no-ops.
+ensure_brew_writable() {
+    if ! command -v brew >/dev/null 2>&1; then
+        if   [ -x /opt/homebrew/bin/brew ]; then eval "$(/opt/homebrew/bin/brew shellenv)"
+        elif [ -x /usr/local/bin/brew ];   then eval "$(/usr/local/bin/brew shellenv)"; fi
+    fi
+    command -v brew >/dev/null 2>&1 || return 0
+    local p; p="$(brew --prefix 2>/dev/null)" || return 0
+    [ -w "$p" ] && return 0
+    warn "Homebrew at $p isn't writable by $(whoami) — fixing ownership (one-time sudo)..."
+    sudo chown -R "$(whoami):admin" "$p" || warn "chown failed; brew may still prompt for sudo."
+}
+ensure_brew_writable
+
 info "Handing off to nous bootstrap..."
 # bash 3.2 (macOS default) errors on an empty array under `set -u`, so branch.
 if [ ${#nous_env[@]} -gt 0 ]; then
@@ -187,11 +206,16 @@ if   [ -x /opt/homebrew/bin/brew ]; then eval "$(/opt/homebrew/bin/brew shellenv
 elif [ -x /usr/local/bin/brew ];   then eval "$(/usr/local/bin/brew shellenv)"
 fi
 command -v brew >/dev/null 2>&1 || die "brew not on PATH after nous bootstrap — can't continue."
+ensure_brew_writable   # re-check now that nous may have just installed brew
 
 # ── helpers for the learner delta ────────────────────────────────────────────
-brew_tap() { brew tap | grep -qx "$1" || { info "tap $1"; brew tap "$1"; }; }
-brew_get() { brew list --formula 2>/dev/null | grep -qx "$1" || { info "brew install $1"; brew install "$1"; }; }
-cask_get() { brew list --cask    2>/dev/null | grep -qx "$1" || { info "brew install --cask $1"; brew install --cask "$1"; }; }
+# `set -o pipefail` makes a non-zero `brew list` (a deprecation warning, etc.)
+# abort the pipeline even when grep matched — which would then run `brew install`
+# on an already-installed package and error out. So query each package directly:
+# `brew list <name>` exits 0 iff it's installed, making re-runs a clean no-op.
+brew_tap() { local t; t="$(brew tap 2>/dev/null)" || true; printf '%s\n' "$t" | grep -qx "$1" || { info "tap $1"; brew tap "$1"; }; }
+brew_get() { brew list --formula "$1" >/dev/null 2>&1 || { info "brew install $1"; brew install "$1"; }; }
+cask_get() { brew list --cask    "$1" >/dev/null 2>&1 || { info "brew install --cask $1"; brew install --cask "$1"; }; }
 
 # ── 5a. Terminal + editor delta (not in nous's Brewfile) ─────────────────────
 step "Terminal + editor (cmux, pair, pandoc)"
