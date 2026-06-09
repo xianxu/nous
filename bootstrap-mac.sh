@@ -154,7 +154,13 @@ fi
 # ripgrep, fzf, …) and builds the nous binary.
 step "The construct (nous + ariadne + toolchain)"
 if [ -d "$NOUS_DIR/.git" ]; then
-    ok "nous already cloned at $NOUS_DIR."
+    # Update an existing clone so re-runs pick up new files/fixes (a clone made
+    # before, e.g., this asset was added would otherwise stay stale). Best-effort:
+    # a dirty tree or a non-main branch (the VM mirror) just keeps what's there.
+    info "Updating existing nous clone at $NOUS_DIR ..."
+    git -C "$NOUS_DIR" pull --ff-only 2>/dev/null \
+        && ok "nous up to date." \
+        || warn "  couldn't fast-forward nous (local changes / a branch?); using the existing clone."
 else
     info "Cloning nous → $NOUS_DIR ..."
     git clone "$NOUS_REPO_URL" "$NOUS_DIR"
@@ -546,15 +552,23 @@ fi
 step "Keyboard layout (Option → Alt, no dead-key accents)"
 KBD_SRC="$NOUS_DIR/assets/keyboard/US-No-Dead-Letter.keylayout"
 KBD_DST_DIR="$HOME/Library/Keyboard Layouts"
+KBD_DST="$KBD_DST_DIR/US-No-Dead-Letter.keylayout"
+KBD_URL="https://raw.githubusercontent.com/xianxu/nous/main/assets/keyboard/US-No-Dead-Letter.keylayout"
+mkdir -p "$KBD_DST_DIR"
+# Prefer the cloned copy; fall back to a direct download — an older nous clone
+# (or the VM mirror) may predate this asset.
 if [ -f "$KBD_SRC" ]; then
-    mkdir -p "$KBD_DST_DIR"
-    cp -f "$KBD_SRC" "$KBD_DST_DIR/US-No-Dead-Letter.keylayout"
+    cp -f "$KBD_SRC" "$KBD_DST"
+else
+    curl -fsSL "$KBD_URL" -o "$KBD_DST" 2>/dev/null || true
+fi
+if [ -f "$KBD_DST" ]; then
     ok "Installed the 'U.S. No Dead Letter' keyboard layout."
     info "  Turn it on: log out and back in, then System Settings → Keyboard →"
     info "  Input Sources → ＋ → English → 'U.S. No Dead Letter' → Add, then pick it"
     info "  in the top-right input menu. Option+key then sends Alt, not ´˜¨ accents."
 else
-    warn "Keyboard layout not found at $KBD_SRC; skipping."
+    warn "Keyboard layout couldn't be installed (no clone copy + download failed); skipping."
 fi
 
 # ── 6. (optional) provision a local brain ────────────────────────────────────
