@@ -303,7 +303,12 @@ bindkey '^S' history-incremental-search-forward   # ...this ^S bind works (else 
 # GPG needs a tty for passphrase prompts (used once you enable encrypted brains)
 export GPG_TTY=$(tty)
 
-# convert ariadne-styled cmd to alias (sdlc, nous, …)
+# Default to the prebuilt binaries (~/workspace/nous/bin) — fast, no Go rebuild
+# on every call. Flip to NOUS_DEV=1 when you start *hacking on* the construct
+# itself, for build-on-every-call dev functions (the contributor turn).
+export NOUS_DEV=0
+# ariadne-styled cmd → shell functions (sdlc, nous, …) when NOUS_DEV=1; the
+# dev-aliases gate makes this a no-op when NOUS_DEV=0.
 [ -r "$HOME/workspace/ariadne/construct/dev-aliases.sh" ] && \
     source <("$HOME/workspace/ariadne/construct/dev-aliases.sh")
 EOF
