@@ -253,6 +253,10 @@ export EDITOR="nvim"
 export VISUAL="nvim"
 
 # ── editor ───────────────────────────────────────────────────────────────────
+# zsh refuses to define a function whose name is already an alias (e.g. the tart
+# VM rc — or an old dotfile — sets `alias v='${EDITOR}'`), failing with "defining
+# function based on alias". Drop any such aliases first so our functions win.
+unalias v p dir 2>/dev/null || true
 # v — open nvim; supports file:line  (e.g. `v notes.md:42`)
 v() {
     if [[ "$1" == *:* ]]; then
