@@ -599,24 +599,41 @@ check go version
 check nvim
 check claude
 check pair
+check codex
+[ -x "$HOME/.local/bin/agy" ] && ok "agy → $HOME/.local/bin/agy" || warn "agy not on PATH yet (open a fresh shell)"
 [ -x "$NOUS_DIR/bin/nous" ] && ok "nous → $NOUS_DIR/bin/nous" || warn "nous binary missing at $NOUS_DIR/bin/nous"
 brew list --cask 2>/dev/null | grep -qx cmux && ok "cmux installed (open from /Applications or Spotlight)" || warn "cmux cask not found"
 ssh-add -l >/dev/null 2>&1 && ok "SSH key loaded in agent." || warn "SSH key not in agent (run: ssh-add --apple-use-keychain $SSH_KEY)"
 
 cat >&2 <<EOF
 
-${GREEN}${BOLD}Done.${RESET} Learner environment is up.
+${GREEN}${BOLD}Done.${RESET}
 
-${CYAN}Next steps${RESET}
-  1. Open a ${BOLD}fresh terminal${RESET} (or: exec zsh) so PATH + aliases load.
-  2. Set your API key in ${BOLD}$ENV_FILE${RESET}, e.g.:
-       ${BOLD}export ANTHROPIC_API_KEY=...${RESET}    (for parley.nvim in the editor)
-     Then run ${BOLD}claude${RESET} once to log in to Claude Code (browser OAuth).
-  3. Create your first brain (your writing workbench):
-       ${BOLD}nous brain${RESET}      (TUI — press 'n' for a new local brain)
-  4. Launch the two-pane writing setup inside it:
-       ${BOLD}cd \$(your brain dir) && pc${RESET}     (alias for: pair claude)
-  5. Try the editor: ${BOLD}v a-note.md${RESET}  (first launch installs parley.nvim)
+${CYAN}What's installed${RESET}
+  • Shell      oh-my-zsh + a learner block in ~/.zshrc — aliases (v, s, p, …),
+               PATH, and the dev-alias functions (sdlc, nous, …)
+  • Editor     nvim with a minimal writing config (~/.config/nvim) + parley.nvim
+  • Terminal   cmux (the window) and pair (the two-pane agent+editor workbench)
+  • Agents     claude, codex, agy
+  • Construct  nous + ariadne under ~/workspace, the prebuilt nous CLI, a GitHub
+               SSH key — plus pandoc, a no-dead-key keyboard layout, and the CLI
+               deps (go, node, ripgrep, fzf, zoxide, …)
+
+${CYAN}Do these once to make it live${RESET}
+  1. Open a ${BOLD}fresh terminal${RESET} (or run: exec zsh) so PATH + aliases load.
+  2. ${BOLD}Sign in to the agents${RESET} — run each once (opens a browser):
+       ${BOLD}claude${RESET}    ${BOLD}codex${RESET}    ${BOLD}agy${RESET}
+     For the editor's chat (parley), also set a key in $ENV_FILE:
+       ${BOLD}export ANTHROPIC_API_KEY=...${RESET}
+  3. ${BOLD}Make your brain${RESET} — your writing workbench:  ${BOLD}nous brain${RESET}  (press 'n')
+
+${CYAN}Further setup — your AI Workbench${RESET}
+  1. ${BOLD}Keyboard${RESET}: enable 'U.S. No Dead Letter' so Option acts as Alt — log
+     out/in, then System Settings → Keyboard → Input Sources → ＋ → Others.
+  2. ${BOLD}The 3-pane workbench${RESET} (left two panes by pair, right pane by cmux):
+       https://xianxu.dev/workbench
+  3. ${BOLD}What nous is${RESET} (and how your brain works):
+       https://xianxu.dev/nous-intro
 
 You're plugged in. Anything that stops you is a question away.
 EOF
