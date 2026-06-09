@@ -623,13 +623,13 @@ ${CYAN}What's installed${RESET}
 ${CYAN}Do these once to make it live${RESET}
   1. Open a ${BOLD}fresh terminal${RESET} (or run: exec zsh) so PATH + aliases load.
   2. ${BOLD}Sign in${RESET} (opens a browser): ${BOLD}claude${RESET} — your main agent;
-     ${BOLD}codex${RESET} — for fresh-context review. (agy is a hedge; sign in if you'll use it.)
+     ${BOLD}codex${RESET} — for fresh-context review.
   3. ${BOLD}Learn the editor${RESET} — nvim is the modern heir to vim, so any vim
      tutorial applies. Run through the basics:  ${BOLD}https://openvim.com${RESET}
   4. ${BOLD}Make your brain${RESET} — your writing workbench:  ${BOLD}nous brain${RESET}  (press 'n')
-  5. ${BOLD}SSH key → GitHub${RESET} (you'll need it to publish) — if you skipped it during
-     setup:  ${BOLD}pbcopy < ~/.ssh/id_ed25519.pub${RESET}  then paste it at
-       https://github.com/settings/ssh/new
+  5. ${BOLD}SSH key → GitHub${RESET} — lets you push your work (like a blog) to GitHub
+     later. If you skipped it during setup:  ${BOLD}pbcopy < ~/.ssh/id_ed25519.pub${RESET}
+     then paste it at  https://github.com/settings/ssh/new
 
 ${CYAN}Further setup — your AI Workbench${RESET}
   1. ${BOLD}Keyboard${RESET}: enable 'U.S. No Dead Letter' so Option acts as Alt — log
