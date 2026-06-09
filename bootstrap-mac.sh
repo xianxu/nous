@@ -626,6 +626,9 @@ ${CYAN}Do these once to make it live${RESET}
      For the editor's chat (parley), also set a key in $ENV_FILE:
        ${BOLD}export ANTHROPIC_API_KEY=...${RESET}
   3. ${BOLD}Make your brain${RESET} — your writing workbench:  ${BOLD}nous brain${RESET}  (press 'n')
+  4. ${BOLD}SSH key → GitHub${RESET} (you'll need it to publish) — if you skipped it during
+     setup:  ${BOLD}pbcopy < ~/.ssh/id_ed25519.pub${RESET}  then paste it at
+       https://github.com/settings/ssh/new
 
 ${CYAN}Further setup — your AI Workbench${RESET}
   1. ${BOLD}Keyboard${RESET}: enable 'U.S. No Dead Letter' so Option acts as Alt — log
