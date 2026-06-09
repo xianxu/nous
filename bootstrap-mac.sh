@@ -215,7 +215,18 @@ ensure_brew_writable   # re-check now that nous may have just installed brew
 # `brew list <name>` exits 0 iff it's installed, making re-runs a clean no-op.
 brew_tap() { local t; t="$(brew tap 2>/dev/null)" || true; printf '%s\n' "$t" | grep -qx "$1" || { info "tap $1"; brew tap "$1"; }; }
 brew_get() { brew list --formula "$1" >/dev/null 2>&1 || { info "brew install $1"; brew install "$1"; }; }
-cask_get() { brew list --cask    "$1" >/dev/null 2>&1 || { info "brew install --cask $1"; brew install --cask "$1"; }; }
+cask_get() {
+    if brew list --cask "$1" >/dev/null 2>&1; then return 0; fi   # already brew-managed
+    info "brew install --cask $1"
+    if brew install --cask "$1"; then return 0; fi
+    # A pre-existing app (manual install or a leftover) makes brew error
+    # "It seems there is already an App at /Applications/<name>.app". Adopt the
+    # existing one if it's identical, else overwrite; never abort the whole run.
+    warn "  $1: an existing app is in the way — adopting/overwriting it..."
+    brew install --cask --adopt "$1" 2>/dev/null \
+        || brew install --cask --force "$1" \
+        || warn "  $1: still couldn't install (resolve manually); continuing."
+}
 
 # ── 5a. Terminal + editor delta (not in nous's Brewfile) ─────────────────────
 step "Terminal + editor (cmux, pair, pandoc)"
@@ -524,6 +535,26 @@ require('lazy').setup({
 })
 LUA
     ok "Wrote $NVIM_INIT."
+fi
+
+# ── 5e. Keyboard layout: Option key → Alt (no dead-key accents) ──────────────
+# macOS's stock U.S. layout turns Option+key into dead-key accents (Option+e → ´,
+# Option+n → ˜), which swallows the Alt bindings the learner relies on — pair's
+# Alt+Return, zellij, nvim Alt+hjkl. This bundled layout makes Option behave as a
+# plain Alt. Installed as a bare .keylayout (macOS reads it directly). NOTE: macOS
+# only scans for new layouts at LOGIN, and you still enable it in Input Sources.
+step "Keyboard layout (Option → Alt, no dead-key accents)"
+KBD_SRC="$NOUS_DIR/assets/keyboard/US-No-Dead-Letter.keylayout"
+KBD_DST_DIR="$HOME/Library/Keyboard Layouts"
+if [ -f "$KBD_SRC" ]; then
+    mkdir -p "$KBD_DST_DIR"
+    cp -f "$KBD_SRC" "$KBD_DST_DIR/US-No-Dead-Letter.keylayout"
+    ok "Installed the 'U.S. No Dead Letter' keyboard layout."
+    info "  Turn it on: log out and back in, then System Settings → Keyboard →"
+    info "  Input Sources → ＋ → English → 'U.S. No Dead Letter' → Add, then pick it"
+    info "  in the top-right input menu. Option+key then sends Alt, not ´˜¨ accents."
+else
+    warn "Keyboard layout not found at $KBD_SRC; skipping."
 fi
 
 # ── 6. (optional) provision a local brain ────────────────────────────────────
