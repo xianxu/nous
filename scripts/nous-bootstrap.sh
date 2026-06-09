@@ -162,6 +162,33 @@ info "Applying Brewfile ($BREWFILE)..."
 brew bundle install --file="$BREWFILE"
 ok "Brewfile applied."
 
+# ── 3b. Agent CLIs: codex (OpenAI) + agy (Antigravity) ───────────────────────
+# claude-code comes from the Brewfile; add the other two agents `pair` can drive
+# — codex via npm, agy via its official installer (github.com/google-antigravity
+# /antigravity-cli). Skip the downloads with NOUS_BOOTSTRAP_SKIP_AGENTS=1 (CI /
+# the test harness, which avoids the ~140MB agy download).
+if [ "${NOUS_BOOTSTRAP_SKIP_AGENTS:-}" = "1" ]; then
+    info "Skipping extra agent CLIs (NOUS_BOOTSTRAP_SKIP_AGENTS=1)."
+else
+    if command -v codex >/dev/null 2>&1; then
+        ok "codex already installed."
+    elif command -v npm >/dev/null 2>&1; then
+        info "Installing codex (npm @openai/codex)..."
+        npm install -g @openai/codex && ok "codex installed." \
+            || warn "codex install failed; add later: npm install -g @openai/codex"
+    else
+        warn "npm not on PATH; skipping codex. Later: npm install -g @openai/codex"
+    fi
+    if command -v agy >/dev/null 2>&1; then
+        ok "agy already installed."
+    else
+        info "Installing agy (Antigravity CLI)..."
+        curl -fsSL https://antigravity.google/cli/install.sh | bash \
+            && ok "agy installed." \
+            || warn "agy install failed; add later: curl -fsSL https://antigravity.google/cli/install.sh | bash"
+    fi
+fi
+
 # ── 4. Identity (GPG) ────────────────────────────────────────────────────────
 # Set NOUS_BOOTSTRAP_SKIP_IDENTITY=1 to skip — used by the test harness, which
 # manages its own GPG environment (custom pinentry + pre-staged test key).
