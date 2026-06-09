@@ -565,7 +565,7 @@ fi
 if [ -f "$KBD_DST" ]; then
     ok "Installed the 'U.S. No Dead Letter' keyboard layout."
     info "  Turn it on: log out and back in, then System Settings → Keyboard →"
-    info "  Input Sources → ＋ → English → 'U.S. No Dead Letter' → Add, then pick it"
+    info "  Input Sources → ＋ → Others → 'U.S. No Dead Letter' → Add, then pick it"
     info "  in the top-right input menu. Option+key then sends Alt, not ´˜¨ accents."
 else
     warn "Keyboard layout couldn't be installed (no clone copy + download failed); skipping."
