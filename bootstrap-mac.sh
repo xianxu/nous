@@ -610,23 +610,24 @@ cat >&2 <<EOF
 ${GREEN}${BOLD}Done.${RESET}
 
 ${CYAN}What's installed${RESET}
-  • Shell      oh-my-zsh + a learner block in ~/.zshrc — aliases (v, s, p, …),
-               PATH, and the dev-alias functions (sdlc, nous, …)
+  • Shell      oh-my-zsh + a learner block in ~/.zshrc: aliases — v → nvim,
+               s → git status, a → git add, d → git diff, p → commit + push,
+               pc → pair claude — plus the nous CLI on your PATH
   • Editor     nvim with a minimal writing config (~/.config/nvim) + parley.nvim
   • Terminal   cmux (the window) and pair (the two-pane agent+editor workbench)
   • Agents     claude, codex, agy
-  • Construct  nous + ariadne under ~/workspace, the prebuilt nous CLI, a GitHub
-               SSH key — plus pandoc, a no-dead-key keyboard layout, and the CLI
-               deps (go, node, ripgrep, fzf, zoxide, …)
+  • Construct  the base config that makes AI work well as a workbench (nous +
+               ariadne under ~/workspace), plus pandoc, a no-dead-key keyboard
+               layout, and CLI deps (go, node, ripgrep, fzf, zoxide, …)
 
 ${CYAN}Do these once to make it live${RESET}
   1. Open a ${BOLD}fresh terminal${RESET} (or run: exec zsh) so PATH + aliases load.
-  2. ${BOLD}Sign in to the agents${RESET} — run each once (opens a browser):
-       ${BOLD}claude${RESET}    ${BOLD}codex${RESET}    ${BOLD}agy${RESET}
-     For the editor's chat (parley), also set a key in $ENV_FILE:
-       ${BOLD}export ANTHROPIC_API_KEY=...${RESET}
-  3. ${BOLD}Make your brain${RESET} — your writing workbench:  ${BOLD}nous brain${RESET}  (press 'n')
-  4. ${BOLD}SSH key → GitHub${RESET} (you'll need it to publish) — if you skipped it during
+  2. ${BOLD}Sign in${RESET} (opens a browser): ${BOLD}claude${RESET} — your main agent;
+     ${BOLD}codex${RESET} — for fresh-context review. (agy is a hedge; sign in if you'll use it.)
+  3. ${BOLD}Learn the editor${RESET} — nvim is the modern heir to vim, so any vim
+     tutorial applies. Run through the basics:  ${BOLD}https://openvim.com${RESET}
+  4. ${BOLD}Make your brain${RESET} — your writing workbench:  ${BOLD}nous brain${RESET}  (press 'n')
+  5. ${BOLD}SSH key → GitHub${RESET} (you'll need it to publish) — if you skipped it during
      setup:  ${BOLD}pbcopy < ~/.ssh/id_ed25519.pub${RESET}  then paste it at
        https://github.com/settings/ssh/new
 
