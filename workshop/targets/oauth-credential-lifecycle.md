@@ -241,6 +241,18 @@ under **both** Google and Microsoft dialects (`TestContract_Fake` +
 (`Contract_RealMicrosoft`, `conformance`-tagged) skips without an Entra app +
 Keychain token, exactly as Google's does.
 
+**Real-Microsoft grounding certified (2026-06-11).** A single-tenant public-client
+Entra app (`xian@xldigit.com`, tenant `6daae80a…`, PKCE, no secret) issued a real
+refresh token (stored in Keychain `nous-oauth-conformance-microsoft` via
+`cmd/oauth-conformance-provision -provider microsoft`). `go test -tags conformance
+./lib/provider/oauth/ -run Contract_RealMicrosoft` **PASSED**, and **passed again
+on an immediate re-run** — proving the `rtCapture` rotated-token write-back makes
+grounding repeatable despite Microsoft's single-use rotation (the seed token from
+run 1 is dead by run 2; only the persisted rotation survives). The fake matches
+real Microsoft on the grounded edges (`Expired→Active` Refresh + the `CheckHealth`
+read). The consent leg, `Revoke` (`ErrRevokeUnsupported` — no MS mechanism), and
+`→Dead` remain fake-only/manual. n=2-real is now grounded, not just designed.
+
 ### 2026-06-08 — first real-Google grounding certification (nous#49)
 
 The Google `real` backend is now **certified**, not just wired. With a

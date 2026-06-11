@@ -85,13 +85,16 @@ forces; PKCE + `offline_access` scope + no-token-revoke + always-rotate are the 
 MS dialect dimensions.
 
 - [x] M1 — Factor the per-provider seam (identity extractor + `dialect`, rename to `OIDCProvider`) + Microsoft adapter (PKCE, `preferred_username`, `offline_access`, `ErrRevokeUnsupported`) + dialect-aware `Fake` certifying the `S` contract under both Google and Microsoft dialects (hermetic n=2). All hermetic tests green; Google behavior unchanged.
-- [ ] M2 — Real-Microsoft grounding: generalize the conformance provisioner (`-provider microsoft`), `TestContract_RealMicrosoft` with rotated-token persistence (MS single-use), certify against real MS this session; record the n=2 findings → `oauth-credential-lifecycle` Revisions + ariadne#71.
+- [x] M2 — Real-Microsoft grounding: generalize the conformance provisioner (`-provider microsoft`), `TestContract_RealMicrosoft` with rotated-token persistence (MS single-use), certify against real MS this session; record the n=2 findings → `oauth-credential-lifecycle` Revisions + ariadne#71.
 
 ## Log
 
 ### 2026-06-08
 - 2026-06-08: closed M1 — go test ./lib/provider/oauth/ green: one OIDCProvider+dialect; Microsoft adapter (PKCE/preferred_username/offline_access/ErrRevokeUnsupported); dialect-aware Fake certifies the S contract under BOTH Google & Microsoft dialects (TestContract_Fake + TestContract_FakeMicrosoft); MS wire grounded vs httptest (verifier+no client_secret+rotation); Google behavior unchanged (existing tests pass).
 - 2026-06-08: M1 boundary review = **FIX-THEN-SHIP** (info; no Critical/correctness). Fixed both Important: atlas drift (`atlas/nous/oauth-health.md` `*GoogleProvider`→`*OIDCProvider`) + removed a stray tracked `oauth-conformance-provision` binary (+.gitignore). gofmt'd oidc.go/token.go/token_test.go. Lessons recorded (rename sweeps must include atlas/docs; no build artifacts in `git add -A`). Deferred minors in lessons.md.
+
+### 2026-06-11
+- 2026-06-11: **Real-Microsoft grounding CERTIFIED.** Operator stood up a single-tenant public-client Entra app (client `a49b2de2…`, tenant `6daae80a…`, account `xian@xldigit.com`, PKCE/no-secret). Provisioner minted+stored a real refresh token; `go test -tags conformance ./lib/provider/oauth/ -run Contract_RealMicrosoft` **PASSED twice in a row** — confirming the `rtCapture` rotated-token write-back makes grounding repeatable despite MS single-use rotation. The fake matches real Microsoft on Refresh + CheckHealth. n=2-real grounded (not just designed). Recorded in the target Revisions; cross-provider evidence in ariadne#71.
 
 Filed from the nous#44 M3 scope decision (operator: 2nd OAuth provider lands as a
 separate follow-up, symmetric to nous#46 for gh, not bundled into #44). The
