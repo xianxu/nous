@@ -44,6 +44,7 @@ func main() {
 		gp           oauth.Provider
 		scopes       []string
 		svc          string
+		fixedAccount string // non-empty → store under this label instead of cred.Account
 		consentLabel string
 		certRun      string
 	)
@@ -70,6 +71,10 @@ func main() {
 		// pass them for clarity / a minimal consent screen).
 		scopes = []string{"openid", "profile", "offline_access"}
 		svc = defaultService(*service, oauth.ConformanceKeychainServiceMicrosoft)
+		// Microsoft rotates single-use refresh tokens, so the cert writes the
+		// rotated token back. Store under the SAME fixed label the test writes
+		// back to, so `-U` updates one item in place (no duplicate/stale entry).
+		fixedAccount = oauth.ConformanceAccountMicrosoft
 		consentLabel = "THROWAWAY Microsoft/Entra account"
 		certRun = "Contract_RealMicrosoft"
 	default:
@@ -87,13 +92,19 @@ func main() {
 
 	// cred.Account is the identity the library already extracted from the ID
 	// token (Google: email; Microsoft: preferred_username) — don't re-parse.
-	cmd := exec.Command("security", keychainStoreArgs(svc, cred.Account, cred.RefreshToken)...)
+	// Microsoft stores under a fixed label (fixedAccount) so the cert's
+	// rotated-token write-back updates this same item in place.
+	storeAccount := cred.Account
+	if fixedAccount != "" {
+		storeAccount = fixedAccount
+	}
+	cmd := exec.Command("security", keychainStoreArgs(svc, storeAccount, cred.RefreshToken)...)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		fatalf("store refresh token in Keychain (%s): %v", svc, err)
 	}
 
-	fmt.Printf("✓ stored refresh token for %s in Keychain service %q\n", cred.Account, svc)
+	fmt.Printf("✓ stored refresh token for %s (account label %q) in Keychain service %q\n", cred.Account, storeAccount, svc)
 	fmt.Println("Certify the fake against the real provider with:")
 	fmt.Printf("  go test -tags conformance ./lib/provider/oauth/ -run %s -v\n", certRun)
 }

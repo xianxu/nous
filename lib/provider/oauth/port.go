@@ -34,6 +34,18 @@ const ConformanceKeychainService = "nous-oauth-conformance-google"
 // (and the provisioner's -provider microsoft path writes).
 const ConformanceKeychainServiceMicrosoft = "nous-oauth-conformance-microsoft"
 
+// ConformanceAccountMicrosoft is the FIXED Keychain account label for the
+// Microsoft grounding entry. Microsoft rotates the refresh token on every use,
+// so the grounding test must write the rotated token back; for `security
+// add-generic-password -U` to UPDATE the one item in place (rather than create a
+// second item keyed on a different account, leaving a stale dead secret and an
+// order-undefined read), the provisioner's initial store and the test's
+// write-back must agree on the account field. They both use this const. The
+// label is a fixture identifier, not a real identity — the test never asserts
+// it. (Google needs no analogue: its token is reusable, so there is no
+// write-back and thus no duplicate-item risk.)
+const ConformanceAccountMicrosoft = "conformance@grounding"
+
 // Conf is the opaque, service-specific construction config. The one
 // cross-service convention is the shape New(Conf)/NewFake(Conf), not these
 // fields. Endpoints are injectable so tests (and the Microsoft adapter) point

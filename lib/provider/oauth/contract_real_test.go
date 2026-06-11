@@ -157,7 +157,7 @@ func TestContract_RealMicrosoft(t *testing.T) {
 	cred := &vault.Credential{
 		Type:         vault.TypeOAuth,
 		Provider:     "microsoft",
-		Account:      "conformance@grounding", // preserved across refresh; not asserted for correctness
+		Account:      ConformanceAccountMicrosoft, // preserved across refresh; not asserted for correctness
 		AccessToken:  "stale",
 		RefreshToken: rt,
 		Expiry:       time.Now().Add(-time.Hour),
@@ -166,10 +166,12 @@ func TestContract_RealMicrosoft(t *testing.T) {
 
 	// Persist the final live (rotated) token back to Keychain so re-runs work
 	// despite Microsoft's single-use rotation. Always attempt it (even on a
-	// failing body) since the seed token is consumed regardless.
+	// failing body) since the seed token is consumed regardless. The account
+	// label matches the provisioner's store (ConformanceAccountMicrosoft) so
+	// `-U` updates the one item in place — no duplicate/stale entry.
 	defer func() {
 		if c.last != "" {
-			if err := keychainStore(ConformanceKeychainServiceMicrosoft, "conformance@grounding", c.last); err != nil {
+			if err := keychainStore(ConformanceKeychainServiceMicrosoft, ConformanceAccountMicrosoft, c.last); err != nil {
 				t.Logf("warning: failed to persist rotated refresh token back to Keychain: %v", err)
 			} else {
 				t.Logf("persisted rotated refresh token back to Keychain %s (single-use rotation)", ConformanceKeychainServiceMicrosoft)
@@ -190,4 +192,36 @@ func TestContract_RealMicrosoft(t *testing.T) {
 	cred.RefreshToken = fresh.RefreshToken
 
 	runOAuthContract(t, c, cred)
+}
+
+// TestRTCapture_CapturesLastRotation pins the rotated-token-capture linchpin
+// HERMETICALLY (against the fake with always-rotate, no real Microsoft): the
+// decorator must capture the rotation buried inside CheckHealth's internal
+// Refresh, not just the direct Refresh. If it didn't, the only live token after
+// a grounding run would be lost in the discarded probe and re-runs would fail.
+// Tagged `conformance` because rtCapture lives in this file, but needs no creds
+// or network — runs under `go test -tags conformance`.
+func TestRTCapture_CapturesLastRotation(t *testing.T) {
+	f := NewFake(Conf{ClientID: "cid"})
+	f.SetRotateRefreshTokens(true) // Microsoft-like single-use rotation
+	seed := f.SeedAccount("u@x.com", []string{"openid"})
+	c := &rtCapture{inner: f}
+
+	fresh, err := c.Refresh(seed)
+	if err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	if c.last == "" || c.last != fresh.RefreshToken {
+		t.Fatalf("after Refresh, c.last=%q, want the rotated token %q", c.last, fresh.RefreshToken)
+	}
+	afterRefresh := c.last
+
+	// CheckHealth runs an internal Refresh through c.Refresh → another rotation
+	// that rtCapture must capture.
+	if got := c.CheckHealth(fresh); got != HealthHealthy {
+		t.Fatalf("CheckHealth = %v, want Healthy", got)
+	}
+	if c.last == "" || c.last == afterRefresh {
+		t.Fatalf("CheckHealth's internal rotation not captured: c.last=%q (unchanged from %q)", c.last, afterRefresh)
+	}
 }

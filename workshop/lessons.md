@@ -223,3 +223,39 @@ Minors deferred (non-blocking, recorded): `OIDCProvider.Revoke("")` returns
 (harmless ordering — empty token is a caller error for any provider); no
 symmetric Google-side "client_secret IS sent" assertion (MS asserts its
 absence; Google happy-path covers presence).
+
+---
+
+## 2026-06-11 — nous#48 M2 boundary review
+
+`FIX-THEN-SHIP` (info): no Critical; one Important (a real latent bug), fixed +
+validated before crossing.
+
+1. **Keychain `(service, account)` is the uniqueness key — a write-back under a
+   different account than the initial store creates a SECOND item, not an
+   update.** The MS conformance provisioner stored the seed token under the real
+   `preferred_username` (`xian@xldigit.com`); the cert's rotated-token write-back
+   stored under a hardcoded `conformance@grounding`. `security add-generic-password
+   -U` keys on `(service, account)`, so this left TWO items under one service: a
+   dead seed + the live rotated token. `keychainSecret` reads by **service only**
+   (`find-generic-password -s … -w`) → which item wins is order-undefined. It
+   passed twice by luck (most-recently-modified ordering), but a bare
+   `find-generic-password -s SERVICE` then returned the *dead* item — proving the
+   read was genuinely ambiguous. **Rule:** when a Keychain entry is written by more
+   than one path (provision + write-back), pin the **account label to one shared
+   const** so `-U` updates a single item in place; never let the account field
+   differ between writers to the same service. Reusable-token providers (Google)
+   don't write back, so they're immune — only rotating providers hit this.
+2. **A read-by-service-only Keychain helper is a smell when writes can rotate.**
+   `find-generic-password -s SERVICE` (no `-a`) silently picks among matches. If
+   multiple items can ever share a service, read by `(service, account)` or
+   guarantee a single item by construction (the fix above).
+
+The fix also added a hermetic `rtCapture` unit test (against the fake with
+`SetRotateRefreshTokens(true)`) pinning that the decorator captures the rotation
+buried inside `CheckHealth`'s internal Refresh — the linchpin of repeatable
+grounding, previously exercised only by the real conformance run.
+
+Deferred minors (non-blocking): target Revisions heading dated 2026-06-08 vs the
+2026-06-11 cert sub-note (defensible: design-realization date vs cert date);
+`keychainStore`/`defaultService` absent from the plan's Core-concepts table.
