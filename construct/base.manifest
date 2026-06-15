@@ -1,18 +1,27 @@
-# Nous base.manifest — nous-specific additions on top of ariadne's base layer.
+# Nous base.manifest — nous's module declaration for the weave layer compiler.
 #
-# Ancestors are discovered automatically by construct/setup.sh (vendored
-# from ariadne) via `go list -m all` + replace directives in go.mod. This
-# file holds only nous's own contributions; ariadne's base layer is walked
-# first as a transitive upstream.
+# nous is BOTH a consumer and a base: it consumes ariadne as its substrate
+# (construct/deps `substrate ../ariadne`) and inherits ariadne's EXPORTED base
+# layer through that edge, AND it exports its OWN artifacts (the nous-* skills,
+# Makefile.nous, directory conventions) down to its consumers (brain). This file
+# declares only nous's own contributions; ariadne's layer is walked first as a
+# transitive ancestor.
 #
-# Format: <action> <source-path> [<target-path>]
-#
-# Actions:
-#   symlink   — create symlink (or copy in vendor mode)
-#   copy      — copy once (for files that need local modification)
-#   scaffold  — create empty directory
-#   touch     — create empty file if missing
-#   merge     — JSON merge (settings.<layer>.json layered under settings.local.json)
+# Format and verbs are documented in ariadne's construct/base.manifest. The
+# OPTIONAL leading visibility token (ariadne#99 composition algebra) tags a row
+# `export` (flows down to consumers — the default when omitted) or `internal`
+# (stays with nous: selected only on nous's own self-walk, never leaked into a
+# consumer's composition).
+
+# ── Constitution ──────────────────────────────────────────────────────────────
+# nous's own local extensions. weave concatenates this fragment into nous's
+# composed AGENTS.md AFTER every ancestor's exported prose (ariadne's exported
+# AGENTS.base.md / Constitution). Declared `internal` so it composes ONLY on
+# nous's own self-walk and never leaks DOWN into a consumer's AGENTS.md — and,
+# conversely, ariadne's own internal AGENTS.local.md never leaks into nous's.
+# This is the structural fix for the #95 bug (the old `symlink AGENTS.md` whose
+# @-import silently resolved to ariadne's local file).
+internal  prose AGENTS.local.md
 
 # ── Nous skills ──────────────────────────────────────────────────────────────
 # nous-tools is the consolidated skill: covers both tool invocation (Audience
