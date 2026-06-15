@@ -6,3 +6,8 @@ cmd/*/bin/
 bin/
 .DS_Store
 /bin/sdlc
+/AGENTS.md
+/.claude/skills/
+/.claude/settings.json
+/.colima/
+/construct/scripts/vm-log.sh
