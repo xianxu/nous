@@ -24,13 +24,16 @@
 internal  prose AGENTS.local.md
 
 # ── Nous skills ──────────────────────────────────────────────────────────────
-# nous-tools is the consolidated skill: covers both tool invocation (Audience
-# A — invoke cmd/<name>) and tool authoring (Audience B — write code that
-# uses the proxy via `nous instructions`). The standalone charon skill was
-# retired after charon merged into the nous binary; its protocol-guide
-# content lives inside nous itself, accessed via `nous instructions`.
-symlink   construct/skills/nous-tools    .claude/skills/nous-tools
-symlink   construct/skills/nous-resolve  .claude/skills/nous-resolve
+# nous owns its skills under construct/local/<dir> (the standard layout, #104 M3):
+# weave's `skill` intent gathers them, prefixes by repo name (no config.json →
+# `nous-`), lowers them to .claude/skills/, lists them in the menu, and serves
+# their bodies via `weave skill <name>`. EXPORT (bare `skill`) so nous's dependents
+# (the brains) inherit them through the layer walk, same as ariadne's xx-* skills.
+#   - construct/local/tools   → nous-tools   (tool invocation + authoring via the
+#     proxy; `nous instructions`). The retired charon skill's protocol guide now
+#     lives in the nous binary, accessed via `nous instructions`.
+#   - construct/local/resolve → nous-resolve (brain-sync AI-prose conflict merge).
+skill     construct/local
 
 # ── Makefile ─────────────────────────────────────────────────────────────────
 symlink   Makefile.nous
