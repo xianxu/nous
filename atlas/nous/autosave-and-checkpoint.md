@@ -100,6 +100,20 @@ something with uncommitted state we don't want to stomp on.
 
 The same predicate gates `nous push` (refuses with a clear message).
 
+**Sync-branch binding (nous#52).** `performAutocommit` also stands down
+when HEAD is **not on the sync branch (`main`)** — a `review/<slug>`
+workbench branch, an `sdlc` feature branch, or a detached HEAD
+(`CurrentBranch(repo)` in `git.go`; detached → `""`). brainsync's whole
+model targets `main` (push/pull/reset are all `origin main`), so an
+autosave commit off `main` would never be pushed and would just pollute
+that branch — and, worse, race whatever tool owns that branch's
+deliberate commit cadence (the motivating case: the pair review
+workbench's `docflow` rounds on a `review/*` branch, which the daemon
+was preempting + clobbering). Unlike the merge/rebase skip, this guard
+is **daemon-only**: an explicit `nous push` on a side branch is honored
+(operator intent). A genuine branch-lookup failure fails safe — surface
+the error, don't commit blind.
+
 ## `nous push` — the operator-facing gesture
 
 ```
@@ -201,7 +215,12 @@ Operator-visible at `--verbose`: `brainsync: <repo> no remote changes
 ## Pointers
 
 - `nous/lib/brainsync/autocommit.go` — `AutoCommitter` state machine
-  (the `push` flag gates the push half — nous#47).
+  (the `push` flag gates the push half — nous#47; `performAutocommit`
+  stands down off the `main` sync branch — nous#52).
+- `nous/lib/brainsync/git.go` — `CurrentBranch(repo)` (the sync-branch
+  guard's helper; detached HEAD → `""`, nous#52).
+- `nous/workshop/issues/000052-brainsync-autosave-bind-to-the-sync-branch-main-don-t-auto-commit-onto-review-feature-branches.md`
+  — sync-branch binding spec (motivated by a pair `review/*` collision).
 - `nous/lib/brainsync/policy.go` — `BrainPolicy` / `ComputePolicy` /
   `shouldPush`: the pure per-brain commit/push/pull/keys decision.
 - `nous/lib/brainsync/discovery.go` — `FindBrains` (watch iff policy Active).
