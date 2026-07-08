@@ -1,12 +1,13 @@
 ---
 id: 000052
-status: working
+status: codecomplete
 deps: []
 github_issue:
 created: 2026-07-07
 updated: 2026-07-07
 estimate_hours: 0.43
 started: 2026-07-07T17:17:35-07:00
+actual_hours: 0.24
 ---
 
 # brainsync autosave: bind to the sync branch (main) — don't auto-commit onto review/feature branches
@@ -89,6 +90,7 @@ analyzed, guard shape fixed against `autocommit.go`/`git.go`), so the +15% desig
 ## Log
 
 ### 2026-07-07
+- 2026-07-07: closed — go build/vet clean; go test ./lib/brainsync/... green incl 3 new tests — TestCurrentBranch (main/review-x/detached HEAD→""), TestAutoCommitter_SkipsNonSyncBranch (edit on review/pvp → 0 commits, file stays modified-uncommitted), TestAutoCommitter_SkipsDetachedHead. performAutocommit now no-ops off main; nous push left unguarded by design.; review verdict: SHIP
 - Root-caused from a live pair `review/pvp` session in `brain`: autosave (brainsync
   `AutoCommitter`) is branch-agnostic while the rest of brainsync is `main`-only. Fix is a
   sync-branch guard in `performAutocommit`. Design confirmed against `autocommit.go` +
