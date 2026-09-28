@@ -360,6 +360,26 @@ func (a *AutoCommitter) performAutocommit() (bool, error) {
 		return false, nil
 	}
 
+	// Autosave is bound to the brain's sync branch (main). brainsync's whole
+	// model targets main — push/pull/reset are all `origin main` (git.go) — so
+	// on any other branch (a review/<slug> workbench branch, an sdlc feature
+	// branch, a detached HEAD) an autosave commit is off-model: it would never
+	// be pushed and would just pollute that branch, racing whatever tool owns
+	// its commit cadence. Off main, the daemon stands down; the operator (or
+	// that tool) owns commits there.
+	branch, err := CurrentBranch(a.brain)
+	if err != nil {
+		// Branch unknowable (broken repo / git failure) → fail safe: surface
+		// the error and do not commit, rather than silently committing blind.
+		return false, fmt.Errorf("current branch: %w", err)
+	}
+	if branch != "main" {
+		if a.verbose {
+			log.Printf("autocommit %s: on branch %q (not main) — autosave stands down", a.brain, branch)
+		}
+		return false, nil
+	}
+
 	// 1. Stage modified-tracked files (additions to the working tree
 	//    of files git already knows about). Excludes A/D/R/U/C — we
 	//    only sweep up edits.

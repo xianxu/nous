@@ -42,6 +42,35 @@ func Status(repo string) ([]string, error) {
 	return paths, nil
 }
 
+// CurrentBranch returns the name of the branch HEAD points at, or "" when
+// HEAD is detached — a detached HEAD simply isn't on a branch, which is not
+// an error for our callers. A genuine git failure (not a repo, etc.) is
+// returned as an error.
+//
+// Implemented with `git symbolic-ref --quiet --short HEAD`, run directly
+// rather than via RunGit: on a branch it prints the short name and exits 0;
+// on a detached HEAD it prints nothing and exits 1 (`--quiet` suppresses the
+// stderr message but NOT the exit status). RunGit folds any non-zero exit
+// into an error, which would mis-report a detached HEAD — so we handle the
+// exit code here and map the silent exit-1 to ("", nil).
+func CurrentBranch(repo string) (string, error) {
+	cmd := exec.Command("git", "-C", repo, "symbolic-ref", "--quiet", "--short", "HEAD")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err == nil {
+		return strings.TrimSpace(stdout.String()), nil
+	}
+	// Detached HEAD: exit 1 with empty stderr (the --quiet contract). Not an
+	// error — HEAD just isn't a branch.
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 && strings.TrimSpace(stderr.String()) == "" {
+		return "", nil
+	}
+	return "", fmt.Errorf("symbolic-ref HEAD: %w: %s", err, stderr.String())
+}
+
 // Fetch runs `git fetch origin`.
 func Fetch(repo string) error {
 	_, err := RunGit(repo, "fetch", "origin")

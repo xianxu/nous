@@ -33,6 +33,34 @@ func TestStatus_ListsModifiedFiles(t *testing.T) {
 	}
 }
 
+func TestCurrentBranch(t *testing.T) {
+	repo := initRepoForTest(t) // git init -b main
+
+	// Fresh repo is on (unborn) main.
+	if got, err := CurrentBranch(repo); err != nil || got != "main" {
+		t.Fatalf("fresh repo: want (\"main\", nil), got (%q, %v)", got, err)
+	}
+
+	// Need a commit before we can detach.
+	must(t, os.WriteFile(filepath.Join(repo, "a.md"), []byte("hi\n"), 0o644))
+	mustGit(t, repo, "add", "a.md")
+	mustGit(t, repo, "commit", "-q", "-m", "seed")
+
+	// A named non-main branch reports its name.
+	mustGit(t, repo, "checkout", "-q", "-b", "review/x")
+	if got, err := CurrentBranch(repo); err != nil || got != "review/x" {
+		t.Fatalf("review branch: want (\"review/x\", nil), got (%q, %v)", got, err)
+	}
+
+	// Detached HEAD → "" and NOT an error (the --quiet exit-1 contract).
+	head, err := RunGit(repo, "rev-parse", "HEAD")
+	must(t, err)
+	mustGit(t, repo, "checkout", "-q", strings.TrimSpace(string(head)))
+	if got, err := CurrentBranch(repo); err != nil || got != "" {
+		t.Fatalf("detached HEAD: want (\"\", nil), got (%q, %v)", got, err)
+	}
+}
+
 // initRepoWithBareRemote creates a bare remote and a clone with origin set.
 func initRepoWithBareRemote(t *testing.T) (workTree, bare string) {
 	t.Helper()

@@ -171,6 +171,58 @@ func TestAutoCommitter_SkipsDuringMerge(t *testing.T) {
 	}
 }
 
+// TestAutoCommitter_SkipsNonSyncBranch: autosave is bound to the sync branch
+// (main). On a non-main branch — e.g. a review/<slug> workbench branch that
+// owns its own deliberate commit cadence — the daemon must stand down and not
+// commit underneath it. (The commit-on-main path is the golden test above.)
+func TestAutoCommitter_SkipsNonSyncBranch(t *testing.T) {
+	_, peerA, _ := twoPeerRepo(t)
+	mustGit(t, peerA, "checkout", "-q", "-b", "review/pvp")
+
+	a, err := NewAutoCommitter(peerA, "test", shortCommit, shortPush, true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Stop()
+
+	preCount := len(readCommitMessages(t, peerA))
+	must(t, os.WriteFile(filepath.Join(peerA, "paris.md"), []byte("edited on a review branch\n"), 0o644))
+	time.Sleep(shortCommit + settle)
+
+	if postCount := len(readCommitMessages(t, peerA)); postCount != preCount {
+		t.Errorf("autosave committed on review/pvp (commits %d→%d); should stand down off the sync branch", preCount, postCount)
+	}
+	// The edit must remain uncommitted (modified-tracked), not silently dropped.
+	out, err := RunGit(peerA, "status", "--porcelain")
+	must(t, err)
+	if !strings.Contains(string(out), "paris.md") {
+		t.Errorf("expected paris.md to remain modified-uncommitted on the review branch, status:\n%s", out)
+	}
+}
+
+// TestAutoCommitter_SkipsDetachedHead: on a detached HEAD (CurrentBranch → "")
+// the daemon also stands down — a detached HEAD isn't the sync branch.
+func TestAutoCommitter_SkipsDetachedHead(t *testing.T) {
+	_, peerA, _ := twoPeerRepo(t)
+	head, err := RunGit(peerA, "rev-parse", "HEAD")
+	must(t, err)
+	mustGit(t, peerA, "checkout", "-q", strings.TrimSpace(string(head)))
+
+	a, err := NewAutoCommitter(peerA, "test", shortCommit, shortPush, true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Stop()
+
+	preCount := len(readCommitMessages(t, peerA))
+	must(t, os.WriteFile(filepath.Join(peerA, "paris.md"), []byte("edited on detached HEAD\n"), 0o644))
+	time.Sleep(shortCommit + settle)
+
+	if postCount := len(readCommitMessages(t, peerA)); postCount != preCount {
+		t.Errorf("autosave committed on a detached HEAD (commits %d→%d); should stand down", preCount, postCount)
+	}
+}
+
 // TestAutoCommitter_WatchesNewSubdirs: a new subdirectory created
 // at runtime should be picked up by the recursive watcher, so a
 // file inside it triggers an autosave once added to the index.

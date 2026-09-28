@@ -85,4 +85,4 @@ does *not* apply. See `brain/atlas/threat-model-shared-brain.md`.
 - gcrypt mechanics (engaged at publish): `gcrypt-brain-encryption.md`
 - Recipient onboarding (the shared rung): `recipient-onboarding.md`
 - Security posture + threat boundaries: `brain/atlas/threat-model-shared-brain.md`
-- Issue: `workshop/history/000033-*` (once archived) / `workshop/issues/000033-*`
+- Issue: `workshop/history/issues/000033-*` (once archived) / `workshop/issues/000033-*`
