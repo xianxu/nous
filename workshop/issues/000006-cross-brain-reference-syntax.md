@@ -5,9 +5,14 @@ deps: [nous#3]
 created: 2026-05-05
 updated: 2026-05-05
 estimate_hours: 4
+card_mirror: 'ee2d58e8397cc9b33da1b333cc8efe1ef9db7e65' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # cross-brain reference syntax
+
+## Problem
+
+No problem statement was recorded before the issue tracker migration.
 
 ## Done when
 

@@ -6,6 +6,7 @@ github_issue:
 created: 2026-06-06
 updated: 2026-06-06
 estimate_hours:
+card_mirror: '2d4e8c3e3f18893d2cdd763f664140a674e68f8a' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # shim every nous external dependency + an integrated end-to-end mock harness (the deterministic-shell demo)

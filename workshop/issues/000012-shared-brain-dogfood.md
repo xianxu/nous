@@ -5,6 +5,7 @@ deps: [000004]
 created: 2026-05-08
 updated: 2026-05-08
 estimate_hours:
+card_mirror: '83f780046e5060acaa88cd95fa52efb6dec09c77' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # shared-brain dogfood — wife/me forcing-function

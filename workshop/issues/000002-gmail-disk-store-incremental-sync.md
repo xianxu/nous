@@ -4,6 +4,7 @@ status: open
 deps: [000001]
 created: 2026-04-28
 updated: 2026-04-28
+card_mirror: '42012a1c5a716b4d920817537834c29b1876e584' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # Gmail: on-disk message store + incremental sync

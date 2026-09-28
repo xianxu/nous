@@ -5,6 +5,7 @@ deps: [000028]
 created: 2026-05-20
 updated: 2026-05-20
 estimate_hours: 4
+card_mirror: '74a7a587afda8124a89c85270f973dab27760ddd' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # build: cross-repo Go binary support (brain-repo imports nous/lib)

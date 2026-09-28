@@ -6,6 +6,7 @@ github_issue:
 created: 2026-06-01
 updated: 2026-06-01
 estimate_hours:
+card_mirror: '942cb23442b9ba0877cabf485350c234c1f514b5' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # system-wide identity revocation

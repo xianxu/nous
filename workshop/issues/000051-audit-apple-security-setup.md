@@ -5,9 +5,14 @@ deps: []
 created: 2026-05-06
 updated: 2026-06-08
 estimate_hours: 1
+card_mirror: '5b9562f3efb1677c0527ea8f88bf5b964c6577b9' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # audit and harden apple security setup
+
+## Problem
+
+No problem statement was recorded before the issue tracker migration.
 
 ## Done when
 

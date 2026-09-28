@@ -6,6 +6,7 @@ github_issue:
 created: 2026-06-08
 updated: 2026-06-08
 estimate_hours:
+card_mirror: 'ea646fc5e9bd8a03d75e0b2e588b0e951c18fe12' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # shim(gh): make the consumer-POV state machine explicit + add a 2nd git-hosting provider (gitlab/bitbucket) as cross-domain validation

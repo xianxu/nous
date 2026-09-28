@@ -5,6 +5,7 @@ deps: []
 created: 2026-05-10
 updated: 2026-05-10
 estimate_hours: 4
+card_mirror: 'dcd88edb91137ddb476b8dacd4eae8f6106682cd' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # nous-security `.app` packaging — signed + notarized menubar

@@ -5,9 +5,14 @@ deps: [nous#4]
 created: 2026-05-05
 updated: 2026-05-05
 estimate_hours: 4
+card_mirror: 'a2b31a23630ce29e82858af87e19b5f1aeec155a' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # lock primitive
+
+## Problem
+
+No problem statement was recorded before the issue tracker migration.
 
 ## Done when
 

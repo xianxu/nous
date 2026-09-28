@@ -5,6 +5,7 @@ deps: []
 created: 2026-05-20
 updated: 2026-05-20
 estimate_hours: 4
+card_mirror: '3e6bf8f927c4ccd95eca5f36a03bb8f936fa27e5' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # bootstrap: fetch signed nous binary from GitHub releases (when releases exist)

@@ -5,6 +5,7 @@ deps: []
 created: 2026-05-10
 updated: 2026-05-10
 estimate_hours: 2
+card_mirror: '23a2ddb5ff8860bdea5c4514d37289ca7e8475fb' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # Audit: promote terminals + unanchored DRs to Critical on charon-namespace ACLs

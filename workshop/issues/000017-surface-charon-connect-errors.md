@@ -5,6 +5,7 @@ deps: [000014]
 created: 2026-05-09
 updated: 2026-05-09
 estimate_hours: 3
+card_mirror: 'f3ac0c6b87c1f289186a5c31dfe35087ed222a3f' # card fields mirrored from issue-cards; edit via sdlc
 ---
 
 # Surface charon's CONNECT-time errors to agents
