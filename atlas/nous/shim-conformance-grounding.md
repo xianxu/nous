@@ -28,7 +28,7 @@ below is the last *passing* run; refresh by re-running that row's command.
 | `lib/gh` | **GitHub** | `lib/gh/contract_real_test.go` | `go test -tags conformance ./lib/gh/ -run Contract_Real -v` | `nous-conformance-operator`, `nous-conformance-invitee` (two throwaway accounts; ephemeral fixture repo) | **2026-06-06** | PASS (10/10 invariants; operator=emmatest42, invitee=yingtest42) — nous#43 |
 | `lib/gh` | GitLab / Bitbucket | *(planned)* | — | — | — | pending (nous#46) |
 | `lib/provider/oauth` | **Google** | `lib/provider/oauth/contract_real_test.go` (`TestContract_RealGoogle`) | `go test -tags conformance ./lib/provider/oauth/ -run Contract_RealGoogle -v` | `nous-oauth-conformance-google` (throwaway refresh token; provision via `cmd/oauth-conformance-provision`) | **2026-06-08** | PASS (Refresh + CheckHealth) — nous#49 |
-| `lib/provider/oauth` | Microsoft / Entra | *(planned)* | — | — | — | pending (nous#48) |
+| `lib/provider/oauth` | **Microsoft / Entra** | `lib/provider/oauth/contract_real_test.go` (`TestContract_RealMicrosoft`) | `MICROSOFT_CLIENT_ID=… MICROSOFT_TENANT_ID=… go test -tags conformance ./lib/provider/oauth/ -run Contract_RealMicrosoft -v` | `nous-oauth-conformance-microsoft` (single-tenant public-client/PKCE Entra app; provision via `cmd/oauth-conformance-provision -provider microsoft`) | **2026-06-11** | PASS (Refresh + CheckHealth; repeatable via rotated-token write-back) — nous#48 |
 
 > Keep "Last certified" current: after a successful re-cert, update the cell here
 > and record the run (date + result) in the relevant shim's grounding doc /
@@ -52,6 +52,18 @@ Don't claim coverage the mechanism can't deliver (the nous#42 discipline).
   Provision the token with `cmd/oauth-conformance-provision` (a Google refresh
   token is bound to charon's client, so it can't be a pasted PAT like gh's); see
   its `SKILL.md` for the provision→certify→re-cert loop.
+- **Microsoft OAuth** (`lib/provider/oauth`): the n=2-real provider behind the
+  *same* `Provider` port + `S` machine (one `OIDCProvider` + injected `dialect`,
+  no shared cross-service framework). Grounds the same `Expired→Active` (Refresh)
+  + `CheckHealth` read. Two boundary differences from Google — both real
+  cross-provider findings (nous#48): (1) `Revoke` is `ErrRevokeUnsupported` —
+  Microsoft has *no per-token revoke endpoint at all* (only global Graph
+  `revokeSignInSessions`), so it's ungroundable by **mechanism**, not just
+  destructiveness; (2) refresh tokens are **single-use** — the test wraps the
+  provider in `rtCapture` and **persists the rotated token back to Keychain** so
+  re-runs work (Google's reusable token is deliberately *not* persisted). Public
+  client + PKCE, so provisioning needs your Entra app's `MICROSOFT_CLIENT_ID` /
+  `MICROSOFT_TENANT_ID` (no embedded secret); see `cmd/oauth-conformance-provision/SKILL.md`.
 
 ## Why this is its own page
 

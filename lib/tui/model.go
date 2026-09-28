@@ -89,7 +89,7 @@ type model struct {
 
 	// healthCheck probes per-account refresh-token validity for badge
 	// surfacing. nil → no checks (older callers, tests). Production
-	// wires an adapter over oauth.GoogleProvider.CheckHealth in
+	// wires an adapter over oauth.OIDCProvider.CheckHealth in
 	// lib/charoncli's AuthCmd. See nous#15 for the design rationale
 	// (active health check at session boundary; can't prevent token
 	// death, only detect it early).
@@ -157,7 +157,7 @@ func WithGCPClientFactory(f func(account string) (GCPSetupClient, error)) Option
 // Without this option, no badges render — same UX as before nous#15.
 //
 // Adapter typically lives in cmd/nous or lib/charoncli where
-// oauth.GoogleProvider is in scope; the adapter maps oauth's
+// oauth.OIDCProvider is in scope; the adapter maps oauth's
 // HealthState enum to tui.AccountHealth strings.
 func WithAccountHealthChecker(f AccountHealthChecker) Option {
 	return func(m *model) { m.healthCheck = f }

@@ -16,24 +16,21 @@ import (
 // browser — and the fake — which records it for assertions without a browser —
 // build the identical request through one code path.
 //
-// access_type=offline + prompt=consent + include_granted_scopes are Google's
-// dialect for "issue a refresh token" + incremental vs reductive consent; a
-// non-Google adapter would vary these (e.g. the offline_access scope).
-func buildAuthURL(authURL, clientID, redirectURI string, scopes []string, loginHint string, forceFresh bool) string {
+// The provider-specific authorization params (Google: access_type=offline +
+// prompt=consent + include_granted_scopes; Microsoft: prompt=consent, with
+// offline_access riding in the scope set) come in via `extra` from the
+// dialect's authParams. PKCE params (code_challenge/code_challenge_method) are
+// layered on by the real Auth per-call (they depend on a per-call verifier),
+// not here — the fake records the URL without them.
+func buildAuthURL(authURL, clientID, redirectURI string, scopes []string, loginHint string, extra url.Values) string {
 	params := url.Values{
 		"client_id":     {clientID},
 		"redirect_uri":  {redirectURI},
 		"response_type": {"code"},
 		"scope":         {strings.Join(scopes, " ")},
-		"access_type":   {"offline"}, // request refresh token
-		"prompt":        {"consent"}, // force consent to get refresh token
 	}
-	if forceFresh {
-		// Token covers only the requested scope set, not the union of existing
-		// grants. Required for the reductive flow.
-		params.Set("include_granted_scopes", "false")
-	} else {
-		params.Set("include_granted_scopes", "true") // incremental authorization
+	for k, vs := range extra {
+		params[k] = vs
 	}
 	if loginHint != "" {
 		params.Set("login_hint", loginHint)
@@ -76,33 +73,30 @@ type tokenResponse struct {
 }
 
 // credentialFromToken maps a token-endpoint response to a fresh credential
-// (the pure body of the code-exchange path: extract the authenticated email
+// (the pure body of the code-exchange path: extract the authenticated identity
 // from the ID token, split scopes, compute expiry from ExpiresIn against the
 // injected clock). The real adapter feeds it an HTTP-decoded response; the
 // fake feeds it a minted one — one source of truth for "token → credential".
 //
-// It rejects an unverified email: accepting email_verified==false would let a
-// caller bind a credential to an address they don't control. Real Google
-// returns email_verified==true for the consent flow, so production is
-// unaffected; the fake's unverified knob exercises this guard.
-//
-// The "google" provider id is the one per-provider concern here (the seam a
-// future non-Google OIDC adapter varies); everything else is OIDC-standard.
-func credentialFromToken(tok tokenResponse, now time.Time) (*vault.Credential, error) {
-	email, verified, err := parseIDToken(tok.IDToken)
+// The two per-provider concerns are injected: `providerID` (the credential's
+// Provider tag) and `extractID` (the identity-claim extractor — the seam
+// Microsoft forced into existence, nous#48). Google's extractor reads `email`
+// and rejects email_verified==false; Microsoft's reads preferred_username/upn
+// with no verified claim. The verified-email guard therefore lives *inside*
+// googleIdentity now (a Google-layer payload concern, not shared) — everything
+// here is OIDC-standard.
+func credentialFromToken(tok tokenResponse, providerID string, extractID func(idToken string) (string, error), now time.Time) (*vault.Credential, error) {
+	account, err := extractID(tok.IDToken)
 	if err != nil {
 		return nil, fmt.Errorf("failed to identify account: %w", err)
-	}
-	if !verified {
-		return nil, fmt.Errorf("id token email %q is not verified", email)
 	}
 	var scopes []string
 	if tok.Scope != "" {
 		scopes = strings.Split(tok.Scope, " ")
 	}
 	return &vault.Credential{
-		Provider:     "google",
-		Account:      email,
+		Provider:     providerID,
+		Account:      account,
 		AccessToken:  tok.AccessToken,
 		RefreshToken: tok.RefreshToken,
 		Expiry:       now.Add(time.Duration(tok.ExpiresIn) * time.Second),
@@ -144,54 +138,27 @@ func applyRefresh(old *vault.Credential, tok tokenResponse, now time.Time) *vaul
 	return updated
 }
 
-// parseIDToken extracts the email and email_verified claims from an OIDC ID
-// token (JWT). No signature verification — the token comes directly from the
-// issuer's token endpoint over HTTPS. Returns (email, verified, err).
-//
-// email_verified is accepted as either a bool or the string "true"; Google's
-// v2 endpoint returns a bool, but the string form has been observed and is
-// cheap to tolerate.
-func parseIDToken(idToken string) (email string, verified bool, err error) {
+// decodeIDClaims decodes an OIDC ID token's (JWT) payload into the
+// caller-supplied struct. Provider-neutral: split header.payload.sig,
+// base64url-decode the payload, json.Unmarshal. No signature verification —
+// the token comes directly from the issuer's token endpoint over HTTPS (the
+// same trust assumption the prior parseIDToken made). Each provider's identity
+// extractor (googleIdentity / microsoftIdentity) decodes its own claim subset
+// through this one path.
+func decodeIDClaims(idToken string, into any) error {
 	if idToken == "" {
-		return "", false, fmt.Errorf("no ID token in response (openid scope may not be granted)")
+		return fmt.Errorf("no ID token in response (openid scope may not be granted)")
 	}
 	parts := strings.Split(idToken, ".")
 	if len(parts) != 3 {
-		return "", false, fmt.Errorf("invalid ID token format")
+		return fmt.Errorf("invalid ID token format")
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return "", false, fmt.Errorf("failed to decode ID token payload: %w", err)
+		return fmt.Errorf("failed to decode ID token payload: %w", err)
 	}
-	var claims struct {
-		Email         string      `json:"email"`
-		EmailVerified interface{} `json:"email_verified"`
+	if err := json.Unmarshal(payload, into); err != nil {
+		return fmt.Errorf("failed to parse ID token claims: %w", err)
 	}
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return "", false, fmt.Errorf("failed to parse ID token claims: %w", err)
-	}
-	if claims.Email == "" {
-		return "", false, fmt.Errorf("no email claim in ID token")
-	}
-	switch v := claims.EmailVerified.(type) {
-	case bool:
-		verified = v
-	case string:
-		verified = v == "true"
-	}
-	return claims.Email, verified, nil
-}
-
-// mintIDToken builds a structurally-valid unsigned ID token (header.payload.
-// with an empty signature segment) carrying the given email + email_verified
-// claims. The fake uses it so its tokens flow through the *same* parseIDToken
-// the real adapter uses — exercising real parsing, not bypassing it.
-func mintIDToken(email string, verified bool) string {
-	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
-	payloadJSON, _ := json.Marshal(struct {
-		Email         string `json:"email"`
-		EmailVerified bool   `json:"email_verified"`
-	}{Email: email, EmailVerified: verified})
-	payload := base64.RawURLEncoding.EncodeToString(payloadJSON)
-	return header + "." + payload + "."
+	return nil
 }

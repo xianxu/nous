@@ -127,13 +127,20 @@ scope-downgrade observations), `DenyConsent` / `WrongAccount` (the `Auth` leg).
    is the single source of truth (both adapters): carry `Type`/`Provider`/
    `Account`, keep the old refresh token unless the response rotates it, default
    scopes to the old set, preserve `GCP`/`AIStudio`/`AdminKey`/`Catalog`.
-4. **Reject unverified identity.** `credentialFromToken` refuses
-   `email_verified==false` (a Google-layer payload guard, below the per-provider
-   seam — not an `S` edge).
+4. **Reject unverified identity.** The Google identity extractor (`googleIdentity`)
+   refuses `email_verified==false` (absent → false → rejected). This is a
+   Google-layer payload guard, **inside** the per-provider seam — not an `S` edge.
+   *(Realized at nous#48: the guard moved out of the shared `credentialFromToken`
+   into `googleIdentity` when Microsoft — which has no `email_verified` claim —
+   forced the identity extractor to become per-provider.)*
 5. **The port is provider-neutral; the wire/payload is the variant.** `S` is the
-   same for every OIDC provider. A new provider supplies an adapter (endpoints,
-   identity-claim extractor, error→edge mapping, revoke mechanism), not a new
-   machine, and **no shared cross-service framework** (ariadne#71 rule).
+   same for every OIDC provider. A new provider supplies a `dialect` (provider id,
+   required scopes, auth-URL params, identity-claim extractor, PKCE flag, revoke
+   mechanism) injected into the **one** generic `OIDCProvider` — not a new machine
+   and not a second adapter — and **no shared cross-service framework**
+   (ariadne#71 rule; the `dialect` lives inside package `oauth`, varies only OIDC
+   providers, each still its own `Conf`). *(Realized seam list confirmed at
+   nous#48 — see Revisions.)*
 6. **Grounding is honest.** `Refresh` + `CheckHealth` are grounded against real
    Google; the consent leg, `Revoke`, and provider-autonomous revocation are
    fake-only/manual. Don't claim coverage the mechanism can't deliver (the nous#42
@@ -181,6 +188,70 @@ control-plane sibling).
   else does, the distinction stays an implementation detail of the read path.
 
 ## Revisions
+
+### 2026-06-08 — n=2-real: Microsoft/Entra as the 2nd provider (nous#48)
+
+Microsoft (Entra ID) landed as the second real backend behind the **same**
+`Provider` port and the **same** `S`, validating that the abstraction is real and
+not a Google-shaped quotient. The architecture held: **one** generic
+`OIDCProvider` (renamed from `GoogleProvider`) drives Auth/Refresh/Revoke/exchange
+for every provider; the per-provider variation is an injected `dialect` value, and
+Google + Microsoft are sibling provider files over a shared core. No shared
+cross-service framework (ariadne#71 honored — the `dialect` is in-package).
+
+**The seam Microsoft forced into existence** (= what was "by inspection" in nous#44,
+now grounded):
+
+- **Identity extractor** is now per-provider (`dialect.extractID`). The hardcoded
+  `Provider:"google"` + email-verified logic left `credentialFromToken`; it now
+  takes `(providerID, extractID)`. `googleIdentity` reads `email` + rejects
+  unverified; `microsoftIdentity` reads `preferred_username` (→ `upn` fallback)
+  with **no verified claim** (MS has neither a reliable top-level `email` nor
+  `email_verified`). This proved invariant 4's guard was always Google-specific —
+  it moved *into* `googleIdentity`, not into the shared core.
+- **PKCE** is a new dialect dimension (`dialect.usePKCE`). MS is a **public client**
+  (no secret); the real `Auth` mints a per-call `code_verifier`, layers the S256
+  challenge on the auth URL, and sends the verifier on exchange. The shared token
+  POSTs omit `client_secret` when empty — so public (MS/PKCE) and confidential
+  (Google/secret) clients use one code path.
+- **`offline_access` scope** (vs Google's `access_type=offline` auth-URL param) is
+  how MS issues a refresh token — captured in `requiredMicrosoftScopes` +
+  `microsoftAuthParams`.
+- **No token-revoke endpoint.** MS has no RFC-7009 per-token revoke; the only
+  mechanism (Graph `revokeSignInSessions`) is global across every app and needs an
+  elevated token. So `Provider.Revoke` is honestly `ErrRevokeUnsupported` for MS —
+  the port method exists for uniformity, but the grounding boundary differs by
+  *mechanism*, not just (as for Google) by destructiveness.
+- **Always-rotate ⇒ opposite grounding-persistence discipline.** MS refresh tokens
+  are single-use (every Refresh rotates). The shared contract body (Refresh, then
+  CheckHealth-which-Refreshes) consumes the seed and the only live token ends up in
+  CheckHealth's discarded rotation — so `Contract_RealMicrosoft` wraps the provider
+  in an `rtCapture` decorator and **persists the final rotated token back to
+  Keychain**, making grounding repeatable. Google's token is reusable and its test
+  deliberately does **not** persist (probe semantics, invariant 1). *Same `S`
+  contract body (`runOAuthContract`), opposite persistence discipline — that
+  asymmetry is itself cross-provider evidence the lifecycle, not the wire, is the
+  invariant.*
+
+**Hermetic certification:** the dialect-aware `Fake` certifies `runOAuthContract`
+under **both** Google and Microsoft dialects (`TestContract_Fake` +
+`TestContract_FakeMicrosoft`), always-on in CI. The MS wire (PKCE verifier, no
+`client_secret`, rotation, `preferred_username`/`upn`) is grounded against an
+`httptest` server in `microsoft_test.go`. Real-MS grounding
+(`Contract_RealMicrosoft`, `conformance`-tagged) skips without an Entra app +
+Keychain token, exactly as Google's does.
+
+**Real-Microsoft grounding certified (2026-06-11).** A single-tenant public-client
+Entra app (`xian@xldigit.com`, tenant `6daae80a…`, PKCE, no secret) issued a real
+refresh token (stored in Keychain `nous-oauth-conformance-microsoft` via
+`cmd/oauth-conformance-provision -provider microsoft`). `go test -tags conformance
+./lib/provider/oauth/ -run Contract_RealMicrosoft` **PASSED**, and **passed again
+on an immediate re-run** — proving the `rtCapture` rotated-token write-back makes
+grounding repeatable despite Microsoft's single-use rotation (the seed token from
+run 1 is dead by run 2; only the persisted rotation survives). The fake matches
+real Microsoft on the grounded edges (`Expired→Active` Refresh + the `CheckHealth`
+read). The consent leg, `Revoke` (`ErrRevokeUnsupported` — no MS mechanism), and
+`→Dead` remain fake-only/manual. n=2-real is now grounded, not just designed.
 
 ### 2026-06-08 — first real-Google grounding certification (nous#49)
 

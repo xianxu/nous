@@ -107,3 +107,6 @@ cmd/*/bin/
 bin/
 .DS_Store
 /bin/sdlc
+
+# stray compiled output of cmd/oauth-conformance-provision (build artifact)
+/oauth-conformance-provision

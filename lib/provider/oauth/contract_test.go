@@ -55,10 +55,26 @@ func runOAuthContract(t *testing.T, p Provider, cred *vault.Credential) {
 	}
 }
 
-// TestContract_Fake runs the contract against the in-memory fake. Always on.
+// TestContract_Fake runs the contract against the in-memory Google-dialect fake.
+// Always on.
 func TestContract_Fake(t *testing.T) {
 	f := NewFake(Conf{ClientID: "cid", DefaultScopes: []string{"openid"}})
 	cred := f.SeedAccount("user@example.com", []string{"openid", "email"})
 	cred.GCP = &vault.GCPData{ProjectID: "proj-x"} // exercise the sidecar invariant
+	runOAuthContract(t, f, cred)
+}
+
+// TestContract_FakeMicrosoft runs the SAME S-machine contract against the
+// in-memory fake under the Microsoft dialect — the hermetic half of the
+// n=2-real validation (nous#48). The state machine is the invariant; the fake
+// mints MS-shaped ID tokens (preferred_username) and tags credentials
+// "microsoft", yet the identical contract body holds.
+func TestContract_FakeMicrosoft(t *testing.T) {
+	f := newFake(Conf{ClientID: "cid", AuthURL: "https://login.microsoftonline.com/tenant/oauth2/v2.0/authorize"}, microsoftDialect)
+	cred := f.SeedAccount("user@xldigit.com", []string{"openid", "profile", "offline_access"})
+	if cred.Provider != "microsoft" {
+		t.Fatalf("seed provider = %q, want microsoft", cred.Provider)
+	}
+	cred.GCP = &vault.GCPData{ProjectID: "proj-x"} // sidecar invariant holds cross-provider
 	runOAuthContract(t, f, cred)
 }

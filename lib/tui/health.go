@@ -38,6 +38,6 @@ const (
 
 // AccountHealthChecker probes one credential and returns its health.
 // nil checker → skip checks (used by tests + when health-surfacing
-// isn't wired). Production wires an adapter over oauth.GoogleProvider.
+// isn't wired). Production wires an adapter over oauth.OIDCProvider.
 // CheckHealth in lib/charoncli's AuthCmd.
 type AccountHealthChecker func(*vault.Credential) AccountHealth

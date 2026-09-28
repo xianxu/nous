@@ -67,7 +67,7 @@ func (h HealthState) String() string {
 // keep the new token should call g.Refresh directly and write back
 // to the vault. This is intentional: probes happen on a TUI event
 // loop where unexpected vault writes would be confusing.
-func (g *GoogleProvider) CheckHealth(cred *vault.Credential) HealthState {
+func (g *OIDCProvider) CheckHealth(cred *vault.Credential) HealthState {
 	return checkHealth(g.Refresh, cred)
 }
 
