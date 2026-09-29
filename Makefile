@@ -14,10 +14,7 @@ help: $(WF_HELP_TARGETS)
 	@true
 
 # This layer's tools, built by `weave compile` (foundation first) and put on
-# dependents' PATH: the brain repos run `nous` from here.
-.PHONY: tools nous-build
+# dependents' PATH: the brain repos run `nous` from here. nous-build is
+# Makefile.nous's (via Makefile.local), the one recipe that builds the binary.
+.PHONY: tools
 tools: nous-build
-
-nous-build:
-	@mkdir -p bin
-	go build -o bin/nous ./cmd/nous
